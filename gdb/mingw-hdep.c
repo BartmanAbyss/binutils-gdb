@@ -65,6 +65,13 @@ gdb_select (int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
   int num_ready;
   size_t indx;
 
+  // BARTO
+  if(n == 0)
+	{
+	  Sleep(timeout->tv_sec * 1000 + timeout->tv_usec / 1000);
+	  return 0;
+	}
+
   num_ready = 0;
   num_handles = 0;
   num_scbs = 0;

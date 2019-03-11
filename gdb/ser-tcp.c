@@ -109,7 +109,12 @@ wait_for_connect (int sock, unsigned int *polls)
   /* Check for timeout.  */
   if (*polls > tcp_retry_limit * POLL_INTERVAL)
     {
-      errno = ETIMEDOUT;
+	  // BARTO
+	  #ifdef USE_WIN32API
+		errno = WSAETIMEDOUT;
+	  #else
+        errno = ETIMEDOUT;
+      #endif
       return -1;
     }
 
