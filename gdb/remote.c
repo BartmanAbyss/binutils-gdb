@@ -4110,8 +4110,9 @@ remote_target::get_offsets ()
 	  while (*ptr && *ptr != ';')
 	    bss_addr = (bss_addr << 4) + fromhex (*ptr++);
 
-	  if (bss_addr != data_addr)
-	    warning (_("Target reported unsupported offsets: %s"), buf);
+	  // BARTO
+	  //if (bss_addr != data_addr)
+	  //  warning (_("Target reported unsupported offsets: %s"), buf);
 	}
       else
 	lose = 1;
@@ -4145,7 +4146,8 @@ remote_target::get_offsets ()
   memcpy (offs, symfile_objfile->section_offsets,
 	  SIZEOF_N_SECTION_OFFSETS (symfile_objfile->num_sections));
 
-  data = get_symfile_segment_data (symfile_objfile->obfd);
+  //data = get_symfile_segment_data (symfile_objfile->obfd);
+  data = NULL; //BARTO
   do_segments = (data != NULL);
   do_sections = num_segments == 0;
 
@@ -4196,15 +4198,17 @@ remote_target::get_offsets ()
 
   if (do_sections)
     {
-      offs->offsets[SECT_OFF_TEXT (symfile_objfile)] = text_addr;
+	  //BARTO: offsets returned by gdbserver are absolute addresses of sections!
+	  offs->offsets[SECT_OFF_TEXT(symfile_objfile)] = text_addr - symfile_objfile->sections[SECT_OFF_TEXT(symfile_objfile)].the_bfd_section->vma; //BARTO
+	  offs->offsets[SECT_OFF_RODATA(symfile_objfile)] = text_addr - symfile_objfile->sections[SECT_OFF_TEXT(symfile_objfile)].the_bfd_section->vma; //BARTO
 
       /* This is a temporary kludge to force data and bss to use the
 	 same offsets because that's what nlmconv does now.  The real
 	 solution requires changes to the stub and remote.c that I
 	 don't have time to do right now.  */
 
-      offs->offsets[SECT_OFF_DATA (symfile_objfile)] = data_addr;
-      offs->offsets[SECT_OFF_BSS (symfile_objfile)] = data_addr;
+      offs->offsets[SECT_OFF_DATA (symfile_objfile)] = data_addr - symfile_objfile->sections[SECT_OFF_DATA(symfile_objfile)].the_bfd_section->vma; //BARTO
+      offs->offsets[SECT_OFF_BSS (symfile_objfile)] = bss_addr - symfile_objfile->sections[SECT_OFF_BSS(symfile_objfile)].the_bfd_section->vma; //BARTO
     }
 
   objfile_relocate (symfile_objfile, offs);

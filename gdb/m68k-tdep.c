@@ -36,12 +36,16 @@
 #include "target-float.h"
 
 #include "m68k-tdep.h"
-
 
-#define P_LINKL_FP	0x480e
-#define P_LINKW_FP	0x4e56
-#define P_PEA_FP	0x4856
-#define P_MOVEAL_SP_FP	0x2c4f
+//BARTO: on Amiga, frame pointer = a5; thanks to https://github.com/bebbo/binutils-gdb/commit/adaf5566afa1829ac173caf3225844482d9354dc
+#define P_LINKW_FP	0x4e55
+#define P_LINKL_FP	0x480d
+#define P_PEA_FP	0x4855
+#define P_MOVEAL_SP_FP	0x2a4f
+//#define P_LINKW_FP	0x4e56
+//#define P_LINKL_FP	0x480e
+//#define P_PEA_FP	0x4856
+//#define P_MOVEAL_SP_FP	0x2c4f
 #define P_ADDAW_SP	0xdefc
 #define P_ADDAL_SP	0xdffc
 #define P_SUBQW_SP	0x514f
@@ -157,8 +161,8 @@ m68k_register_type (struct gdbarch *gdbarch, int regnum)
 
 static const char *m68k_register_names[] = {
     "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7",
-    "a0", "a1", "a2", "a3", "a4", "a5", "fp", "sp",
-    "ps", "pc",
+    "a0", "a1", "a2", "a3", "a4", "a5", "a6", "sp", //BARTO
+    "sr", "pc", //BARTO
     "fp0", "fp1", "fp2", "fp3", "fp4", "fp5", "fp6", "fp7",
     "fpcontrol", "fpstatus", "fpiaddr"
   };

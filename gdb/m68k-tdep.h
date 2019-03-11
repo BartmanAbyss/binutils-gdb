@@ -33,7 +33,7 @@ enum m68k_regnum
   M68K_A0_REGNUM = 8,
   M68K_A1_REGNUM = 9,
   M68K_A2_REGNUM = 10,
-  M68K_FP_REGNUM = 14,		/* Address of executing stack frame.  */
+  M68K_FP_REGNUM = 13,		/* Address of executing stack frame.  */ //BARTO
   M68K_SP_REGNUM = 15,		/* Address of top of stack.  */
   M68K_PS_REGNUM = 16,		/* Processor status.  */
   M68K_PC_REGNUM = 17,		/* Program counter.  */
