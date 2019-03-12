@@ -43,7 +43,8 @@
 #define YYLEX_PARAM	&((struct parse_args *) arg)->cp
 #define YYPARSE_PARAM	arg
 %}
-%pure_parser
+%param {void *arg}
+%pure-parser
 %expect 7
 
 %union {
@@ -67,7 +68,7 @@ static inline struct expression *new_exp_3 PARAMS ((enum operator op,
 						   struct expression *tbranch,
 						   struct expression *fbranch));
 static int yylex PARAMS ((YYSTYPE *lval, const char **pexp));
-static void yyerror PARAMS ((const char *str));
+static void yyerror PARAMS ((void *arg, const char *str));
 
 /* Allocation of expressions.  */
 
@@ -402,7 +403,8 @@ yylex (lval, pexp)
 
 
 static void
-yyerror (str)
+yyerror (arg, str)
+	void *arg;
      const char *str;
 {
   /* Do nothing.  We don't print error messages here.  */
