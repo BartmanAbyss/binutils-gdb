@@ -26,8 +26,57 @@
 
 #include "opcode/m68k.h"
 
-/* Local function prototypes.  */
+#define MOTOROLA 1
+#define TARGET_AMIGA 1
 
+#ifdef MOTOROLA
+/* print as signed decimal. */
+#undef sprintf_vma
+#define sprintf_vma(b,n) sprintf(b,"%d",(int)n)
+#endif
+
+#ifdef TARGET_AMIGA
+/* Extra info to pass to the disassembler address printing function.  */
+struct objdump_disasm_info
+{
+  bfd *abfd;
+  asection *sec;
+  bfd_boolean require_sec;
+};
+
+/* Support display of symbols in baserel offsets. */
+void print_m68k_disassembler_options (FILE * stream);
+static void
+parse_disassembler_options (const char *);
+#endif
+
+
+/* Local function prototypes.  */
+#ifdef MOTOROLA
+static int dump_baserel;
+
+const char * const fpcr_names[] =
+{
+  "", "fpiar", "fpsr", "fpiar/fpsr", "fpcr",
+  "fpiar/fpcr", "fpsr/fpcr", "fpiar/fpsr/fpcr"
+};
+
+static char *const reg_names[] =
+{
+  "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7",
+  "a0", "a1", "a2", "a3", "a4", "a5", "a6", "sp",
+  "ps", "pc"
+};
+
+/* Name of register halves for MAC/EMAC.
+   Seperate from reg_names since 'spu', 'fpl' look weird.  */
+static char *const reg_half_names[] =
+{
+  "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7",
+  "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7",
+  "ps", "pc"
+};
+#else
 const char * const fpcr_names[] =
 {
   "", "%fpiar", "%fpsr", "%fpiar/%fpsr", "%fpcr",
@@ -49,6 +98,7 @@ static char *const reg_half_names[] =
   "%a0", "%a1", "%a2", "%a3", "%a4", "%a5", "%a6", "%a7",
   "%ps", "%pc"
 };
+#endif
 
 /* Sign-extend an (unsigned char).  */
 #if __STDC__ == 1
@@ -508,22 +558,66 @@ print_base (int regno, bfd_vma disp, disassemble_info *info)
 {
   if (regno == -1)
     {
+#ifdef MOTOROLA
+      (*info->print_address_func) (disp, info);
+      (*info->fprintf_func) (info->stream, ",pc");
+#else
       (*info->fprintf_func) (info->stream, "%%pc@(");
       (*info->print_address_func) (disp, info);
+#endif
     }
   else
     {
       char buf[50];
 
+#ifdef TARGET_AMIGA
+      /* Dump the symbol instead of the number*/
+      if (dump_baserel && regno == 12)
+	{
+	  static int offset;
+
+	  /* Swap section to .data */
+	  struct objdump_disasm_info *aux =
+	      (struct objdump_disasm_info *) info->application_data;
+	  asection * text = aux->sec;
+	  aux->sec = text->next;
+
+	  /* Try handling a4 set to 0 or set to -0x7ffe.
+	   * TODO: search the correct offset via lea statement.
+	   */
+	  if (disp & 0x80000000)
+	    offset = 0x7ffe;
+	  (*info->print_address_func) (disp + offset, info);
+
+	  /* restore section to .text */
+	  aux->sec = text;
+	}
+      else
+	{
+	  sprintf_vma (buf, disp);
+          (*info->fprintf_func) (info->stream, "%s", buf);
+	}
+#endif
+#ifdef MOTOROLA
+      if (regno == -2)
+	;
+      else if (regno == -3)
+	(*info->fprintf_func) (info->stream, ",zpc");
+      else
+	(*info->fprintf_func) (info->stream, ",%s", reg_names[regno]);
+#else
       if (regno == -2)
 	(*info->fprintf_func) (info->stream, "@(");
       else if (regno == -3)
 	(*info->fprintf_func) (info->stream, "%%zpc@(");
       else
 	(*info->fprintf_func) (info->stream, "%s@(", reg_names[regno]);
+#endif
 
+#ifndef TARGET_AMIGA
       sprintf_vma (buf, disp);
       (*info->fprintf_func) (info->stream, "%s", buf);
+#endif
     }
 }
 
@@ -539,7 +633,11 @@ print_indexed (int basereg,
 	       disassemble_info *info)
 {
   int word;
+#ifdef MOTOROLA
+  static char *const scales[] = { "", "*2", "*4", "*8" };
+#else
   static char *const scales[] = { "", ":2", ":4", ":8" };
+#endif
   bfd_vma base_disp;
   bfd_vma outer_disp;
   char buf[40];
@@ -549,7 +647,11 @@ print_indexed (int basereg,
 
   /* Generate the text for the index register.
      Where this will be output is not yet determined.  */
+#ifdef MOTOROLA
+  sprintf (buf, "%s.%c%s",
+#else
   sprintf (buf, "%s:%c%s",
+#endif
 	   reg_names[(word >> 12) & 0xf],
 	   (word & 0x800) ? 'l' : 'w',
 	   scales[(word >> 9) & 3]);
@@ -563,6 +665,9 @@ print_indexed (int basereg,
 	base_disp -= 0x100;
       if (basereg == -1)
 	base_disp += addr;
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "(");
+#endif
       print_base (basereg, base_disp, info);
       (*info->fprintf_func) (info->stream, ",%s)", buf);
       return p;
@@ -594,6 +699,9 @@ print_indexed (int basereg,
   /* Handle single-level case (not indirect).  */
   if ((word & 7) == 0)
     {
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "(");
+#endif
       print_base (basereg, base_disp, info);
       if (buf[0] != '\0')
 	(*info->fprintf_func) (info->stream, ",%s", buf);
@@ -612,6 +720,9 @@ print_indexed (int basereg,
       NEXTLONG (p, outer_disp, NULL);
     }
 
+#ifdef MOTOROLA
+  (*info->fprintf_func) (info->stream, "([");
+#endif
   print_base (basereg, base_disp, info);
   if ((word & 4) == 0 && buf[0] != '\0')
     {
@@ -619,10 +730,18 @@ print_indexed (int basereg,
       buf[0] = '\0';
     }
   sprintf_vma (vmabuf, outer_disp);
+#ifdef MOTOROLA
+  (*info->fprintf_func) (info->stream, "]");
+  if (buf[0] != '\0')
+    (*info->fprintf_func) (info->stream, ",%s", buf);
+  (*info->fprintf_func) (info->stream, ",%s", vmabuf);
+  (*info->fprintf_func) (info->stream, ")");
+#else
   (*info->fprintf_func) (info->stream, ")@(%s", vmabuf);
   if (buf[0] != '\0')
     (*info->fprintf_func) (info->stream, ",%s", buf);
   (*info->fprintf_func) (info->stream, ")");
+#endif
 
   return p;
 }
@@ -671,7 +790,11 @@ print_insn_arg (const char *d,
     case 'a':		/* Address register indirect only. Cf. case '+'.  */
       {
 	FETCH_ARG (3, val);
+#ifdef MOTOROLA
+	(*info->fprintf_func) (info->stream, "(%s)", reg_names[val + 8]);
+#else
 	(*info->fprintf_func) (info->stream, "%s@", reg_names[val + 8]);
+#endif
         break;
       }
 
@@ -683,27 +806,51 @@ print_insn_arg (const char *d,
       }
 
     case 'C':
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "ccr");
+#else
       (*info->fprintf_func) (info->stream, "%%ccr");
+#endif
       break;
 
     case 'S':
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "sr");
+#else
       (*info->fprintf_func) (info->stream, "%%sr");
+#endif
       break;
 
     case 'U':
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "usp");
+#else
       (*info->fprintf_func) (info->stream, "%%usp");
+#endif
       break;
 
     case 'E':
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "acc");
+#else
       (*info->fprintf_func) (info->stream, "%%acc");
+#endif
       break;
 
     case 'G':
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "macsr");
+#else
       (*info->fprintf_func) (info->stream, "%%macsr");
+#endif
       break;
 
     case 'H':
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "mask");
+#else
       (*info->fprintf_func) (info->stream, "%%mask");
+#endif
       break;
 
     case 'J':
@@ -712,6 +859,40 @@ print_insn_arg (const char *d,
 	   same address different names.  The tables below try to get it right
 	   using info->mach, but only for v4e.  */
 	struct regname { char * name; int value; };
+#ifdef MOTOROLA
+	static const struct regname names[] =
+	  {
+	    {"sfc", 0x000}, {"dfc", 0x001}, {"cacr", 0x002},
+	    {"tc",  0x003}, {"itt0",0x004}, {"itt1", 0x005},
+	    {"dtt0",0x006}, {"dtt1",0x007}, {"buscr",0x008},
+	    {"rgpiobar", 0x009}, {"acr4",0x00c},
+	    {"acr5",0x00d}, {"acr6",0x00e}, {"acr7", 0x00f},
+	    {"usp", 0x800}, {"vbr", 0x801}, {"caar", 0x802},
+	    {"msp", 0x803}, {"isp", 0x804},
+	    {"pc", 0x80f},
+	    /* Reg c04 is sometimes called flashbar or rambar.
+	       Reg c05 is also sometimes called rambar.  */
+	    {"rambar0", 0xc04}, {"rambar1", 0xc05},
+
+	    /* reg c0e is sometimes called mbar2 or secmbar.
+	       reg c0f is sometimes called mbar.  */
+	    {"mbar0", 0xc0e}, {"mbar1", 0xc0f},
+
+	    /* Should we be calling this psr like we do in case 'Y'?  */
+	    {"mmusr",0x805},
+
+	    {"urp", 0x806}, {"srp", 0x807}, {"pcr", 0x808},
+
+	    /* Fido added these.  */
+	    {"cac", 0xffe}, {"mbo", 0xfff}
+	};
+	/* Alternate names for v4e (MCF5407/5445x/MCF547x/MCF548x), at least.  */
+	static const struct regname names_v4e[] =
+	  {
+	    {"asid",0x003}, {"acr0",0x004}, {"acr1",0x005},
+	    {"acr2",0x006}, {"acr3",0x007}, {"mmubar",0x008},
+	  };
+#else
 	static const struct regname names[] =
 	  {
 	    {"%sfc", 0x000}, {"%dfc", 0x001}, {"%cacr", 0x002},
@@ -744,6 +925,7 @@ print_insn_arg (const char *d,
 	    {"%asid",0x003}, {"%acr0",0x004}, {"%acr1",0x005},
 	    {"%acr2",0x006}, {"%acr3",0x007}, {"%mmubar",0x008},
 	  };
+#endif
 	unsigned int arch_mask;
 
 	arch_mask = bfd_m68k_mach_to_features (info->mach);
@@ -835,15 +1017,23 @@ print_insn_arg (const char *d,
 
     case 'r':
       FETCH_ARG (4, regno);
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "(%s)", reg_names[regno]);
+#else
       if (regno > 7)
 	(*info->fprintf_func) (info->stream, "%s@", reg_names[regno]);
       else
 	(*info->fprintf_func) (info->stream, "@(%s)", reg_names[regno]);
+#endif
       break;
 
     case 'F':
       FETCH_ARG (3, val);
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "fp%d", val);
+#else
       (*info->fprintf_func) (info->stream, "%%fp%d", val);
+#endif
       break;
 
     case 'O':
@@ -856,12 +1046,20 @@ print_insn_arg (const char *d,
 
     case '+':
       FETCH_ARG (3, val);
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "(%s)+", reg_names[val + 8]);
+#else
       (*info->fprintf_func) (info->stream, "%s@+", reg_names[val + 8]);
+#endif
       break;
 
     case '-':
       FETCH_ARG (3, val);
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "-(%s)", reg_names[val + 8]);
+#else
       (*info->fprintf_func) (info->stream, "%s@-", reg_names[val + 8]);
+#endif
       break;
 
     case 'k':
@@ -940,7 +1138,11 @@ print_insn_arg (const char *d,
 
 	NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
 	FETCH_ARG (3, val1);
+#ifdef MOTOROLA
+	(*info->fprintf_func) (info->stream, "%d(%s)", val, reg_names[val1 + 8]);
+#else
 	(*info->fprintf_func) (info->stream, "%s@(%d)", reg_names[val1 + 8], val);
+#endif
 	break;
       }
 
@@ -1034,20 +1236,43 @@ print_insn_arg (const char *d,
 	  break;
 
 	case 2:
+#ifdef MOTOROLA
+	  (*info->fprintf_func) (info->stream, "(%s)", regname);
+#else
 	  (*info->fprintf_func) (info->stream, "%s@", regname);
+#endif
 	  break;
 
 	case 3:
+#ifdef MOTOROLA
+	  (*info->fprintf_func) (info->stream, "(%s)+", regname);
+#else
 	  (*info->fprintf_func) (info->stream, "%s@+", regname);
+#endif
 	  break;
 
 	case 4:
+#ifdef MOTOROLA
+	  (*info->fprintf_func) (info->stream, "-(%s)", regname);
+#else
 	  (*info->fprintf_func) (info->stream, "%s@-", regname);
+#endif
 	  break;
 
 	case 5:
 	  NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
+#ifdef MOTOROLA
+	  if (dump_baserel)
+	    {
+	      (*info->fprintf_func) (info->stream, "(");
+	      print_base(regno, val, info);
+	      (*info->fprintf_func) (info->stream, ")");
+	    }
+	  else
+	    (*info->fprintf_func) (info->stream, "%d(%s)", val, regname);
+#else
 	  (*info->fprintf_func) (info->stream, "%s@(%d)", regname, val);
+#endif
 	  break;
 
 	case 6:
@@ -1071,9 +1296,14 @@ print_insn_arg (const char *d,
 
 	    case 2:
 	      NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
+#ifdef MOTOROLA
+	      (*info->print_address_func) (addr + val, info);
+	      (*info->fprintf_func) (info->stream, "(pc)");
+#else
 	      (*info->fprintf_func) (info->stream, "%%pc@(");
 	      (*info->print_address_func) (addr + val, info);
 	      (*info->fprintf_func) (info->stream, ")");
+#endif
 	      break;
 
 	    case 3:
@@ -1214,12 +1444,20 @@ print_insn_arg (const char *d,
 		  if (doneany)
 		    (*info->fprintf_func) (info->stream, "/");
 		  doneany = 1;
+#ifdef MOTOROLA
+		  (*info->fprintf_func) (info->stream, "fp%d", regno);
+#else
 		  (*info->fprintf_func) (info->stream, "%%fp%d", regno);
+#endif
 		  first_regno = regno;
 		  while (val & (1 << (regno + 1)))
 		    ++regno;
 		  if (regno > first_regno)
+#ifdef MOTOROLA
+		    (*info->fprintf_func) (info->stream, "-fp%d", regno);
+#else
 		    (*info->fprintf_func) (info->stream, "-%%fp%d", regno);
+#endif
 		}
 	  }
 	else if (place == '8')
@@ -1248,6 +1486,29 @@ print_insn_arg (const char *d,
 	FETCH_ARG (5, val);
 	switch (val)
 	  {
+#ifdef MOTOROLA
+	  case 2: name = "tt0"; break;
+	  case 3: name = "tt1"; break;
+	  case 0x10: name = "tc"; break;
+	  case 0x11: name = "drp"; break;
+	  case 0x12: name = "srp"; break;
+	  case 0x13: name = "crp"; break;
+	  case 0x14: name = "cal"; break;
+	  case 0x15: name = "val"; break;
+	  case 0x16: name = "scc"; break;
+	  case 0x17: name = "ac"; break;
+ 	  case 0x18: name = "psr"; break;
+	  case 0x19: name = "pcsr"; break;
+	  case 0x1c:
+	  case 0x1d:
+	    {
+	      int break_reg = ((buffer[3] >> 2) & 7);
+
+	      (*info->fprintf_func)
+		(info->stream, val == 0x1c ? "bad%d" : "bac%d",
+		 break_reg);
+	    }
+#else
 	  case 2: name = "%tt0"; break;
 	  case 3: name = "%tt1"; break;
 	  case 0x10: name = "%tc"; break;
@@ -1269,6 +1530,7 @@ print_insn_arg (const char *d,
 		(info->stream, val == 0x1c ? "%%bad%d" : "%%bac%d",
 		 break_reg);
 	    }
+#endif
 	    break;
 	  default:
 	    (*info->fprintf_func) (info->stream, "<mmu register %d>", val);
@@ -1284,9 +1546,15 @@ print_insn_arg (const char *d,
 
 	FETCH_ARG (5, fc);
 	if (fc == 1)
+#ifdef MOTOROLA
+	  (*info->fprintf_func) (info->stream, "dfc");
+	else if (fc == 0)
+	  (*info->fprintf_func) (info->stream, "sfc");
+#else
 	  (*info->fprintf_func) (info->stream, "%%dfc");
 	else if (fc == 0)
 	  (*info->fprintf_func) (info->stream, "%%sfc");
+#endif
 	else
 	  /* xgettext:c-format */
 	  (*info->fprintf_func) (info->stream, _("<function code %d>"), fc);
@@ -1294,7 +1562,11 @@ print_insn_arg (const char *d,
       break;
 
     case 'V':
+#ifdef MOTOROLA
+      (*info->fprintf_func) (info->stream, "val");
+#else
       (*info->fprintf_func) (info->stream, "%%val");
+#endif
       break;
 
     case 't':
@@ -1464,6 +1736,24 @@ match_insn_m68k (bfd_vma memaddr,
 
   d = args;
 
+#ifdef MOTOROLA
+  /* add a . into movel and simila names. */
+  int bnl = strlen(best->name);
+  char c = best->name[bnl - 1];
+  if (strcmp("rts", best->name)
+      && strcmp("bfexts", best->name)
+      && strcmp("bfins", best->name)
+      && strcmp("cas", best->name)
+      && (c == 's' || c == 'w' || c == 'b' || c == 'l'))
+    {
+      static char b[32];
+      strcpy(b, best->name);
+      b[bnl - 1] = '.';
+      b[bnl] = c;
+      b[bnl + 1] = 0;
+      info->fprintf_func (info->stream, "%s", b);
+    } else
+#endif
   info->fprintf_func (info->stream, "%s", best->name);
 
   if (*d)
@@ -1627,6 +1917,14 @@ print_insn_m68k (bfd_vma memaddr, disassemble_info *info)
   priv.max_fetched = priv.the_buffer;
   priv.insn_start = memaddr;
 
+  if (info->disassembler_options)
+    {
+      parse_disassembler_options (info->disassembler_options);
+
+      /* To avoid repeated parsing of these options, we remove them here.  */
+      info->disassembler_options = NULL;
+    }
+
   arch_mask = bfd_m68k_mach_to_features (info->mach);
   if (!arch_mask)
     {
@@ -1647,3 +1945,28 @@ print_insn_m68k (bfd_vma memaddr, disassemble_info *info)
 
   return val ? val : 2;
 }
+
+#ifdef TARGET_AMIGA
+void print_m68k_disassembler_options (FILE * stream)
+{
+  fprintf (stream, _("\n\
+The following m68k specific disassembler options are supported for use with\n\
+the -M switch:\n"));
+  fprintf (stream, "  a4              Display labels for base relative offsets\n");
+}
+
+/*
+ * Support -M a4
+ */
+static void
+parse_disassembler_options (const char * options)
+{
+  const char *p;
+
+  p = options;
+  while (*p && *p <= 32)
+    ++p;
+
+  dump_baserel = !strncmp(p, "a4", 2);
+}
+#endif
