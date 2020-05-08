@@ -1,5 +1,5 @@
 # Expect script for ld-i386 tests
-#   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+#   Copyright (C) 2002-2020 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -460,6 +460,16 @@ run_dump_test "property-x86-shstk3a"
 run_dump_test "property-x86-shstk3b"
 run_dump_test "property-x86-shstk4"
 run_dump_test "property-x86-shstk5"
+run_dump_test "property-x86-cet1"
+run_dump_test "property-x86-cet2a"
+run_dump_test "property-x86-cet2b"
+run_dump_test "property-x86-cet3a"
+run_dump_test "property-x86-cet3b"
+run_dump_test "property-x86-cet4a"
+run_dump_test "property-x86-cet4b"
+run_dump_test "property-x86-cet5a"
+run_dump_test "property-x86-cet5b"
+run_dump_test "property-x86-cet6"
 run_dump_test "pie1"
 run_dump_test "pie1-nacl"
 run_dump_test "pr21884"
@@ -483,6 +493,9 @@ run_dump_test "pr23486c"
 run_dump_test "pr23486d"
 run_dump_test "pr23854"
 run_dump_test "pr23930"
+run_dump_test "pr24322a"
+run_dump_test "pr24322b"
+run_dump_test "align-branch-1"
 
 if { !([istarget "i?86-*-linux*"]
        || [istarget "i?86-*-gnu*"]
@@ -500,7 +513,8 @@ run_dump_test "pr14215"
 run_dump_test "pr17057"
 run_dump_test "pr17935-1"
 run_dump_test "pr17935-2"
-run_dump_test "pr18801"
+run_dump_test "pr18801a"
+run_dump_test "pr18801b"
 run_dump_test "pr18815"
 run_dump_test "pr19939a"
 run_dump_test "pr19939b"
@@ -568,7 +582,7 @@ global PLT_CFLAGS
 # Must be Linux native with the C compiler
 if { [isnative]
      && [istarget "i?86-*-linux*"]
-     && [which $CC] != 0 } {
+     && [check_compiler_available] } {
     run_cc_link_tests [list \
 	[list \
 	    "Build plt-lib.so" \
@@ -1180,7 +1194,7 @@ global NOPIE_CFLAGS NOPIE_LDFLAGS
 if { [isnative]
      && [check_ifunc_available]
      && [istarget "i?86-*-*"]
-     && [which $CC] != 0 } {
+     && [check_compiler_available] } {
     run_cc_link_tests [list \
 	[list \
 	    "Build ifunc-1a.o ifunc-1b.o ifunc-1c.o ifunc-1d.o" \
@@ -1297,7 +1311,7 @@ if { [isnative]
 # Must be native with the C compiler.
 if { [isnative]
      && [istarget "i?86-*-*"]
-     && [which $CC] != 0 } {
+     && [check_compiler_available] } {
     run_cc_link_tests [list \
 	[list \
 	    "Build pr22001-1.so" \

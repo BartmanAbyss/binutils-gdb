@@ -1,5 +1,5 @@
 /* .eh_frame section optimization.
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2020 Free Software Foundation, Inc.
    Written by Jakub Jelinek <jakub@redhat.com>.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -1109,7 +1109,7 @@ add_eh_frame_hdr_terminator (asection *sec,
   if (!sec->rawsize)
     sec->rawsize = sec->size;
 
-  bfd_set_section_size (sec->owner, sec, sec->size + 8);
+  bfd_set_section_size (sec, sec->size + 8);
 }
 
 /* Finish a pass over all .eh_frame_entry sections.  */
@@ -1532,19 +1532,23 @@ _bfd_elf_discard_section_eh_frame
 		   don't create the binary search table,
 		   since it is affected by runtime relocations.  */
 		hdr_info->u.dwarf.table = FALSE;
-		if (num_warnings_issued < 10)
+		/* Only warn if --eh-frame-hdr was specified.  */
+		if (info->eh_frame_hdr_type != 0)
 		  {
-		    _bfd_error_handler
-		      /* xgettext:c-format */
-		      (_("FDE encoding in %pB(%pA) prevents .eh_frame_hdr"
-			 " table being created"), abfd, sec);
-		    num_warnings_issued ++;
-		  }
-		else if (num_warnings_issued == 10)
-		  {
-		    _bfd_error_handler
-		      (_("further warnings about FDE encoding preventing .eh_frame_hdr generation dropped"));
-		    num_warnings_issued ++;
+		    if (num_warnings_issued < 10)
+		      {
+			_bfd_error_handler
+			  /* xgettext:c-format */
+			  (_("FDE encoding in %pB(%pA) prevents .eh_frame_hdr"
+			     " table being created"), abfd, sec);
+			num_warnings_issued ++;
+		      }
+		    else if (num_warnings_issued == 10)
+		      {
+			_bfd_error_handler
+			  (_("further warnings about FDE encoding preventing .eh_frame_hdr generation dropped"));
+			num_warnings_issued ++;
+		      }
 		  }
 	      }
 	    ent->removed = 0;
@@ -1682,7 +1686,7 @@ _bfd_elf_eh_frame_entry_present (struct bfd_link_info *info)
     {
       for (o = abfd->sections; o; o = o->next)
 	{
-	  const char *name = bfd_get_section_name (abfd, o);
+	  const char *name = bfd_section_name (o);
 
 	  if (strcmp (name, ".eh_frame_entry")
 	      && !bfd_is_abs_section (o->output_section))
@@ -2145,6 +2149,7 @@ _bfd_elf_write_section_eh_frame (bfd *abfd,
 			/* Fall thru */
 		      case bfd_arch_frv:
 		      case bfd_arch_i386:
+		      case bfd_arch_nios2:
 			BFD_ASSERT (htab->hgot != NULL
 				    && ((htab->hgot->root.type
 					 == bfd_link_hash_defined)

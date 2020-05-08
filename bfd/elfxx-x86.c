@@ -1,5 +1,5 @@
 /* x86 specific support for ELF
-   Copyright (C) 2017-2019 Free Software Foundation, Inc.
+   Copyright (C) 2017-2020 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -347,7 +347,8 @@ elf_x86_allocate_dynrelocs (struct elf_link_hash_entry *h, void *inf)
 	 (but if both R_386_TLS_IE_32 and R_386_TLS_IE is present, we
 	 need two), R_386_TLS_GD and R_X86_64_TLSGD need one if local
 	 symbol and two if global.  No dynamic relocation against
-	 resolved undefined weak symbol in executable.  */
+	 resolved undefined weak symbol in executable.  No dynamic
+	 relocation against non-preemptible absolute symbol.  */
       if (tls_type == GOT_TLS_IE_BOTH)
 	htab->elf.srelgot->size += 2 * htab->sizeof_reloc;
       else if ((GOT_TLS_GD_P (tls_type) && h->dynindx == -1)
@@ -359,7 +360,9 @@ elf_x86_allocate_dynrelocs (struct elf_link_hash_entry *h, void *inf)
 	       && ((ELF_ST_VISIBILITY (h->other) == STV_DEFAULT
 		    && !resolved_to_zero)
 		   || h->root.type != bfd_link_hash_undefweak)
-	       && (bfd_link_pic (info)
+	       && ((bfd_link_pic (info)
+		    && !(h->dynindx == -1
+			 && ABS_SYMBOL_P (h)))
 		   || WILL_CALL_FINISH_DYNAMIC_SYMBOL (dyn, 0, h)))
 	htab->elf.srelgot->size += htab->sizeof_reloc;
       if (GOT_TLS_GDESC_P (tls_type))
@@ -756,7 +759,7 @@ _bfd_x86_elf_link_hash_table_create (bfd *abfd)
 {
   struct elf_x86_link_hash_table *ret;
   const struct elf_backend_data *bed;
-  bfd_size_type amt = sizeof (struct elf_x86_link_hash_table);
+  size_t amt = sizeof (struct elf_x86_link_hash_table);
 
   ret = (struct elf_x86_link_hash_table *) bfd_zmalloc (amt);
   if (ret == NULL)
@@ -952,6 +955,100 @@ _bfd_x86_elf_link_check_relocs (bfd *abfd, struct bfd_link_info *info)
   return _bfd_elf_link_check_relocs (abfd, info);
 }
 
+bfd_boolean
+_bfd_elf_x86_valid_reloc_p (asection *input_section,
+			    struct bfd_link_info *info,
+			    struct elf_x86_link_hash_table *htab,
+			    const Elf_Internal_Rela *rel,
+			    struct elf_link_hash_entry *h,
+			    Elf_Internal_Sym *sym,
+			    Elf_Internal_Shdr *symtab_hdr,
+			    bfd_boolean *no_dynreloc_p)
+{
+  bfd_boolean valid_p = TRUE;
+
+  *no_dynreloc_p = FALSE;
+
+  /* Check If relocation against non-preemptible absolute symbol is
+     valid in PIC.  FIXME: Can't use SYMBOL_REFERENCES_LOCAL_P since
+     it may call _bfd_elf_link_hide_sym_by_version and result in
+     ld-elfvers/ vers21 test failure.  */
+  if (bfd_link_pic (info)
+      && (h == NULL || SYMBOL_REFERENCES_LOCAL (info, h)))
+    {
+      const struct elf_backend_data *bed;
+      unsigned int r_type;
+      Elf_Internal_Rela irel;
+
+      /* Skip non-absolute symbol.  */
+      if (h)
+	{
+	  if (!ABS_SYMBOL_P (h))
+	    return valid_p;
+	}
+      else if (sym->st_shndx != SHN_ABS)
+	return valid_p;
+
+      bed = get_elf_backend_data (input_section->owner);
+      r_type = ELF32_R_TYPE (rel->r_info);
+      irel = *rel;
+
+      /* Only allow relocations against absolute symbol, which can be
+	 resolved as absolute value + addend.  GOTPCREL relocations
+	 are allowed since absolute value + addend is stored in the
+	 GOT slot.  */
+      if (bed->target_id == X86_64_ELF_DATA)
+	{
+	  r_type &= ~R_X86_64_converted_reloc_bit;
+	  valid_p = (r_type == R_X86_64_64
+		     || r_type == R_X86_64_32
+		     || r_type == R_X86_64_32S
+		     || r_type == R_X86_64_16
+		     || r_type == R_X86_64_8
+		     || r_type == R_X86_64_GOTPCREL
+		     || r_type == R_X86_64_GOTPCRELX
+		     || r_type == R_X86_64_REX_GOTPCRELX);
+	  if (!valid_p)
+	    {
+	      unsigned int r_symndx = htab->r_sym (rel->r_info);
+	      irel.r_info = htab->r_info (r_symndx, r_type);
+	    }
+	}
+      else
+	valid_p = (r_type == R_386_32
+		   || r_type == R_386_16
+		   || r_type == R_386_8);
+
+      if (valid_p)
+	*no_dynreloc_p = TRUE;
+      else
+	{
+	  const char *name;
+	  arelent internal_reloc;
+
+	  if (!bed->elf_info_to_howto (input_section->owner,
+				       &internal_reloc, &irel)
+	      || internal_reloc.howto == NULL)
+	    abort ();
+
+	  if (h)
+	    name = h->root.root.string;
+	  else
+	    name = bfd_elf_sym_name (input_section->owner, symtab_hdr,
+				     sym, NULL);
+	  info->callbacks->einfo
+	    /* xgettext:c-format */
+	    (_("%F%P: %pB: relocation %s against absolute symbol "
+	       "`%s' in section `%pA' is disallowed\n"),
+	     input_section->owner, internal_reloc.howto->name, name,
+	     input_section);
+	  bfd_set_error (bfd_error_bad_value);
+	}
+    }
+
+  return valid_p;
+}
+
 /* Set the sizes of the dynamic sections.  */
 
 bfd_boolean
@@ -1065,7 +1162,7 @@ _bfd_x86_elf_size_dynamic_sections (bfd *output_bfd,
 		      || *local_tls_type == GOT_TLS_IE_BOTH)
 		    s->size += htab->got_entry_size;
 		}
-	      if (bfd_link_pic (info)
+	      if ((bfd_link_pic (info) && *local_tls_type != GOT_ABS)
 		  || GOT_TLS_GD_ANY_P (*local_tls_type)
 		  || (*local_tls_type & GOT_TLS_IE))
 		{
@@ -1238,7 +1335,7 @@ _bfd_x86_elf_size_dynamic_sections (bfd *output_bfd,
 	{
 	  /* Strip these too.  */
 	}
-      else if (htab->is_reloc_section (bfd_get_section_name (dynobj, s)))
+      else if (htab->is_reloc_section (bfd_section_name (s)))
 	{
 	  if (s->size != 0
 	      && s != htab->elf.srelplt
@@ -1280,8 +1377,7 @@ _bfd_x86_elf_size_dynamic_sections (bfd *output_bfd,
 	 it is empty.  Update its section alignment now since it
 	 is non-empty.  */
       if (s == htab->elf.iplt)
-	bfd_set_section_alignment (s->owner, s,
-				   htab->plt.iplt_alignment);
+	bfd_set_section_alignment (s, htab->plt.iplt_alignment);
 
       /* Allocate memory for the section contents.  We use bfd_zalloc
 	 here in case unused entries are not reclaimed before the
@@ -1381,7 +1477,8 @@ _bfd_x86_elf_size_dynamic_sections (bfd *output_bfd,
 		{
 		  info->callbacks->einfo
 		    (_("%P%X: read-only segment has dynamic IFUNC relocations;"
-		       " recompile with -fPIC\n"));
+		       " recompile with %s\n"),
+		     bfd_link_dll (info) ? "-fPIC" : "-fPIE");
 		  bfd_set_error (bfd_error_bad_value);
 		  return FALSE;
 		}
@@ -2170,17 +2267,18 @@ _bfd_x86_elf_get_synthetic_symtab (bfd *abfd,
 			      bfd_vma);
   bfd_boolean (*valid_plt_reloc_p) (unsigned int);
 
+  dynrelbuf = NULL;
   if (count == 0)
-    return -1;
+    goto bad_return;
 
   dynrelbuf = (arelent **) bfd_malloc (relsize);
   if (dynrelbuf == NULL)
-    return -1;
+    goto bad_return;
 
   dynrelcount = bfd_canonicalize_dynamic_reloc (abfd, dynrelbuf,
 						dynsyms);
   if (dynrelcount <= 0)
-    return -1;
+    goto bad_return;
 
   /* Sort the relocs by address.  */
   qsort (dynrelbuf, dynrelcount, sizeof (arelent *),
@@ -2346,7 +2444,7 @@ _bfd_x86_elf_get_synthetic_symtab (bfd *abfd,
   /* PLT entries with R_386_TLS_DESC relocations are skipped.  */
   if (n == 0)
     {
-bad_return:
+    bad_return:
       count = -1;
     }
   else
@@ -2401,6 +2499,7 @@ _bfd_x86_elf_parse_gnu_properties (bfd *abfd, unsigned int type,
 bfd_boolean
 _bfd_x86_elf_merge_gnu_properties (struct bfd_link_info *info,
 				   bfd *abfd ATTRIBUTE_UNUSED,
+				   bfd *bbfd ATTRIBUTE_UNUSED,
 				   elf_property *aprop,
 				   elf_property *bprop)
 {
@@ -2478,12 +2577,18 @@ _bfd_x86_elf_merge_gnu_properties (struct bfd_link_info *info,
 	 2. If APROP is NULL, remove x86 feature.
 	 3. Otherwise, do nothing.
        */
+      const struct elf_backend_data *bed
+	= get_elf_backend_data (info->output_bfd);
+      struct elf_x86_link_hash_table *htab
+	= elf_x86_hash_table (info, bed->target_id);
+      if (!htab)
+	abort ();
       if (aprop != NULL && bprop != NULL)
 	{
 	  features = 0;
-	  if (info->ibt)
+	  if (htab->params->ibt)
 	    features = GNU_PROPERTY_X86_FEATURE_1_IBT;
-	  if (info->shstk)
+	  if (htab->params->shstk)
 	    features |= GNU_PROPERTY_X86_FEATURE_1_SHSTK;
 	  number = aprop->u.number;
 	  /* Add GNU_PROPERTY_X86_FEATURE_1_IBT and
@@ -2496,25 +2601,25 @@ _bfd_x86_elf_merge_gnu_properties (struct bfd_link_info *info,
 	}
       else
 	{
+	  /* There should be no AND properties since some input doesn't
+	     have them.  Set IBT and SHSTK properties for -z ibt and -z
+	     shstk if needed.  */
 	  features = 0;
-	  if (info->ibt)
+	  if (htab->params->ibt)
 	    features = GNU_PROPERTY_X86_FEATURE_1_IBT;
-	  if (info->shstk)
+	  if (htab->params->shstk)
 	    features |= GNU_PROPERTY_X86_FEATURE_1_SHSTK;
 	  if (features)
 	    {
-	      /* Add GNU_PROPERTY_X86_FEATURE_1_IBT and
-		 GNU_PROPERTY_X86_FEATURE_1_SHSTK.  */
 	      if (aprop != NULL)
 		{
-		  number = aprop->u.number;
-		  aprop->u.number = number | features;
-		  updated = number != (unsigned int) aprop->u.number;
+		  updated = features != (unsigned int) aprop->u.number;
+		  aprop->u.number = features;
 		}
 	      else
 		{
-		  bprop->u.number |= features;
 		  updated = TRUE;
+		  bprop->u.number = features;
 		}
 	    }
 	  else if (aprop != NULL)
@@ -2555,12 +2660,6 @@ _bfd_x86_elf_link_setup_gnu_properties
   unsigned int class_align = ABI_64_P (info->output_bfd) ? 3 : 2;
   unsigned int got_align;
 
-  features = 0;
-  if (info->ibt)
-    features = GNU_PROPERTY_X86_FEATURE_1_IBT;
-  if (info->shstk)
-    features |= GNU_PROPERTY_X86_FEATURE_1_SHSTK;
-
   /* Find a normal input file with GNU property note.  */
   for (pbfd = info->input_bfds;
        pbfd != NULL;
@@ -2579,6 +2678,20 @@ _bfd_x86_elf_link_setup_gnu_properties
   htab = elf_x86_hash_table (info, bed->target_id);
   if (htab == NULL)
     return pbfd;
+
+  features = 0;
+  if (htab->params->ibt)
+    {
+      features = GNU_PROPERTY_X86_FEATURE_1_IBT;
+      htab->params->cet_report &= ~cet_report_ibt;
+    }
+  if (htab->params->shstk)
+    {
+      features |= GNU_PROPERTY_X86_FEATURE_1_SHSTK;
+      htab->params->cet_report &= ~cet_report_shstk;
+    }
+  if (!(htab->params->cet_report & (cet_report_ibt | cet_report_shstk)))
+    htab->params->cet_report = cet_report_none;
 
   if (ebfd != NULL)
     {
@@ -2608,15 +2721,63 @@ _bfd_x86_elf_link_setup_gnu_properties
 	  if (sec == NULL)
 	    info->callbacks->einfo (_("%F%P: failed to create GNU property section\n"));
 
-	  if (!bfd_set_section_alignment (ebfd, sec, class_align))
+	  if (!bfd_set_section_alignment (sec, class_align))
 	    {
-error_alignment:
+	    error_alignment:
 	      info->callbacks->einfo (_("%F%pA: failed to align section\n"),
 				      sec);
 	    }
 
 	  elf_section_type (sec) = SHT_NOTE;
 	}
+    }
+
+  if (htab->params->cet_report)
+    {
+      /* Report missing IBT and SHSTK properties.  */
+      bfd *abfd;
+      const char *msg;
+      elf_property_list *p;
+      bfd_boolean missing_ibt, missing_shstk;
+      bfd_boolean check_ibt
+	= !!(htab->params->cet_report & cet_report_ibt);
+      bfd_boolean check_shstk
+	= !!(htab->params->cet_report & cet_report_shstk);
+
+      if ((htab->params->cet_report & cet_report_warning))
+	msg = _("%P: %pB: warning: missing %s\n");
+      else
+	msg = _("%X%P: %pB: error: missing %s\n");
+
+      for (abfd = info->input_bfds; abfd != NULL; abfd = abfd->link.next)
+	if (!(abfd->flags & (DYNAMIC | BFD_PLUGIN | BFD_LINKER_CREATED))
+	    && bfd_get_flavour (abfd) == bfd_target_elf_flavour)
+	  {
+	    for (p = elf_properties (abfd); p; p = p->next)
+	      if (p->property.pr_type == GNU_PROPERTY_X86_FEATURE_1_AND)
+		break;
+
+	    missing_ibt = check_ibt;
+	    missing_shstk = check_shstk;
+	    if (p)
+	      {
+		missing_ibt &= !(p->property.u.number
+				 & GNU_PROPERTY_X86_FEATURE_1_IBT);
+		missing_shstk &= !(p->property.u.number
+				   & GNU_PROPERTY_X86_FEATURE_1_SHSTK);
+	      }
+	    if (missing_ibt || missing_shstk)
+	      {
+		const char *missing;
+		if (missing_ibt && missing_shstk)
+		  missing = _("IBT and SHSTK properties");
+		else if (missing_ibt)
+		  missing = _("IBT property");
+		else
+		  missing = _("SHSTK property");
+		info->callbacks->einfo (msg, abfd, missing);
+	      }
+	  }
     }
 
   pbfd = _bfd_elf_link_setup_gnu_properties (info);
@@ -2629,7 +2790,7 @@ error_alignment:
 
   htab->plt0_pad_byte = init_table->plt0_pad_byte;
 
-  use_ibt_plt = info->ibtplt || info->ibt;
+  use_ibt_plt = htab->params->ibtplt || htab->params->ibt;
   if (!use_ibt_plt && pbfd != NULL)
     {
       /* Check if GNU_PROPERTY_X86_FEATURE_1_IBT is on.  */
@@ -2774,11 +2935,11 @@ error_alignment:
      instead of in create_dynamic_sections so that they are always
      properly aligned even if create_dynamic_sections isn't called.  */
   sec = htab->elf.sgot;
-  if (!bfd_set_section_alignment (dynobj, sec, got_align))
+  if (!bfd_set_section_alignment (sec, got_align))
     goto error_alignment;
 
   sec = htab->elf.sgotplt;
-  if (!bfd_set_section_alignment (dynobj, sec, got_align))
+  if (!bfd_set_section_alignment (sec, got_align))
     goto error_alignment;
 
   /* Create the ifunc sections here so that check_relocs can be
@@ -2816,8 +2977,7 @@ error_alignment:
 	    = bfd_log2 (htab->non_lazy_plt->plt_entry_size);
 
 	  sec = pltsec;
-	  if (!bfd_set_section_alignment (sec->owner, sec,
-					  plt_alignment))
+	  if (!bfd_set_section_alignment (sec, plt_alignment))
 	    goto error_alignment;
 
 	  /* Create the GOT procedure linkage table.  */
@@ -2827,8 +2987,7 @@ error_alignment:
 	  if (sec == NULL)
 	    info->callbacks->einfo (_("%F%P: failed to create GOT PLT section\n"));
 
-	  if (!bfd_set_section_alignment (dynobj, sec,
-					  non_lazy_plt_alignment))
+	  if (!bfd_set_section_alignment (sec, non_lazy_plt_alignment))
 	    goto error_alignment;
 
 	  htab->plt_got = sec;
@@ -2848,11 +3007,10 @@ error_alignment:
 		  if (sec == NULL)
 		    info->callbacks->einfo (_("%F%P: failed to create IBT-enabled PLT section\n"));
 
-		  if (!bfd_set_section_alignment (dynobj, sec,
-						  plt_alignment))
+		  if (!bfd_set_section_alignment (sec, plt_alignment))
 		    goto error_alignment;
 		}
-	      else if (info->bndplt && ABI_64_P (dynobj))
+	      else if (htab->params->bndplt && ABI_64_P (dynobj))
 		{
 		  /* Create the second PLT for Intel MPX support.  MPX
 		     PLT is supported only for non-NaCl target in 64-bit
@@ -2863,8 +3021,7 @@ error_alignment:
 		  if (sec == NULL)
 		    info->callbacks->einfo (_("%F%P: failed to create BND PLT section\n"));
 
-		  if (!bfd_set_section_alignment (dynobj, sec,
-						  non_lazy_plt_alignment))
+		  if (!bfd_set_section_alignment (sec, non_lazy_plt_alignment))
 		    goto error_alignment;
 		}
 
@@ -2884,7 +3041,7 @@ error_alignment:
 	  if (sec == NULL)
 	    info->callbacks->einfo (_("%F%P: failed to create PLT .eh_frame section\n"));
 
-	  if (!bfd_set_section_alignment (dynobj, sec, class_align))
+	  if (!bfd_set_section_alignment (sec, class_align))
 	    goto error_alignment;
 
 	  htab->plt_eh_frame = sec;
@@ -2897,7 +3054,7 @@ error_alignment:
 	      if (sec == NULL)
 		info->callbacks->einfo (_("%F%P: failed to create GOT PLT .eh_frame section\n"));
 
-	      if (!bfd_set_section_alignment (dynobj, sec, class_align))
+	      if (!bfd_set_section_alignment (sec, class_align))
 		goto error_alignment;
 
 	      htab->plt_got_eh_frame = sec;
@@ -2911,7 +3068,7 @@ error_alignment:
 	      if (sec == NULL)
 		info->callbacks->einfo (_("%F%P: failed to create the second PLT .eh_frame section\n"));
 
-	      if (!bfd_set_section_alignment (dynobj, sec, class_align))
+	      if (!bfd_set_section_alignment (sec, class_align))
 		goto error_alignment;
 
 	      htab->plt_second_eh_frame = sec;
@@ -2930,12 +3087,29 @@ error_alignment:
 	 section backwards, resulting in a warning and section lma not
 	 being set properly.  It later leads to a "File truncated"
 	 error.  */
-      if (!bfd_set_section_alignment (sec->owner, sec, 0))
+      if (!bfd_set_section_alignment (sec, 0))
 	goto error_alignment;
 
       htab->plt.iplt_alignment = (normal_target
 				  ? plt_alignment
 				  : bed->plt_alignment);
+    }
+
+  if (bfd_link_executable (info)
+      && !info->nointerp
+      && !htab->params->has_dynamic_linker
+      && htab->params->static_before_all_inputs)
+    {
+      /* Report error for dynamic input objects if -static is passed at
+	 command-line before all input files without --dynamic-linker
+	 unless --no-dynamic-linker is used.  */
+      bfd *abfd;
+
+      for (abfd = info->input_bfds; abfd != NULL; abfd = abfd->link.next)
+	if ((abfd->flags & DYNAMIC))
+	  info->callbacks->einfo
+	    (_("%X%P: attempted static link of dynamic object `%pB'\n"),
+	     abfd);
     }
 
   return pbfd;
@@ -2982,4 +3156,16 @@ _bfd_x86_elf_link_fixup_gnu_properties
 	  break;
 	}
     }
+}
+
+void
+_bfd_elf_linker_x86_set_options (struct bfd_link_info * info,
+				 struct elf_linker_x86_params *params)
+{
+  const struct elf_backend_data *bed
+    = get_elf_backend_data (info->output_bfd);
+  struct elf_x86_link_hash_table *htab
+    = elf_x86_hash_table (info, bed->target_id);
+  if (htab != NULL)
+    htab->params = params;
 }

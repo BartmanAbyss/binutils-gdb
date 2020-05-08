@@ -1,6 +1,6 @@
 /* Remote File-I/O communications
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,7 +22,7 @@
 #ifndef REMOTE_FILEIO_H
 #define REMOTE_FILEIO_H
 
-#include "common/fileio.h"
+#include "gdbsupport/fileio.h"
 
 struct cmd_list_element;
 struct remote_target;

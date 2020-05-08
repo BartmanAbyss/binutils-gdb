@@ -1,6 +1,6 @@
 /* tc-avr.c -- Assembler code for the ATMEL AVR
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2020 Free Software Foundation, Inc.
    Contributed by Denis Chertykov <denisc@overta.ru>
 
    This file is part of GAS, the GNU Assembler.
@@ -1429,7 +1429,7 @@ avr_operands (struct avr_opcodes_s *opcode, char **line)
 valueT
 md_section_align (asection *seg, valueT addr)
 {
-  int align = bfd_get_section_alignment (stdoutput, seg);
+  int align = bfd_section_alignment (seg);
   return ((addr + (1 << align) - 1) & (-1UL << align));
 }
 
@@ -2229,7 +2229,7 @@ avr_create_property_section (void)
   sec = bfd_make_section (stdoutput, section_name);
   if (sec == NULL)
     as_fatal (_("Failed to create property section `%s'\n"), section_name);
-  bfd_set_section_flags (stdoutput, sec, flags);
+  bfd_set_section_flags (sec, flags);
   sec->output_section = sec;
   return sec;
 }
@@ -2404,7 +2404,7 @@ avr_create_and_fill_property_section (void)
     return;
 
   prop_sec = avr_create_property_section ();
-  bfd_set_section_size (stdoutput, prop_sec, sec_size);
+  bfd_set_section_size (prop_sec, sec_size);
 
   subseg_set (prop_sec, 0);
   frag_base = frag_more (sec_size);
@@ -2635,8 +2635,8 @@ avr_patch_gccisr_frag (fragS *fr, int reg)
   /* Turn frag into ordinary code frag of now known size.  */
 
   fr->fr_var = 0;
-  fr->fr_fix = (offsetT) (where - fr->fr_literal);
-  gas_assert (fr->fr_fix <= fr->fr_offset);
+  fr->fr_fix = where - fr->fr_literal;
+  gas_assert (fr->fr_fix <= (valueT) fr->fr_offset);
   fr->fr_offset = 0;
   fr->fr_type = rs_fill;
   fr->fr_subtype = 0;

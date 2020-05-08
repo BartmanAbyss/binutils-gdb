@@ -1,5 +1,5 @@
 /* Meta support for 32-bit ELF
-   Copyright (C) 2013-2019 Free Software Foundation, Inc.
+   Copyright (C) 2013-2020 Free Software Foundation, Inc.
    Contributed by Imagination Technologies Ltd.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -1021,7 +1021,7 @@ static struct bfd_link_hash_table *
 elf_metag_link_hash_table_create (bfd *abfd)
 {
   struct elf_metag_link_hash_table *htab;
-  bfd_size_type amt = sizeof (*htab);
+  size_t amt = sizeof (*htab);
 
   htab = bfd_zmalloc (amt);
   if (htab == NULL)
@@ -1519,7 +1519,7 @@ elf_metag_relocate_section (bfd *output_bfd,
 
 	  name = bfd_elf_string_from_elf_section
 	    (input_bfd, symtab_hdr->sh_link, sym->st_name);
-	  name = (name == NULL) ? bfd_section_name (input_bfd, sec) : name;
+	  name = name == NULL ? bfd_section_name (sec) : name;
 	}
       else
 	{
@@ -2374,9 +2374,7 @@ elf_metag_check_relocs (bfd *abfd,
 	  /* This relocation describes which C++ vtable entries are actually
 	     used.  Record for later use during GC.  */
 	case R_METAG_GNU_VTENTRY:
-	  BFD_ASSERT (hh != NULL);
-	  if (hh != NULL
-	      && !bfd_elf_gc_record_vtentry (abfd, sec, &hh->eh, rel->r_addend))
+	  if (!bfd_elf_gc_record_vtentry (abfd, sec, &hh->eh, rel->r_addend))
 	    return FALSE;
 	  break;
 	}
@@ -2936,7 +2934,7 @@ elf_metag_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	  /* Strip this section if we don't need it; see the
 	     comment below.  */
 	}
-      else if (CONST_STRNEQ (bfd_get_section_name (dynobj, s), ".rela"))
+      else if (CONST_STRNEQ (bfd_section_name (s), ".rela"))
 	{
 	  if (s->size != 0 && s != htab->etab.srelplt)
 	    relocs = TRUE;
@@ -3239,14 +3237,17 @@ elf_metag_finish_dynamic_symbol (bfd *output_bfd,
 
 /* Set the Meta ELF ABI version.  */
 
-static void
-elf_metag_post_process_headers (bfd * abfd, struct bfd_link_info * link_info)
+static bfd_boolean
+elf_metag_init_file_header (bfd *abfd, struct bfd_link_info *link_info)
 {
   Elf_Internal_Ehdr * i_ehdrp;	/* ELF file header, internal form.  */
 
-  _bfd_elf_post_process_headers (abfd, link_info);
+  if (!_bfd_elf_init_file_header (abfd, link_info))
+    return FALSE;
+
   i_ehdrp = elf_elfheader (abfd);
   i_ehdrp->e_ident[EI_ABIVERSION] = METAG_ELF_ABI_VERSION;
+  return TRUE;
 }
 
 /* Used to decide how to sort relocs in an optimal manner for the
@@ -3458,7 +3459,7 @@ metag_type_of_stub (asection *input_sec,
 #define MOV_PC_A0_3	0xa3180ca0
 
 static bfd_boolean
-metag_build_one_stub (struct bfd_hash_entry *gen_entry, void *in_arg ATTRIBUTE_UNUSED)
+metag_build_one_stub (struct bfd_hash_entry *gen_entry, void *in_arg)
 {
   struct elf_metag_stub_hash_entry *hsh;
   asection *stub_sec;
@@ -3466,9 +3467,19 @@ metag_build_one_stub (struct bfd_hash_entry *gen_entry, void *in_arg ATTRIBUTE_U
   bfd_byte *loc;
   bfd_vma sym_value;
   int size;
+  struct bfd_link_info *info;
 
   /* Massage our args to the form they really have.  */
   hsh = (struct elf_metag_stub_hash_entry *) gen_entry;
+  info = (struct bfd_link_info *) in_arg;
+
+  /* Fail if the target section could not be assigned to an output
+     section.  The user should fix his linker script.  */
+  if (hsh->target_section->output_section == NULL
+      && info->non_contiguous_regions)
+    info->callbacks->einfo (_("%F%P: Could not assign '%pA' to an output section. "
+			      "Retry without --enable-non-contiguous-regions.\n"),
+			    hsh->target_section);
 
   stub_sec = hsh->stub_sec;
 
@@ -3561,7 +3572,7 @@ elf_metag_setup_section_lists (bfd *output_bfd, struct bfd_link_info *info)
   unsigned int top_id, top_index;
   asection *section;
   asection **input_list, **list;
-  bfd_size_type amt;
+  size_t amt;
   struct elf_metag_link_hash_table *htab = metag_link_hash_table (info);
 
   /* Count the number of input BFDs and find the top input section id.  */
@@ -3740,7 +3751,7 @@ get_local_syms (bfd *output_bfd ATTRIBUTE_UNUSED, bfd *input_bfd,
   /* We want to read in symbol extension records only once.  To do this
      we need to read in the local symbols in parallel and save them for
      later use; so hold pointers to the local symbols in an array.  */
-  bfd_size_type amt = sizeof (Elf_Internal_Sym *) * htab->bfd_count;
+  size_t amt = sizeof (Elf_Internal_Sym *) * htab->bfd_count;
   all_local_syms = bfd_zmalloc (amt);
   htab->all_local_syms = all_local_syms;
   if (all_local_syms == NULL)
@@ -4147,7 +4158,7 @@ elf_metag_plt_sym_val (bfd_vma i, const asection *plt,
 #define elf_backend_size_dynamic_sections	elf_metag_size_dynamic_sections
 #define elf_backend_omit_section_dynsym \
 	_bfd_elf_omit_section_dynsym_all
-#define elf_backend_post_process_headers	elf_metag_post_process_headers
+#define elf_backend_init_file_header		elf_metag_init_file_header
 #define elf_backend_reloc_type_class		elf_metag_reloc_type_class
 #define elf_backend_copy_indirect_symbol	elf_metag_copy_indirect_symbol
 #define elf_backend_plt_sym_val		elf_metag_plt_sym_val

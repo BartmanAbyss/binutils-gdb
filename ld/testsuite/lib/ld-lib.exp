@@ -1,5 +1,5 @@
 # Support routines for LD testsuite.
-#   Copyright (C) 1994-2019 Free Software Foundation, Inc.
+#   Copyright (C) 1994-2020 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -479,7 +479,10 @@ proc run_ld_link_tests { ldtests args } {
 	}
 
 	foreach target $args {
-	    setup_xfail $target
+	    if [match_target $target] {
+		setup_xfail "*-*-*"
+		break
+	    }
 	}
 
 	set ld_options [lindex $testitem 1]
@@ -672,9 +675,6 @@ proc run_ld_link_exec_tests { ldtests args } {
     }
 
     foreach testitem $ldtests {
-	foreach target $args {
-	    setup_xfail $target
-	}
 	set testname [lindex $testitem 0]
 	set ld_options [lindex $testitem 1]
 	set as_options [lindex $testitem 2]
@@ -687,6 +687,18 @@ proc run_ld_link_exec_tests { ldtests args } {
 	set ld_after [lindex $testitem 9]
 	set objfiles {}
 	set failed 0
+
+	if { ![check_compiler_available] } {
+	    unsupported $testname
+	    continue
+	}
+
+	foreach target $args {
+	    if [match_target $target] {
+		setup_xfail "*-*-*"
+		break
+	    }
+	}
 
 #	verbose -log "Testname is $testname"
 #	verbose -log "ld_options is $ld_options"
@@ -840,6 +852,11 @@ proc run_cc_link_tests { ldtests } {
 	set check_ld(terminal) 0
 	set check_ld(source) ""
 
+	if { ![check_compiler_available] } {
+	    unsupported $testname
+	    continue
+	}
+
 	#verbose -log "testname  is $testname"
 	#verbose -log "ldflags   is $ldflags"
 	#verbose -log "cflags    is $cflags"
@@ -911,6 +928,7 @@ proc run_cc_link_tests { ldtests } {
 
 	if { $binfile eq "tmpdir/" } {
 	    # compile only
+	    set binfile $objfile
 	} elseif { [regexp ".*\\.a$" $binfile] } {
 	    if { ![ar_simple_create $ar $ldflags $binfile "$objfiles"] } {
 		set failed 1
@@ -1035,6 +1053,7 @@ proc check_gc_sections_available { } {
 	# Some targets don't support gc-sections despite whatever's
 	# advertised by ld's options.
 	if {   [istarget alpha-*-*]
+            || [istarget bpf-*-*]
 	    || [istarget d30v-*-*]
 	    || [istarget dlx-*-*]
 	    || [istarget hppa*64-*-*]
@@ -1043,7 +1062,9 @@ proc check_gc_sections_available { } {
 	    || [istarget mn10200-*-*]
 	    || [istarget pj*-*-*]
 	    || [istarget pru*-*-*]
-	    || [istarget xgate-*-*] } {
+	    || [istarget s12z-*-*]
+	    || [istarget xgate-*-*]
+	    || [istarget z80-*-*] } {
 	    set gc_sections_available_saved 0
 	    return 0
 	}
@@ -1069,8 +1090,8 @@ proc check_gc_sections_available { } {
     return $gc_sections_available_saved
 }
 
-# Return true if target uses genelf.em (assuming it is ELF).
-proc is_generic_elf { } {
+# Return true if target uses genelf.em.
+proc uses_genelf { } {
     if { [istarget "d30v-*-*"]
 	 || [istarget "dlx-*-*"]
 	 || [istarget "fr30-*-*"]
@@ -1078,14 +1099,14 @@ proc is_generic_elf { } {
 	 || [istarget "ft32-*-*"]
 	 || [istarget "iq2000-*-*"]
 	 || [istarget "mn10200-*-*"]
-	 || [istarget "moxie-*-*"]
 	 || [istarget "msp430-*-*"]
 	 || [istarget "mt-*-*"]
 	 || [istarget "pj*-*-*"]
+	 || [istarget "s12z-*-*"]
 	 || [istarget "xgate-*-*"] } {
-	return 1;
+	return 1
     }
-    return 0;
+    return 0
 }
 
 proc is_underscore_target { } {
@@ -1137,6 +1158,49 @@ proc check_sysroot_available { } {
 	}
     }
     return $ld_sysroot_available_saved
+}
+
+# Return true if we can build a program with the compiler.
+# On some targets, CC might be defined, but libraries and startup
+# code might be missing or require special options that the ld test
+# harness doesn't know about.
+
+proc check_compiler_available { } {
+    global compiler_available_saved
+    global CC
+
+    if {![info exists compiler_available_saved]} {
+        if { [which $CC] == 0 } {
+	    set compiler_available_saved 0
+	    return 0
+	}
+
+	set flags ""
+	if [board_info [target_info name] exists cflags] {
+	    append flags " [board_info [target_info name] cflags]"
+	}
+	if [board_info [target_info name] exists ldflags] {
+	    append flags " [board_info [target_info name] ldflags]"
+	}
+
+	set basename "tmpdir/compiler[pid]"
+	set src ${basename}.c
+	set output ${basename}.out
+	set f [open $src "w"]
+	puts $f "int main (void)"
+	puts $f "{"
+	puts $f "  return 0; "
+	puts $f "}"
+	close $f
+	if [is_remote host] {
+	    set src [remote_download host $src]
+	}
+	set compiler_available_saved [run_host_cmd_yesno "$CC" "$flags $src -o $output"]
+	remote_file host delete $src
+	remote_file host delete $output
+	file delete $src
+    }
+    return $compiler_available_saved
 }
 
 # Returns 1 if plugin is enabled in gcc.  Returns 0 otherwise.
@@ -1326,7 +1390,7 @@ proc check_ifunc_available { } {
     global CC
 
     if {![info exists ifunc_available_saved]} {
-        if { [which $CC] == 0 } {
+        if { ![check_compiler_available] } {
 	    set ifunc_available_saved 0
 	    return 0
 	}
@@ -1375,7 +1439,7 @@ proc check_ifunc_attribute_available { } {
     global CC
 
     if {![info exists ifunc_attribute_available_saved]} {
-        if { [which $CC] == 0 } {
+        if { ![check_compiler_available] } {
 	    set ifunc_attribute_available_saved 0
 	    return 0
 	}
@@ -1422,7 +1486,7 @@ proc check_libdl_available { } {
     global CC
 
     if {![info exists libdl_available_saved]} {
-        if { [which $CC] == 0 } {
+        if { ![check_compiler_available] } {
 	    set libdl_available_saved 0
 	    return 0
 	}
@@ -1458,7 +1522,7 @@ proc check_gnu2_tls_available { } {
     global GNU2_CFLAGS
 
     if {![info exists gnu2_tls_available_saved]} {
-        if { [which $CC] == 0 || "$GNU2_CFLAGS" == "" } {
+        if { ![check_compiler_available] || "$GNU2_CFLAGS" == "" } {
 	    set gnu2_tls_available_saved 0
 	    return 0
 	}

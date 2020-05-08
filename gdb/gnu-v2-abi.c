@@ -1,6 +1,6 @@
 /* Abstraction of GNU v2 abi.
 
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2020 Free Software Foundation, Inc.
 
    Contributed by Daniel Berlin <dberlin@redhat.com>
 
@@ -243,7 +243,7 @@ gnuv2_value_rtti_type (struct value *v, int *full, LONGEST *top, int *using_enc)
   /* Try to find a symbol that is the vtable.  */
   minsym=lookup_minimal_symbol_by_pc(vtbl);
   if (minsym.minsym==NULL
-      || (linkage_name=MSYMBOL_LINKAGE_NAME (minsym.minsym))==NULL
+      || (linkage_name=minsym.minsym->linkage_name ())==NULL
       || !is_vtable_name (linkage_name))
     return NULL;
 
@@ -413,8 +413,9 @@ init_gnuv2_ops (void)
   gnu_v2_abi_ops.baseclass_offset = gnuv2_baseclass_offset;
 }
 
+void _initialize_gnu_v2_abi ();
 void
-_initialize_gnu_v2_abi (void)
+_initialize_gnu_v2_abi ()
 {
   init_gnuv2_ops ();
   register_cp_abi (&gnu_v2_abi_ops);

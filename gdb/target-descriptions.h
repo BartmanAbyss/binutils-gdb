@@ -1,6 +1,6 @@
 /* Target description support for GDB.
 
-   Copyright (C) 2006-2019 Free Software Foundation, Inc.
+   Copyright (C) 2006-2020 Free Software Foundation, Inc.
 
    Contributed by CodeSourcery.
 
@@ -21,7 +21,8 @@
 
 #ifndef TARGET_DESCRIPTIONS_H
 #define TARGET_DESCRIPTIONS_H 1
-#include "common/tdesc.h"
+#include "gdbsupport/tdesc.h"
+#include "gdbarch.h"
 
 struct tdesc_arch_data;
 struct target_ops;

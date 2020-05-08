@@ -1,6 +1,6 @@
 /* Convert a DWARF location expression to C
 
-   Copyright (C) 2014-2019 Free Software Foundation, Inc.
+   Copyright (C) 2014-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,17 +19,19 @@
 
 #include "defs.h"
 #include "dwarf2.h"
-#include "dwarf2expr.h"
-#include "dwarf2loc.h"
+#include "dwarf2/expr.h"
+#include "dwarf2/loc.h"
+#include "dwarf2/read.h"
 #include "ui-file.h"
 #include "utils.h"
 #include "compile-internal.h"
 #include "compile-c.h"
 #include "compile.h"
 #include "block.h"
-#include "dwarf2-frame.h"
-#include "common/gdb_vecs.h"
+#include "dwarf2/frame.h"
+#include "gdbsupport/gdb_vecs.h"
 #include "value.h"
+#include "gdbarch.h"
 
 
 
@@ -621,18 +623,18 @@ do_compile_dwarf_expr_to_c (int indent, string_file *stream,
       if (frame == NULL)
 	error (_("Symbol \"%s\" cannot be used because "
 		 "there is no selected frame"),
-	       SYMBOL_PRINT_NAME (sym));
+	       sym->print_name ());
 
       val = read_var_value (sym, NULL, frame);
       if (VALUE_LVAL (val) != lval_memory)
 	error (_("Symbol \"%s\" cannot be used for compilation evaluation "
 		 "as its address has not been found."),
-	       SYMBOL_PRINT_NAME (sym));
+	       sym->print_name ());
 
       warning (_("Symbol \"%s\" is thread-local and currently can only "
 		 "be referenced from the current thread in "
 		 "compiled code."),
-	       SYMBOL_PRINT_NAME (sym));
+	       sym->print_name ());
 
       fprintfi_filtered (indent, stream, "%s = %s;\n",
 			 result_name,
@@ -717,7 +719,7 @@ do_compile_dwarf_expr_to_c (int indent, string_file *stream,
 	     index, not an address.  We don't support things like
 	     branching between the address and the TLS op.  */
 	  if (op_ptr >= op_end || *op_ptr != DW_OP_GNU_push_tls_address)
-	    uoffset += dwarf2_per_cu_text_offset (per_cu);
+	    uoffset += per_cu->text_offset ();
 	  push (indent, stream, uoffset);
 	  break;
 

@@ -1,5 +1,5 @@
 /* Main program of GNU linker.
-   Copyright (C) 1991-2019 Free Software Foundation, Inc.
+   Copyright (C) 1991-2020 Free Software Foundation, Inc.
    Written by Steve Chamberlain steve@cygnus.com
 
    This file is part of the GNU Binutils.
@@ -25,6 +25,7 @@
 #include "libiberty.h"
 #include "progress.h"
 #include "bfdlink.h"
+#include "ctf-api.h"
 #include "filenames.h"
 
 #include "ld.h"
@@ -148,7 +149,9 @@ static struct bfd_link_callbacks link_callbacks =
   einfo,
   info_msg,
   minfo,
-  ldlang_override_segment_assignment
+  ldlang_override_segment_assignment,
+  ldlang_ctf_apply_strsym,
+  ldlang_write_ctf_late
 };
 
 static bfd_assert_handler_type default_bfd_assert_handler;
@@ -264,6 +267,7 @@ main (int argc, char **argv)
   config.make_executable = TRUE;
   config.magic_demand_paged = TRUE;
   config.text_read_only = TRUE;
+  config.print_map_discarded = TRUE;
   link_info.disable_target_specific_optimizations = -1;
 
   command_line.warn_mismatch = TRUE;
@@ -328,7 +332,7 @@ main (int argc, char **argv)
   if (saved_script_handle == NULL
       && command_line.default_script != NULL)
     {
-      ldfile_open_command_file (command_line.default_script);
+      ldfile_open_script_file (command_line.default_script);
       parser_input = input_script;
       yyparse ();
     }
@@ -815,9 +819,9 @@ add_archive_element (struct bfd_link_info *info,
   input->local_sym_name = abfd->filename;
   input->the_bfd = abfd;
 
-  parent = abfd->my_archive->usrdata;
+  parent = bfd_usrdata (abfd->my_archive);
   if (parent != NULL && !parent->flags.reload)
-    parent->next = (lang_statement_union_type *) input;
+    parent->next = input;
 
   /* Save the original data for trace files/tries below, as plugins
      (if enabled) may possibly alter it to point to a replacement

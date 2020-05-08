@@ -1,6 +1,6 @@
 /* C language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 1992-2019 Free Software Foundation, Inc.
+   Copyright (C) 1992-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,6 +35,7 @@
 #include "gdb_obstack.h"
 #include <ctype.h>
 #include "gdbcore.h"
+#include "gdbarch.h"
 
 /* Given a C string type, STR_TYPE, return the corresponding target
    character set name.  */
@@ -244,7 +245,7 @@ c_get_string (struct value *value, gdb::unique_xmalloc_ptr<gdb_byte> *buffer,
   struct type *element_type = TYPE_TARGET_TYPE (type);
   int req_length = *length;
   enum bfd_endian byte_order
-    = gdbarch_byte_order (get_type_arch (type));
+    = type_byte_order (type);
 
   if (element_type == NULL)
     goto error;
@@ -279,10 +280,21 @@ c_get_string (struct value *value, gdb::unique_xmalloc_ptr<gdb_byte> *buffer,
   /* If the string lives in GDB's memory instead of the inferior's,
      then we just need to copy it to BUFFER.  Also, since such strings
      are arrays with known size, FETCHLIMIT will hold the size of the
-     array.  */
+     array.
+
+     An array is assumed to live in GDB's memory, so we take this path
+     here.
+
+     However, it's possible for the caller to request more array
+     elements than apparently exist -- this can happen when using the
+     C struct hack.  So, only do this if either no length was
+     specified, or the length is within the existing bounds.  This
+     avoids running off the end of the value's contents.  */
   if ((VALUE_LVAL (value) == not_lval
-       || VALUE_LVAL (value) == lval_internalvar)
-      && fetchlimit != UINT_MAX)
+       || VALUE_LVAL (value) == lval_internalvar
+       || TYPE_CODE (type) == TYPE_CODE_ARRAY)
+      && fetchlimit != UINT_MAX
+      && (*length < 0 || *length <= fetchlimit))
     {
       int i;
       const gdb_byte *contents = value_contents (value);
@@ -291,14 +303,14 @@ c_get_string (struct value *value, gdb::unique_xmalloc_ptr<gdb_byte> *buffer,
       if (*length >= 0)
 	i  = *length;
       else
- 	/* Otherwise, look for a null character.  */
- 	for (i = 0; i < fetchlimit; i++)
+	/* Otherwise, look for a null character.  */
+	for (i = 0; i < fetchlimit; i++)
 	  if (extract_unsigned_integer (contents + i * width,
 					width, byte_order) == 0)
- 	    break;
+	    break;
   
       /* I is now either a user-defined length, the number of non-null
- 	 characters, or FETCHLIMIT.  */
+	 characters, or FETCHLIMIT.  */
       *length = i * width;
       buffer->reset ((gdb_byte *) xmalloc (*length));
       memcpy (buffer->get (), contents, *length);
@@ -306,7 +318,19 @@ c_get_string (struct value *value, gdb::unique_xmalloc_ptr<gdb_byte> *buffer,
     }
   else
     {
-      CORE_ADDR addr = value_as_address (value);
+      /* value_as_address does not return an address for an array when
+	 c_style_arrays is false, so we handle that specially
+	 here.  */
+      CORE_ADDR addr;
+      if (TYPE_CODE (type) == TYPE_CODE_ARRAY)
+	{
+	  if (VALUE_LVAL (value) != lval_memory)
+	    error (_("Attempt to take address of value "
+		     "not located in memory."));
+	  addr = value_address (value);
+	}
+      else
+	addr = value_as_address (value);
 
       /* Prior to the fix for PR 16196 read_string would ignore fetchlimit
 	 if length > 0.  The old "broken" behaviour is the behaviour we want:
@@ -587,16 +611,13 @@ evaluate_subexp_c (struct type *expect_type, struct expression *exp,
 					      exp->gdbarch);
 	    break;
 	  case C_WIDE_STRING:
-	    type = lookup_typename (exp->language_defn, exp->gdbarch,
-				    "wchar_t", NULL, 0);
+	    type = lookup_typename (exp->language_defn, "wchar_t", NULL, 0);
 	    break;
 	  case C_STRING_16:
-	    type = lookup_typename (exp->language_defn, exp->gdbarch,
-				    "char16_t", NULL, 0);
+	    type = lookup_typename (exp->language_defn, "char16_t", NULL, 0);
 	    break;
 	  case C_STRING_32:
-	    type = lookup_typename (exp->language_defn, exp->gdbarch,
-				    "char32_t", NULL, 0);
+	    type = lookup_typename (exp->language_defn, "char32_t", NULL, 0);
 	    break;
 	  default:
 	    internal_error (__FILE__, __LINE__, _("unhandled c_string_type"));
@@ -713,6 +734,42 @@ c_watch_location_expression (struct type *type, CORE_ADDR addr)
   std::string name = type_to_string (type);
   return gdb::unique_xmalloc_ptr<char>
     (xstrprintf ("* (%s *) %s", name.c_str (), core_addr_to_string (addr)));
+}
+
+/* See c-lang.h.  */
+
+bool
+c_is_string_type_p (struct type *type)
+{
+  type = check_typedef (type);
+  while (TYPE_CODE (type) == TYPE_CODE_REF)
+    {
+      type = TYPE_TARGET_TYPE (type);
+      type = check_typedef (type);
+    }
+
+  switch (TYPE_CODE (type))
+    {
+    case TYPE_CODE_ARRAY:
+      {
+	/* See if target type looks like a string.  */
+	struct type *array_target_type = TYPE_TARGET_TYPE (type);
+	return (TYPE_LENGTH (type) > 0
+		&& TYPE_LENGTH (array_target_type) > 0
+		&& c_textual_element_type (array_target_type, 0));
+      }
+    case TYPE_CODE_STRING:
+      return true;
+    case TYPE_CODE_PTR:
+      {
+	struct type *element_type = TYPE_TARGET_TYPE (type);
+	return c_textual_element_type (element_type, 0);
+      }
+    default:
+      break;
+    }
+
+  return false;
 }
 
 
@@ -846,7 +903,7 @@ extern const struct language_defn c_language_defn =
   c_emit_char,			/* Print a single char */
   c_print_type,			/* Print a type using appropriate syntax */
   c_print_typedef,		/* Print a typedef using appropriate syntax */
-  c_val_print,			/* Print a value using appropriate syntax */
+  c_value_print_inner,		/* la_value_print_inner */
   c_value_print,		/* Print a top-level value */
   default_read_var_value,	/* la_read_var_value */
   NULL,				/* Language specific skip_trampoline */
@@ -866,7 +923,6 @@ extern const struct language_defn c_language_defn =
   c_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
-  c_get_string,
   c_watch_location_expression,
   NULL,				/* la_get_symbol_name_matcher */
   iterate_over_symbols,
@@ -874,7 +930,8 @@ extern const struct language_defn c_language_defn =
   &c_varobj_ops,
   c_get_compile_context,
   c_compute_program,
-  LANG_MAGIC
+  c_is_string_type_p,
+  "{...}"			/* la_struct_too_deep_ellipsis */
 };
 
 enum cplus_primitive_types {
@@ -991,7 +1048,7 @@ extern const struct language_defn cplus_language_defn =
   c_emit_char,			/* Print a single char */
   c_print_type,			/* Print a type using appropriate syntax */
   c_print_typedef,		/* Print a typedef using appropriate syntax */
-  c_val_print,			/* Print a value using appropriate syntax */
+  c_value_print_inner,		/* la_value_print_inner */
   c_value_print,		/* Print a top-level value */
   default_read_var_value,	/* la_read_var_value */
   cplus_skip_trampoline,	/* Language specific skip_trampoline */
@@ -1011,7 +1068,6 @@ extern const struct language_defn cplus_language_defn =
   cplus_language_arch_info,
   default_print_array_index,
   cp_pass_by_reference,
-  c_get_string,
   c_watch_location_expression,
   cp_get_symbol_name_matcher,
   iterate_over_symbols,
@@ -1019,7 +1075,8 @@ extern const struct language_defn cplus_language_defn =
   &cplus_varobj_ops,
   cplus_get_compile_context,
   cplus_compute_program,
-  LANG_MAGIC
+  c_is_string_type_p,
+  "{...}"			/* la_struct_too_deep_ellipsis */
 };
 
 static const char *asm_extensions[] =
@@ -1045,7 +1102,7 @@ extern const struct language_defn asm_language_defn =
   c_emit_char,			/* Print a single char */
   c_print_type,			/* Print a type using appropriate syntax */
   c_print_typedef,		/* Print a typedef using appropriate syntax */
-  c_val_print,			/* Print a value using appropriate syntax */
+  c_value_print_inner,		/* la_value_print_inner */
   c_value_print,		/* Print a top-level value */
   default_read_var_value,	/* la_read_var_value */
   NULL,				/* Language specific skip_trampoline */
@@ -1062,10 +1119,9 @@ extern const struct language_defn asm_language_defn =
   0,				/* String lower bound */
   default_word_break_characters,
   default_collect_symbol_completion_matches,
-  c_language_arch_info, 	/* FIXME: la_language_arch_info.  */
+  c_language_arch_info,		/* FIXME: la_language_arch_info.  */
   default_print_array_index,
   default_pass_by_reference,
-  c_get_string,
   c_watch_location_expression,
   NULL,				/* la_get_symbol_name_matcher */
   iterate_over_symbols,
@@ -1073,7 +1129,8 @@ extern const struct language_defn asm_language_defn =
   &default_varobj_ops,
   NULL,
   NULL,
-  LANG_MAGIC
+  c_is_string_type_p,
+  "{...}"			/* la_struct_too_deep_ellipsis */
 };
 
 /* The following language_defn does not represent a real language.
@@ -1099,7 +1156,7 @@ extern const struct language_defn minimal_language_defn =
   c_emit_char,			/* Print a single char */
   c_print_type,			/* Print a type using appropriate syntax */
   c_print_typedef,		/* Print a typedef using appropriate syntax */
-  c_val_print,			/* Print a value using appropriate syntax */
+  c_value_print_inner,		/* la_value_print_inner */
   c_value_print,		/* Print a top-level value */
   default_read_var_value,	/* la_read_var_value */
   NULL,				/* Language specific skip_trampoline */
@@ -1119,7 +1176,6 @@ extern const struct language_defn minimal_language_defn =
   c_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
-  c_get_string,
   c_watch_location_expression,
   NULL,				/* la_get_symbol_name_matcher */
   iterate_over_symbols,
@@ -1127,5 +1183,6 @@ extern const struct language_defn minimal_language_defn =
   &default_varobj_ops,
   NULL,
   NULL,
-  LANG_MAGIC
+  c_is_string_type_p,
+  "{...}"			/* la_struct_too_deep_ellipsis */
 };

@@ -1,5 +1,5 @@
 /* ppc-opc.c -- PowerPC opcode list
-   Copyright (C) 1994-2019 Free Software Foundation, Inc.
+   Copyright (C) 1994-2020 Free Software Foundation, Inc.
    Written by Ian Lance Taylor, Cygnus Support
 
    This file is part of the GNU opcodes library.
@@ -321,12 +321,16 @@ valid_bo_pre_v2 (int64_t value)
 	 1z1zz
   */
   if ((value & 0x14) == 0)
+    /* BO: 0000y, 0001y, 0100y, 0101y.  */
     return 1;
   else if ((value & 0x14) == 0x4)
+    /* BO: 001zy, 011zy.  */
     return (value & 0x2) == 0;
   else if ((value & 0x14) == 0x10)
+    /* BO: 1z00y, 1z01y.  */
     return (value & 0x8) == 0;
   else
+    /* BO: 1z1zz.  */
     return value == 0x14;
 }
 
@@ -346,9 +350,17 @@ valid_bo_post_v2 (int64_t value)
 	 1z1zz
   */
   if ((value & 0x14) == 0)
+    /* BO: 0000z, 0001z, 0100z, 0101z.  */
     return (value & 0x1) == 0;
   else if ((value & 0x14) == 0x14)
+    /* BO: 1z1zz.  */
     return value == 0x14;
+  else if ((value & 0x14) == 0x4)
+    /* BO: 001at, 011at, with "at" == 0b01 being reserved.  */
+    return (value & 0x3) != 1;
+  else if ((value & 0x14) == 0x10)
+    /* BO: 1a00t, 1a01t, with "at" == 0b01 being reserved.  */
+    return (value & 0x9) != 1;
   else
     return 1;
 }
@@ -382,7 +394,8 @@ insert_bo (uint64_t insn,
 {
   if (!valid_bo (value, dialect, 0))
     *errmsg = _("invalid conditional option");
-  else if (PPC_OP (insn) == 19 && (insn & 0x400) && ! (value & 4))
+  else if (PPC_OP (insn) == 19
+	   && (((insn >> 1) & 0x3ff) == 528) && ! (value & 4))
     *errmsg = _("invalid counter access");
   return insn | ((value & 0x1f) << 21);
 }
@@ -398,35 +411,128 @@ extract_bo (uint64_t insn,
   return value;
 }
 
-/* The BO field in a B form instruction when the + or - modifier is
-   used.  This is like the BO field, but it must be even.  When
-   extracting it, we force it to be even.  */
+/* For the given BO value, return a bit mask detailing which bits
+   define the branch hints.  */
+
+static int64_t
+get_bo_hint_mask (int64_t bo, ppc_cpu_t dialect)
+{
+  if ((dialect & ISA_V2) == 0)
+    {
+      if ((bo & 0x14) != 0x14)
+	/* BO: 0000y, 0001y, 001zy, 0100y, 0101y, 011zy, 1z00y, 1z01y .  */
+	return 1;
+      else
+	/* BO: 1z1zz.  */
+	return 0;
+    }
+  else
+    {
+      if ((bo & 0x14) == 0x4)
+	/* BO: 001at, 011at.  */
+	return 0x3;
+      else if ((bo & 0x14) == 0x10)
+	/* BO: 1a00t, 1a01t.  */
+	return 0x9;
+      else
+	/* BO: 0000z, 0001z, 0100z, 0101z, 1z1zz.  */
+	return 0;
+    }
+}
+
+/* The BO field in a B form instruction when the + or - modifier is used.  */
 
 static uint64_t
 insert_boe (uint64_t insn,
 	    int64_t value,
 	    ppc_cpu_t dialect,
-	    const char **errmsg)
+	    const char **errmsg,
+	    int branch_taken)
 {
-  if (!valid_bo (value, dialect, 0))
-    *errmsg = _("invalid conditional option");
-  else if (PPC_OP (insn) == 19 && (insn & 0x400) && ! (value & 4))
-    *errmsg = _("invalid counter access");
-  else if ((value & 1) != 0)
-    *errmsg = _("attempt to set y bit when using + or - modifier");
+  int64_t implied_hint;
+  int64_t hint_mask = get_bo_hint_mask (value, dialect);
 
-  return insn | ((value & 0x1f) << 21);
+  if (branch_taken)
+    implied_hint = hint_mask;
+  else
+    implied_hint = hint_mask & ~1;
+
+  /* The branch hint bit(s) in the BO field must either be zero or exactly
+     match the branch hint bits implied by the '+' or '-' modifier.  */
+  if (implied_hint == 0)
+    *errmsg = _("BO value implies no branch hint, when using + or - modifier");
+  else if ((value & hint_mask) != 0
+	   && (value & hint_mask) != implied_hint)
+    {
+      if ((dialect & ISA_V2) == 0)
+	*errmsg = _("attempt to set y bit when using + or - modifier");
+      else
+	*errmsg = _("attempt to set 'at' bits when using + or - modifier");
+    }
+
+  value |= implied_hint;
+
+  return insert_bo (insn, value, dialect, errmsg);
 }
 
 static int64_t
 extract_boe (uint64_t insn,
 	     ppc_cpu_t dialect,
-	     int *invalid)
+	     int *invalid,
+	     int branch_taken)
 {
   int64_t value = (insn >> 21) & 0x1f;
-  if (!valid_bo (value, dialect, 1))
+  int64_t implied_hint;
+  int64_t hint_mask = get_bo_hint_mask (value, dialect);
+
+  if (branch_taken)
+    implied_hint = hint_mask;
+  else
+    implied_hint = hint_mask & ~1;
+
+  if (!valid_bo (value, dialect, 1)
+      || implied_hint == 0
+      || (value & hint_mask) != implied_hint)
     *invalid = 1;
-  return value & 0x1e;
+  return value;
+}
+
+/* The BO field in a B form instruction when the - modifier is used.  */
+
+static uint64_t
+insert_bom (uint64_t insn,
+	    int64_t value,
+	    ppc_cpu_t dialect,
+	    const char **errmsg)
+{
+  return insert_boe (insn, value, dialect, errmsg, 0);
+}
+
+static int64_t
+extract_bom (uint64_t insn,
+	     ppc_cpu_t dialect,
+	     int *invalid)
+{
+  return extract_boe (insn, dialect, invalid, 0);
+}
+
+/* The BO field in a B form instruction when the + modifier is used.  */
+
+static uint64_t
+insert_bop (uint64_t insn,
+	    int64_t value,
+	    ppc_cpu_t dialect,
+	    const char **errmsg)
+{
+  return insert_boe (insn, value, dialect, errmsg, 1);
+}
+
+static int64_t
+extract_bop (uint64_t insn,
+	     ppc_cpu_t dialect,
+	     int *invalid)
+{
+  return extract_boe (insn, dialect, invalid, 1);
 }
 
 /* The DCMX field in a X form instruction when the field is split
@@ -488,6 +594,106 @@ extract_dxdn (uint64_t insn,
 	      int *invalid)
 {
   return -extract_dxd (insn, dialect, invalid);
+}
+
+/* The D field in a 64-bit D form prefix instruction when the field is split
+   into separate D0 and D1 fields.  */
+
+static uint64_t
+insert_d34 (uint64_t insn,
+	    int64_t value,
+	    ppc_cpu_t dialect ATTRIBUTE_UNUSED,
+	    const char **errmsg ATTRIBUTE_UNUSED)
+{
+  return insn | ((value & 0x3ffff0000ULL) << 16) | (value & 0xffff);
+}
+
+static int64_t
+extract_d34 (uint64_t insn,
+	     ppc_cpu_t dialect ATTRIBUTE_UNUSED,
+	     int *invalid ATTRIBUTE_UNUSED)
+{
+  int64_t mask = 1ULL << 33;
+  int64_t value = ((insn >> 16) & 0x3ffff0000ULL) | (insn & 0xffff);
+  value = (value ^ mask) - mask;
+  return value;
+}
+
+/* The NSI34 field in an 8-byte D form prefix instruction.  This is the same
+   as the SI34 field, only negated.  The extraction function always marks it
+   as invalid, since we never want to recognize an instruction which uses
+   a field of this type.  */
+
+static uint64_t
+insert_nsi34 (uint64_t insn,
+	      int64_t value,
+	      ppc_cpu_t dialect,
+	      const char **errmsg)
+{
+  return insert_d34 (insn, -value, dialect, errmsg);
+}
+
+static int64_t
+extract_nsi34 (uint64_t insn,
+	       ppc_cpu_t dialect,
+	       int *invalid)
+{
+  int64_t value = extract_d34 (insn, dialect, invalid);
+  *invalid = 1;
+  return -value;
+}
+
+/* The R field in an 8-byte prefix instruction when there are restrictions
+   between R's value and the RA value (ie, they cannot both be non zero).  */
+
+static uint64_t
+insert_pcrel (uint64_t insn,
+	      int64_t value,
+	      ppc_cpu_t dialect ATTRIBUTE_UNUSED,
+	      const char **errmsg)
+{
+  value &= 0x1;
+  int64_t ra = (insn >> 16) & 0x1f;
+  if (ra != 0 && value != 0)
+    *errmsg = _("invalid R operand");
+
+  return insn | (value << 52);
+}
+
+static int64_t
+extract_pcrel (uint64_t insn,
+	       ppc_cpu_t dialect ATTRIBUTE_UNUSED,
+	       int *invalid)
+{
+  /* If called with *invalid < 0 to return the value for missing
+     operands, *invalid will be the negative count of missing operands
+     including this one.  Return a default value of 1 if the PRA0/PRAQ
+     operand was also omitted (ie. *invalid is -2).  Return a default
+     value of 0 if the PRA0/PRAQ operand was not omitted
+     (ie. *invalid is -1).  */
+  if (*invalid < 0)
+    return ~ *invalid & 1;
+
+  int64_t ra = (insn >> 16) & 0x1f;
+  int64_t pcrel = (insn >> 52) & 0x1;
+  if (ra != 0 && pcrel != 0)
+    *invalid = 1;
+
+  return pcrel;
+}
+
+/* Variant of extract_pcrel that sets invalid for R bit set.  The idea
+   is to disassemble "paddi rt,0,offset,1" as "pla rt,offset".  */
+
+static int64_t
+extract_pcrel0 (uint64_t insn,
+		ppc_cpu_t dialect,
+		int *invalid)
+{
+  int64_t pcrel = extract_pcrel (insn, dialect, invalid);
+  if (pcrel)
+    *invalid = 1;
+  return pcrel;
 }
 
 /* FXM mask in mfcr and mtcrf instructions.  */
@@ -652,6 +858,7 @@ extract_esync (uint64_t insn,
 	       ppc_cpu_t dialect ATTRIBUTE_UNUSED,
 	       int *invalid)
 {
+  /* Missing optional operands have a value of zero.  */
   if (*invalid < 0)
     return 0;
 
@@ -907,6 +1114,7 @@ extract_raq (uint64_t insn,
 	     ppc_cpu_t dialect ATTRIBUTE_UNUSED,
 	     int *invalid)
 {
+  /* Missing optional operands have a value of zero.  */
   if (*invalid < 0)
     return 0;
 
@@ -1232,6 +1440,7 @@ extract_tbr (uint64_t insn,
 	     ppc_cpu_t dialect ATTRIBUTE_UNUSED,
 	     int *invalid)
 {
+  /* Missing optional operands have a value of 268.  */
   if (*invalid < 0)
     return 268;
 
@@ -1704,6 +1913,7 @@ extract_sxl (uint64_t insn,
 	     ppc_cpu_t dialect ATTRIBUTE_UNUSED,
 	     int *invalid)
 {
+  /* Missing optional operands have a value of one.  */
   if (*invalid < 0)
     return 1;
   return (insn >> 11) & 0x1;
@@ -1820,13 +2030,16 @@ const struct powerpc_operand powerpc_operands[] =
 #define BO_MASK (0x1f << 21)
   { 0x1f, 21, insert_bo, extract_bo, 0 },
 
-  /* The BO field in a B form instruction when the + or - modifier is
-     used.  This is like the BO field, but it must be even.  */
-#define BOE BO + 1
-  { 0x1e, 21, insert_boe, extract_boe, 0 },
+  /* The BO field in a B form instruction when the - modifier is used.  */
+#define BOM BO + 1
+  { 0x1f, 21, insert_bom, extract_bom, 0 },
+
+  /* The BO field in a B form instruction when the + modifier is used.  */
+#define BOP BOM + 1
+  { 0x1f, 21, insert_bop, extract_bop, 0 },
 
   /* The RM field in an X form instruction.  */
-#define RM BOE + 1
+#define RM BOP + 1
 #define DD RM
   { 0x3, 11, NULL, NULL, 0 },
 
@@ -1837,8 +2050,12 @@ const struct powerpc_operand powerpc_operands[] =
 #define BT BH + 1
   { 0x1f, 21, NULL, NULL, PPC_OPERAND_CR_BIT },
 
+  /* The BT field in a mtfsb0 or mtfsb1 instruction.  */
+#define BTF BT + 1
+  { 0x1f, 21, NULL, NULL, PPC_OPERAND_CR_BIT | PPC_OPERAND_CR_REG },
+
   /* The BI16 field in a BD8 form instruction.  */
-#define BI16 BT + 1
+#define BI16 BTF + 1
   { 0x3, 8, NULL, NULL, PPC_OPERAND_CR_BIT },
 
   /* The BI32 field in a BD15 form instruction.  */
@@ -1926,9 +2143,26 @@ const struct powerpc_operand powerpc_operands[] =
   { 0xfffc, 0, NULL, NULL,
     PPC_OPERAND_PARENS | PPC_OPERAND_SIGNED | PPC_OPERAND_DS },
 
+  /* The D field in an 8-byte D form prefix instruction.  This is a displacement
+     off a register, and implies that the next operand is a register in
+     parentheses.  */
+#define D34 DS + 1
+  { UINT64_C(0x3ffffffff), PPC_OPSHIFT_INV, insert_d34, extract_d34,
+    PPC_OPERAND_PARENS | PPC_OPERAND_SIGNED },
+
+  /* The SI field in an 8-byte D form prefix instruction.  */
+#define SI34 D34 + 1
+  { UINT64_C(0x3ffffffff), PPC_OPSHIFT_INV, insert_d34, extract_d34, PPC_OPERAND_SIGNED },
+
+  /* The NSI field in an 8-byte D form prefix instruction.  This is the
+     same as the SI34 field, only negated.  */
+#define NSI34 SI34 + 1
+  { UINT64_C(0x3ffffffff), PPC_OPSHIFT_INV, insert_nsi34, extract_nsi34,
+    PPC_OPERAND_NEGATIVE | PPC_OPERAND_SIGNED },
+
   /* The DUIS or BHRBE fields in a XFX form instruction, 10 bits
      unsigned imediate */
-#define DUIS DS + 1
+#define DUIS NSI34 + 1
 #define BHRBE DUIS
   { 0x3ff, 11, NULL, NULL, 0 },
 
@@ -2104,16 +2338,33 @@ const struct powerpc_operand powerpc_operands[] =
 #define RA0 RA + 1
   { 0x1f, 16, NULL, NULL, PPC_OPERAND_GPR_0 },
 
+  /* Similar to above, but optional.  */
+#define PRA0 RA0 + 1
+  { 0x1f, 16, NULL, NULL, PPC_OPERAND_GPR_0 | PPC_OPERAND_OPTIONAL },
+
   /* The RA field in the DQ form lq or an lswx instruction, which have
      special value restrictions.  */
-#define RAQ RA0 + 1
+#define RAQ PRA0 + 1
 #define RAX RAQ
   { 0x1f, 16, insert_raq, extract_raq, PPC_OPERAND_GPR_0 },
+
+  /* Similar to above, but optional.  */
+#define PRAQ RAQ + 1
+  { 0x1f, 16, insert_raq, extract_raq,
+    PPC_OPERAND_GPR_0 | PPC_OPERAND_OPTIONAL },
+
+  /* The R field in an 8-byte D, DS, DQ or X form prefix instruction.  */
+#define PCREL PRAQ + 1
+#define PCREL_MASK (1ULL << 52)
+  { 0x1, 52, insert_pcrel, extract_pcrel, PPC_OPERAND_OPTIONAL },
+
+#define PCREL0 PCREL + 1
+  { 0x1, 52, insert_pcrel, extract_pcrel0, PPC_OPERAND_OPTIONAL },
 
   /* The RA field in a D or X form instruction which is an updating
      load, which means that the RA field may not be zero and may not
      equal the RT field.  */
-#define RAL RAQ + 1
+#define RAL PCREL0 + 1
   { 0x1f, 16, insert_ral, extract_ral, PPC_OPERAND_GPR_0 },
 
   /* The RA field in an lmw instruction, which has special value
@@ -2538,8 +2789,12 @@ const struct powerpc_operand powerpc_operands[] =
 #define XTQ6 XSQ6
   { 0x3f, PPC_OPSHIFT_INV, insert_xtq6, extract_xtq6, PPC_OPERAND_VSR },
 
+  /* The XT field in a plxv instruction.  Runs into the OP field.  */
+#define XTOP XSQ6 + 1
+  { 0x3f, 21, NULL, NULL, PPC_OPERAND_VSR },
+
   /* The XA field in an XX3 form instruction.  This is split.  */
-#define XA6 XTQ6 + 1
+#define XA6 XTOP + 1
   { 0x3f, PPC_OPSHIFT_INV, insert_xa6, extract_xa6, PPC_OPERAND_VSR },
 
   /* The XB field in an XX2 or XX3 form instruction.  This is split.  */
@@ -2607,6 +2862,30 @@ const unsigned int num_powerpc_operands = (sizeof (powerpc_operands)
 /* The main opcode.  */
 #define OP(x) ((((uint64_t)(x)) & 0x3f) << 26)
 #define OP_MASK OP (0x3f)
+
+/* The prefix opcode.  */
+#define PREFIX_OP (1ULL << 58)
+
+/* The 2-bit prefix form.  */
+#define PREFIX_FORM(x) ((x & 3ULL) << 56)
+
+#define SUFFIX_MASK ((1ULL << 32) - 1)
+#define PREFIX_MASK (SUFFIX_MASK << 32)
+
+/* Prefix insn, eight byte load/store form 8LS.  */
+#define P8LS (PREFIX_OP | PREFIX_FORM (0))
+
+/* Prefix insn, modified load/store form MLS.  */
+#define PMLS (PREFIX_OP | PREFIX_FORM (2))
+
+/* Prefix insn, modified register to register form MRR.  */
+#define PMRR (PREFIX_OP | PREFIX_FORM (3))
+
+/* An 8-byte D form prefix instruction.  */
+#define P_D_MASK (((-1ULL << 50) & ~PCREL_MASK) | OP_MASK)
+
+/* The same as P_D_MASK, but with the RA and PCREL fields specified.  */
+#define P_DRAPCREL_MASK (P_D_MASK | PCREL_MASK | RA_MASK)
 
 /* The main opcode combined with a trap code in the TO field of a D
    form instruction.  Used for extended mnemonics for the trap
@@ -2688,7 +2967,7 @@ const unsigned int num_powerpc_operands = (sizeof (powerpc_operands)
 
 /* A BD15 form instruction for extended conditional branch mnemonics.  */
 #define EBD15(op, aa, bo, lk)			\
-  (((op) & 0x3f) << 26)				\
+  (((op) & 0x3fu) << 26)			\
   | (((aa) & 0xf) << 22)			\
   | (((bo) & 0x3) << 20)			\
   | ((lk) & 1)
@@ -2697,7 +2976,7 @@ const unsigned int num_powerpc_operands = (sizeof (powerpc_operands)
 /* A BD15 form instruction for extended conditional branch mnemonics
    with BI.  */
 #define EBD15BI(op, aa, bo, bi, lk)		\
-  ((((op) & 0x3f) << 26)			\
+  ((((op) & 0x3fu) << 26)			\
    | (((aa) & 0xf) << 22)			\
    | (((bo) & 0x3) << 20)			\
    | (((bi) & 0x3) << 16)			\
@@ -3255,26 +3534,18 @@ const unsigned int num_powerpc_operands = (sizeof (powerpc_operands)
   (XLLK ((op), (xop), (lk)) | ((((uint64_t)(bo)) & 0x1f) << 21))
 #define XLO_MASK (XL_MASK | BO_MASK)
 
-/* An XL form instruction which explicitly sets the y bit of the BO
-   field.  */
-#define XLYLK(op, xop, y, lk)			\
-  (XLLK ((op), (xop), (lk))			\
-   | ((((uint64_t)(y)) & 1) << 21))
-#define XLYLK_MASK (XL_MASK | Y_MASK)
-
 /* An XL form instruction which sets the BO field and the condition
    bits of the BI field.  */
 #define XLOCB(op, bo, cb, xop, lk) \
   (XLO ((op), (bo), (xop), (lk)) | ((((uint64_t)(cb)) & 3) << 16))
 #define XLOCB_MASK XLOCB (0x3f, 0x1f, 0x3, 0x3ff, 1)
 
-/* An XL_MASK or XLYLK_MASK or XLOCB_MASK with the BB field fixed.  */
+/* An XL_MASK or XLOCB_MASK with the BB field fixed.  */
 #define XLBB_MASK (XL_MASK | BB_MASK)
-#define XLYBB_MASK (XLYLK_MASK | BB_MASK)
 #define XLBOCBBB_MASK (XLOCB_MASK | BB_MASK)
 
 /* A mask for branch instructions using the BH field.  */
-#define XLBH_MASK (XL_MASK | (0x1c << 11))
+#define XLBH_MASK (XL_MASK | (BB_MASK & ~(3 << 11)))
 
 /* An XL_MASK with the BO and BB fields fixed.  */
 #define XLBOBB_MASK (XL_MASK | BO_MASK | BB_MASK)
@@ -3442,6 +3713,7 @@ const unsigned int num_powerpc_operands = (sizeof (powerpc_operands)
 #define POWER7	PPC_OPCODE_POWER7
 #define POWER8	PPC_OPCODE_POWER8
 #define POWER9	PPC_OPCODE_POWER9
+#define POWERXX PPC_OPCODE_POWERXX
 #define CELL	PPC_OPCODE_CELL
 #define PPC64	PPC_OPCODE_64 | PPC_OPCODE_64_BRIDGE
 #define NON32	(PPC_OPCODE_64 | PPC_OPCODE_POWER4	\
@@ -4685,17 +4957,17 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"btla",     BBO(16,BOT,1,1),		BBOAT_MASK,    PPCCOM,	 PPCVLE,	{BI, BDA}},
 {"bbtla",    BBO(16,BOT,1,1),		BBOAT_MASK,    PWRCOM,	 PPCVLE,	{BI, BDA}},
 
-{"bc-",		B(16,0,0),	B_MASK,	     PPCCOM,	PPCVLE,		{BOE, BI, BDM}},
-{"bc+",		B(16,0,0),	B_MASK,	     PPCCOM,	PPCVLE,		{BOE, BI, BDP}},
+{"bc-",		B(16,0,0),	B_MASK,	     PPCCOM,	PPCVLE,		{BOM, BI, BDM}},
+{"bc+",		B(16,0,0),	B_MASK,	     PPCCOM,	PPCVLE,		{BOP, BI, BDP}},
 {"bc",		B(16,0,0),	B_MASK,	     COM,	PPCVLE,		{BO, BI, BD}},
-{"bcl-",	B(16,0,1),	B_MASK,	     PPCCOM,	PPCVLE,		{BOE, BI, BDM}},
-{"bcl+",	B(16,0,1),	B_MASK,	     PPCCOM,	PPCVLE,		{BOE, BI, BDP}},
+{"bcl-",	B(16,0,1),	B_MASK,	     PPCCOM,	PPCVLE,		{BOM, BI, BDM}},
+{"bcl+",	B(16,0,1),	B_MASK,	     PPCCOM,	PPCVLE,		{BOP, BI, BDP}},
 {"bcl",		B(16,0,1),	B_MASK,	     COM,	PPCVLE,		{BO, BI, BD}},
-{"bca-",	B(16,1,0),	B_MASK,	     PPCCOM,	PPCVLE,		{BOE, BI, BDMA}},
-{"bca+",	B(16,1,0),	B_MASK,	     PPCCOM,	PPCVLE,		{BOE, BI, BDPA}},
+{"bca-",	B(16,1,0),	B_MASK,	     PPCCOM,	PPCVLE,		{BOM, BI, BDMA}},
+{"bca+",	B(16,1,0),	B_MASK,	     PPCCOM,	PPCVLE,		{BOP, BI, BDPA}},
 {"bca",		B(16,1,0),	B_MASK,	     COM,	PPCVLE,		{BO, BI, BDA}},
-{"bcla-",	B(16,1,1),	B_MASK,	     PPCCOM,	PPCVLE,		{BOE, BI, BDMA}},
-{"bcla+",	B(16,1,1),	B_MASK,	     PPCCOM,	PPCVLE,		{BOE, BI, BDPA}},
+{"bcla-",	B(16,1,1),	B_MASK,	     PPCCOM,	PPCVLE,		{BOM, BI, BDMA}},
+{"bcla+",	B(16,1,1),	B_MASK,	     PPCCOM,	PPCVLE,		{BOP, BI, BDPA}},
 {"bcla",	B(16,1,1),	B_MASK,	     COM,	PPCVLE,		{BO, BI, BDA}},
 
 {"svc",		SC(17,0,0),	SC_MASK,     POWER,	PPCVLE,		{SVC_LEV, FL1, FL2}},
@@ -4716,18 +4988,18 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"addpcis",  DX(19,2),		DX_MASK,     POWER9,	PPCVLE,		{RT, DXD}},
 {"subpcis",  DX(19,2),		DX_MASK,     POWER9,	PPCVLE,		{RT, NDXD}},
 
-{"bdnzlr",   XLO(19,BODNZ,16,0),	XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
 {"bdnzlr-",  XLO(19,BODNZ,16,0),	XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
-{"bdnzlrl",  XLO(19,BODNZ,16,1),	XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
-{"bdnzlrl-", XLO(19,BODNZ,16,1),	XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
 {"bdnzlr+",  XLO(19,BODNZP,16,0),	XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
+{"bdnzlr",   XLO(19,BODNZ,16,0),	XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
+{"bdnzlrl-", XLO(19,BODNZ,16,1),	XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
 {"bdnzlrl+", XLO(19,BODNZP,16,1),	XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
-{"bdzlr",    XLO(19,BODZ,16,0),		XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
+{"bdnzlrl",  XLO(19,BODNZ,16,1),	XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
 {"bdzlr-",   XLO(19,BODZ,16,0),		XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
-{"bdzlrl",   XLO(19,BODZ,16,1),		XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
-{"bdzlrl-",  XLO(19,BODZ,16,1),		XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
 {"bdzlr+",   XLO(19,BODZP,16,0),	XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
+{"bdzlr",    XLO(19,BODZ,16,0),		XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
+{"bdzlrl-",  XLO(19,BODZ,16,1),		XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
 {"bdzlrl+",  XLO(19,BODZP,16,1),	XLBOBIBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{0}},
+{"bdzlrl",   XLO(19,BODZ,16,1),		XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
 {"blr",	     XLO(19,BOU,16,0),		XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
 {"br",	     XLO(19,BOU,16,0),		XLBOBIBB_MASK, PWRCOM,	 PPCVLE,	{0}},
 {"blrl",     XLO(19,BOU,16,1),		XLBOBIBB_MASK, PPCCOM,	 PPCVLE,	{0}},
@@ -4741,60 +5013,60 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"bdzlr+",   XLO(19,BODZP4,16,0),	XLBOBIBB_MASK, ISA_V2,	 PPCVLE,	{0}},
 {"bdzlrl+",  XLO(19,BODZP4,16,1),	XLBOBIBB_MASK, ISA_V2,	 PPCVLE,	{0}},
 
-{"bgelr",    XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
 {"bgelr-",   XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bger",     XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnllr",    XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnllr-",   XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnlr",     XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bgelrl",   XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bgelrl-",  XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bgerl",    XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnllrl",   XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnllrl-",  XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnlrl",    XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"blelr",    XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"blelr-",   XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bler",     XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnglr",    XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnglr-",   XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bngr",     XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"blelrl",   XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"blelrl-",  XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"blerl",    XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnglrl",   XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnglrl-",  XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bngrl",    XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnelr",    XLOCB(19,BOF,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnelr-",   XLOCB(19,BOF,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bner",     XLOCB(19,BOF,CBEQ,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnelrl",   XLOCB(19,BOF,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnelrl-",  XLOCB(19,BOF,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnerl",    XLOCB(19,BOF,CBEQ,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnslr",    XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnslr-",   XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnsr",     XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnulr",    XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnulr-",   XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnslrl",   XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnslrl-",  XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnsrl",    XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bnulrl",   XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnulrl-",  XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bgelr+",   XLOCB(19,BOFP,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bgelr",    XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bger",     XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnllr-",   XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnllr+",   XLOCB(19,BOFP,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnllr",    XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnlr",     XLOCB(19,BOF,CBLT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bgelrl-",  XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bgelrl+",  XLOCB(19,BOFP,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bgelrl",   XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bgerl",    XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnllrl-",  XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnllrl+",  XLOCB(19,BOFP,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnllrl",   XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnlrl",    XLOCB(19,BOF,CBLT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"blelr-",   XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"blelr+",   XLOCB(19,BOFP,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"blelr",    XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bler",     XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnglr-",   XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnglr+",   XLOCB(19,BOFP,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnglr",    XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bngr",     XLOCB(19,BOF,CBGT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"blelrl-",  XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"blelrl+",  XLOCB(19,BOFP,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"blelrl",   XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"blerl",    XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnglrl-",  XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnglrl+",  XLOCB(19,BOFP,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnglrl",   XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bngrl",    XLOCB(19,BOF,CBGT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnelr-",   XLOCB(19,BOF,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnelr+",   XLOCB(19,BOFP,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnelr",    XLOCB(19,BOF,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bner",     XLOCB(19,BOF,CBEQ,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnelrl-",  XLOCB(19,BOF,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnelrl+",  XLOCB(19,BOFP,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnelrl",   XLOCB(19,BOF,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnerl",    XLOCB(19,BOF,CBEQ,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnslr-",   XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnslr+",   XLOCB(19,BOFP,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnslr",    XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnsr",     XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnulr-",   XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnulr+",   XLOCB(19,BOFP,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnulr",    XLOCB(19,BOF,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnslrl-",  XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnslrl+",  XLOCB(19,BOFP,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnslrl",   XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnsrl",    XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bnulrl-",  XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnulrl+",  XLOCB(19,BOFP,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnulrl",   XLOCB(19,BOF,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
 {"bgelr-",   XLOCB(19,BOFM4,CBLT,16,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bnllr-",   XLOCB(19,BOFM4,CBLT,16,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bgelrl-",  XLOCB(19,BOFM4,CBLT,16,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
@@ -4823,44 +5095,44 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"bnulr+",   XLOCB(19,BOFP4,CBSO,16,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bnslrl+",  XLOCB(19,BOFP4,CBSO,16,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bnulrl+",  XLOCB(19,BOFP4,CBSO,16,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
-{"bltlr",    XLOCB(19,BOT,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
 {"bltlr-",   XLOCB(19,BOT,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bltr",     XLOCB(19,BOT,CBLT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bltlrl",   XLOCB(19,BOT,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bltlrl-",  XLOCB(19,BOT,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bltrl",    XLOCB(19,BOT,CBLT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bgtlr",    XLOCB(19,BOT,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bgtlr-",   XLOCB(19,BOT,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bgtr",     XLOCB(19,BOT,CBGT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bgtlrl",   XLOCB(19,BOT,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bgtlrl-",  XLOCB(19,BOT,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bgtrl",    XLOCB(19,BOT,CBGT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"beqlr",    XLOCB(19,BOT,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"beqlr-",   XLOCB(19,BOT,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"beqr",     XLOCB(19,BOT,CBEQ,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"beqlrl",   XLOCB(19,BOT,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"beqlrl-",  XLOCB(19,BOT,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"beqrl",    XLOCB(19,BOT,CBEQ,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bsolr",    XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bsolr-",   XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bsor",     XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bunlr",    XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bunlr-",   XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bsolrl",   XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bsolrl-",  XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bsorl",    XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
-{"bunlrl",   XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bunlrl-",  XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bltlr+",   XLOCB(19,BOTP,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bltlr",    XLOCB(19,BOT,CBLT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bltr",     XLOCB(19,BOT,CBLT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bltlrl-",  XLOCB(19,BOT,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bltlrl+",  XLOCB(19,BOTP,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bltlrl",   XLOCB(19,BOT,CBLT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bltrl",    XLOCB(19,BOT,CBLT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bgtlr-",   XLOCB(19,BOT,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bgtlr+",   XLOCB(19,BOTP,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bgtlr",    XLOCB(19,BOT,CBGT,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bgtr",     XLOCB(19,BOT,CBGT,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bgtlrl-",  XLOCB(19,BOT,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bgtlrl+",  XLOCB(19,BOTP,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bgtlrl",   XLOCB(19,BOT,CBGT,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bgtrl",    XLOCB(19,BOT,CBGT,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"beqlr-",   XLOCB(19,BOT,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"beqlr+",   XLOCB(19,BOTP,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"beqlr",    XLOCB(19,BOT,CBEQ,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"beqr",     XLOCB(19,BOT,CBEQ,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"beqlrl-",  XLOCB(19,BOT,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"beqlrl+",  XLOCB(19,BOTP,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"beqlrl",   XLOCB(19,BOT,CBEQ,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"beqrl",    XLOCB(19,BOT,CBEQ,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bsolr-",   XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bsolr+",   XLOCB(19,BOTP,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bsolr",    XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bsor",     XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bunlr-",   XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bunlr+",   XLOCB(19,BOTP,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bunlr",    XLOCB(19,BOT,CBSO,16,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bsolrl-",  XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bsolrl+",  XLOCB(19,BOTP,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bsolrl",   XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bsorl",    XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PWRCOM,	 PPCVLE,	{CR}},
+{"bunlrl-",  XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bunlrl+",  XLOCB(19,BOTP,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bunlrl",   XLOCB(19,BOT,CBSO,16,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
 {"bltlr-",   XLOCB(19,BOTM4,CBLT,16,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bltlrl-",  XLOCB(19,BOTM4,CBLT,16,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bgtlr-",   XLOCB(19,BOTM4,CBGT,16,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
@@ -4882,63 +5154,63 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"bsolrl+",  XLOCB(19,BOTP4,CBSO,16,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bunlrl+",  XLOCB(19,BOTP4,CBSO,16,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 
-{"bdnzflr",  XLO(19,BODNZF,16,0),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"bdnzflr-", XLO(19,BODNZF,16,0),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bdnzflrl", XLO(19,BODNZF,16,1),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
-{"bdnzflrl-",XLO(19,BODNZF,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bdnzflr+", XLO(19,BODNZFP,16,0),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"bdnzflr",  XLO(19,BODNZF,16,0),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bdnzflrl-",XLO(19,BODNZF,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bdnzflrl+",XLO(19,BODNZFP,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bdzflr",   XLO(19,BODZF,16,0),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bdnzflrl", XLO(19,BODNZF,16,1),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"bdzflr-",  XLO(19,BODZF,16,0),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bdzflrl",  XLO(19,BODZF,16,1),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
-{"bdzflrl-", XLO(19,BODZF,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bdzflr+",  XLO(19,BODZFP,16,0),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"bdzflr",   XLO(19,BODZF,16,0),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bdzflrl-", XLO(19,BODZF,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bdzflrl+", XLO(19,BODZFP,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bflr",     XLO(19,BOF,16,0),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bdzflrl",  XLO(19,BODZF,16,1),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"bflr-",    XLO(19,BOF,16,0),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bbfr",     XLO(19,BOF,16,0),		XLBOBB_MASK,   PWRCOM,	 PPCVLE,	{BI}},
-{"bflrl",    XLO(19,BOF,16,1),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
-{"bflrl-",   XLO(19,BOF,16,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bbfrl",    XLO(19,BOF,16,1),		XLBOBB_MASK,   PWRCOM,	 PPCVLE,	{BI}},
 {"bflr+",    XLO(19,BOFP,16,0),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"bflr",     XLO(19,BOF,16,0),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bbfr",     XLO(19,BOF,16,0),		XLBOBB_MASK,   PWRCOM,	 PPCVLE,	{BI}},
+{"bflrl-",   XLO(19,BOF,16,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bflrl+",   XLO(19,BOFP,16,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"bflrl",    XLO(19,BOF,16,1),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bbfrl",    XLO(19,BOF,16,1),		XLBOBB_MASK,   PWRCOM,	 PPCVLE,	{BI}},
 {"bflr-",    XLO(19,BOFM4,16,0),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"bflrl-",   XLO(19,BOFM4,16,1),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"bflr+",    XLO(19,BOFP4,16,0),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"bflrl+",   XLO(19,BOFP4,16,1),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
-{"bdnztlr",  XLO(19,BODNZT,16,0),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"bdnztlr-", XLO(19,BODNZT,16,0),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bdnztlrl", XLO(19,BODNZT,16,1),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
-{"bdnztlrl-", XLO(19,BODNZT,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bdnztlr+", XLO(19,BODNZTP,16,0),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"bdnztlr",  XLO(19,BODNZT,16,0),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bdnztlrl-", XLO(19,BODNZT,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bdnztlrl+", XLO(19,BODNZTP,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bdztlr",   XLO(19,BODZT,16,0),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bdnztlrl", XLO(19,BODNZT,16,1),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"bdztlr-",  XLO(19,BODZT,16,0),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bdztlrl",  XLO(19,BODZT,16,1),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
-{"bdztlrl-", XLO(19,BODZT,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bdztlr+",  XLO(19,BODZTP,16,0),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"bdztlr",   XLO(19,BODZT,16,0),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bdztlrl-", XLO(19,BODZT,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bdztlrl+", XLO(19,BODZTP,16,1),	XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"btlr",     XLO(19,BOT,16,0),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bdztlrl",  XLO(19,BODZT,16,1),	XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"btlr-",    XLO(19,BOT,16,0),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bbtr",     XLO(19,BOT,16,0),		XLBOBB_MASK,   PWRCOM,	 PPCVLE,	{BI}},
-{"btlrl",    XLO(19,BOT,16,1),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
-{"btlrl-",   XLO(19,BOT,16,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bbtrl",    XLO(19,BOT,16,1),		XLBOBB_MASK,   PWRCOM,	 PPCVLE,	{BI}},
 {"btlr+",    XLO(19,BOTP,16,0),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"btlr",     XLO(19,BOT,16,0),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bbtr",     XLO(19,BOT,16,0),		XLBOBB_MASK,   PWRCOM,	 PPCVLE,	{BI}},
+{"btlrl-",   XLO(19,BOT,16,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"btlrl+",   XLO(19,BOTP,16,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"btlrl",    XLO(19,BOT,16,1),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bbtrl",    XLO(19,BOT,16,1),		XLBOBB_MASK,   PWRCOM,	 PPCVLE,	{BI}},
 {"btlr-",    XLO(19,BOTM4,16,0),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"btlrl-",   XLO(19,BOTM4,16,1),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"btlr+",    XLO(19,BOTP4,16,0),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"btlrl+",   XLO(19,BOTP4,16,1),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 
-{"bclr-",    XLYLK(19,16,0,0),		XLYBB_MASK,    PPCCOM,	 PPCVLE,	{BOE, BI}},
-{"bclrl-",   XLYLK(19,16,0,1),		XLYBB_MASK,    PPCCOM,	 PPCVLE,	{BOE, BI}},
-{"bclr+",    XLYLK(19,16,1,0),		XLYBB_MASK,    PPCCOM,	 PPCVLE,	{BOE, BI}},
-{"bclrl+",   XLYLK(19,16,1,1),		XLYBB_MASK,    PPCCOM,	 PPCVLE,	{BOE, BI}},
+{"bclr-",    XLLK(19,16,0),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BOM, BI, BH}},
+{"bclr+",    XLLK(19,16,0),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BOP, BI, BH}},
 {"bclr",     XLLK(19,16,0),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BO, BI, BH}},
-{"bcr",	     XLLK(19,16,0),		XLBB_MASK,     PWRCOM,	 PPCVLE,	{BO, BI}},
+{"bcr",	     XLLK(19,16,0),		XLBH_MASK,     PWRCOM,	 PPCVLE,	{BO, BI, BH}},
+{"bclrl-",   XLLK(19,16,1),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BOM, BI, BH}},
+{"bclrl+",   XLLK(19,16,1),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BOP, BI, BH}},
 {"bclrl",    XLLK(19,16,1),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BO, BI, BH}},
-{"bcrl",     XLLK(19,16,1),		XLBB_MASK,     PWRCOM,	 PPCVLE,	{BO, BI}},
+{"bcrl",     XLLK(19,16,1),		XLBH_MASK,     PWRCOM,	 PPCVLE,	{BO, BI, BH}},
 
 {"rfid",	XL(19,18),	0xffffffff,  PPC64,	PPCVLE,	{0}},
 
@@ -4994,48 +5266,48 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"bctr",    XLO(19,BOU,528,0),		XLBOBIBB_MASK, COM,	 PPCVLE,	{0}},
 {"bctrl",   XLO(19,BOU,528,1),		XLBOBIBB_MASK, COM,	 PPCVLE,	{0}},
 
-{"bgectr",  XLOCB(19,BOF,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
 {"bgectr-", XLOCB(19,BOF,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnlctr",  XLOCB(19,BOF,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnlctr-", XLOCB(19,BOF,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bgectrl", XLOCB(19,BOF,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bgectrl-",XLOCB(19,BOF,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnlctrl", XLOCB(19,BOF,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnlctrl-",XLOCB(19,BOF,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"blectr",  XLOCB(19,BOF,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"blectr-", XLOCB(19,BOF,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bngctr",  XLOCB(19,BOF,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bngctr-", XLOCB(19,BOF,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"blectrl", XLOCB(19,BOF,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"blectrl-",XLOCB(19,BOF,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bngctrl", XLOCB(19,BOF,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bngctrl-",XLOCB(19,BOF,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnectr",  XLOCB(19,BOF,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnectr-", XLOCB(19,BOF,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnectrl", XLOCB(19,BOF,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnectrl-",XLOCB(19,BOF,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnsctr",  XLOCB(19,BOF,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnsctr-", XLOCB(19,BOF,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnuctr",  XLOCB(19,BOF,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnuctr-", XLOCB(19,BOF,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnsctrl", XLOCB(19,BOF,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnsctrl-",XLOCB(19,BOF,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bnuctrl", XLOCB(19,BOF,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bnuctrl-",XLOCB(19,BOF,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bgectr+", XLOCB(19,BOFP,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bgectr",  XLOCB(19,BOF,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnlctr-", XLOCB(19,BOF,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnlctr+", XLOCB(19,BOFP,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnlctr",  XLOCB(19,BOF,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bgectrl-",XLOCB(19,BOF,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bgectrl+",XLOCB(19,BOFP,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bgectrl", XLOCB(19,BOF,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnlctrl-",XLOCB(19,BOF,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnlctrl+",XLOCB(19,BOFP,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnlctrl", XLOCB(19,BOF,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"blectr-", XLOCB(19,BOF,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"blectr+", XLOCB(19,BOFP,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"blectr",  XLOCB(19,BOF,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bngctr-", XLOCB(19,BOF,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bngctr+", XLOCB(19,BOFP,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bngctr",  XLOCB(19,BOF,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"blectrl-",XLOCB(19,BOF,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"blectrl+",XLOCB(19,BOFP,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"blectrl", XLOCB(19,BOF,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bngctrl-",XLOCB(19,BOF,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bngctrl+",XLOCB(19,BOFP,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bngctrl", XLOCB(19,BOF,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnectr-", XLOCB(19,BOF,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnectr+", XLOCB(19,BOFP,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnectr",  XLOCB(19,BOF,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnectrl-",XLOCB(19,BOF,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnectrl+",XLOCB(19,BOFP,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnectrl", XLOCB(19,BOF,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnsctr-", XLOCB(19,BOF,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnsctr+", XLOCB(19,BOFP,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnsctr",  XLOCB(19,BOF,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnuctr-", XLOCB(19,BOF,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnuctr+", XLOCB(19,BOFP,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnuctr",  XLOCB(19,BOF,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnsctrl-",XLOCB(19,BOF,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnsctrl+",XLOCB(19,BOFP,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnsctrl", XLOCB(19,BOF,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bnuctrl-",XLOCB(19,BOF,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bnuctrl+",XLOCB(19,BOFP,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bnuctrl", XLOCB(19,BOF,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
 {"bgectr-", XLOCB(19,BOFM4,CBLT,528,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bnlctr-", XLOCB(19,BOFM4,CBLT,528,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bgectrl-",XLOCB(19,BOFM4,CBLT,528,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
@@ -5064,36 +5336,36 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"bnuctr+", XLOCB(19,BOFP4,CBSO,528,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bnsctrl+",XLOCB(19,BOFP4,CBSO,528,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bnuctrl+",XLOCB(19,BOFP4,CBSO,528,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
-{"bltctr",  XLOCB(19,BOT,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
 {"bltctr-", XLOCB(19,BOT,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bltctrl", XLOCB(19,BOT,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bltctrl-",XLOCB(19,BOT,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bgtctr",  XLOCB(19,BOT,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bgtctr-", XLOCB(19,BOT,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bgtctrl", XLOCB(19,BOT,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bgtctrl-",XLOCB(19,BOT,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"beqctr",  XLOCB(19,BOT,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"beqctr-", XLOCB(19,BOT,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"beqctrl", XLOCB(19,BOT,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"beqctrl-",XLOCB(19,BOT,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bsoctr",  XLOCB(19,BOT,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bsoctr-", XLOCB(19,BOT,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bunctr",  XLOCB(19,BOT,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bunctr-", XLOCB(19,BOT,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bsoctrl", XLOCB(19,BOT,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bsoctrl-",XLOCB(19,BOT,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
-{"bunctrl", XLOCB(19,BOT,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
-{"bunctrl-",XLOCB(19,BOT,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bltctr+", XLOCB(19,BOTP,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bltctr",  XLOCB(19,BOT,CBLT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bltctrl-",XLOCB(19,BOT,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bltctrl+",XLOCB(19,BOTP,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bltctrl", XLOCB(19,BOT,CBLT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bgtctr-", XLOCB(19,BOT,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bgtctr+", XLOCB(19,BOTP,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bgtctr",  XLOCB(19,BOT,CBGT,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bgtctrl-",XLOCB(19,BOT,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bgtctrl+",XLOCB(19,BOTP,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bgtctrl", XLOCB(19,BOT,CBGT,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"beqctr-", XLOCB(19,BOT,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"beqctr+", XLOCB(19,BOTP,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"beqctr",  XLOCB(19,BOT,CBEQ,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"beqctrl-",XLOCB(19,BOT,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"beqctrl+",XLOCB(19,BOTP,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"beqctrl", XLOCB(19,BOT,CBEQ,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bsoctr-", XLOCB(19,BOT,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bsoctr+", XLOCB(19,BOTP,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bsoctr",  XLOCB(19,BOT,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bunctr-", XLOCB(19,BOT,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bunctr+", XLOCB(19,BOTP,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bunctr",  XLOCB(19,BOT,CBSO,528,0),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bsoctrl-",XLOCB(19,BOT,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bsoctrl+",XLOCB(19,BOTP,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bsoctrl", XLOCB(19,BOT,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
+{"bunctrl-",XLOCB(19,BOT,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
 {"bunctrl+",XLOCB(19,BOTP,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 ISA_V2|PPCVLE,	{CR}},
+{"bunctrl", XLOCB(19,BOT,CBSO,528,1),	XLBOCBBB_MASK, PPCCOM,	 PPCVLE,	{CR}},
 {"bltctr-", XLOCB(19,BOTM4,CBLT,528,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bltctrl-",XLOCB(19,BOTM4,CBLT,528,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bgtctr-", XLOCB(19,BOTM4,CBGT,528,0),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
@@ -5115,41 +5387,153 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"bsoctrl+",XLOCB(19,BOTP4,CBSO,528,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 {"bunctrl+",XLOCB(19,BOTP4,CBSO,528,1),	XLBOCBBB_MASK, ISA_V2,	 PPCVLE,	{CR}},
 
-{"bfctr",   XLO(19,BOF,528,0),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"bfctr-",  XLO(19,BOF,528,0),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"bfctrl",  XLO(19,BOF,528,1),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
-{"bfctrl-", XLO(19,BOF,528,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bfctr+",  XLO(19,BOFP,528,0),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"bfctr",   XLO(19,BOF,528,0),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"bfctrl-", XLO(19,BOF,528,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"bfctrl+", XLO(19,BOFP,528,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"bfctrl",  XLO(19,BOF,528,1),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"bfctr-",  XLO(19,BOFM4,528,0),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"bfctrl-", XLO(19,BOFM4,528,1),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"bfctr+",  XLO(19,BOFP4,528,0),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"bfctrl+", XLO(19,BOFP4,528,1),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
-{"btctr",   XLO(19,BOT,528,0),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"btctr-",  XLO(19,BOT,528,0),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
-{"btctrl",  XLO(19,BOT,528,1),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
-{"btctrl-", XLO(19,BOT,528,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"btctr+",  XLO(19,BOTP,528,0),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"btctr",   XLO(19,BOT,528,0),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
+{"btctrl-", XLO(19,BOT,528,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
 {"btctrl+", XLO(19,BOTP,528,1),		XLBOBB_MASK,   PPCCOM,	 ISA_V2|PPCVLE,	{BI}},
+{"btctrl",  XLO(19,BOT,528,1),		XLBOBB_MASK,   PPCCOM,	 PPCVLE,	{BI}},
 {"btctr-",  XLO(19,BOTM4,528,0),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"btctrl-", XLO(19,BOTM4,528,1),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"btctr+",  XLO(19,BOTP4,528,0),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 {"btctrl+", XLO(19,BOTP4,528,1),	XLBOBB_MASK,   ISA_V2,	 PPCVLE,	{BI}},
 
-{"bcctr-",  XLYLK(19,528,0,0),		XLYBB_MASK,    PPCCOM,	 PPCVLE,	{BOE, BI}},
-{"bcctrl-", XLYLK(19,528,0,1),		XLYBB_MASK,    PPCCOM,	 PPCVLE,	{BOE, BI}},
-{"bcctr+",  XLYLK(19,528,1,0),		XLYBB_MASK,    PPCCOM,	 PPCVLE,	{BOE, BI}},
-{"bcctrl+", XLYLK(19,528,1,1),		XLYBB_MASK,    PPCCOM,	 PPCVLE,	{BOE, BI}},
+{"bcctr-",  XLLK(19,528,0),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BOM, BI, BH}},
+{"bcctr+",  XLLK(19,528,0),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BOP, BI, BH}},
 {"bcctr",   XLLK(19,528,0),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BO, BI, BH}},
-{"bcc",	    XLLK(19,528,0),		XLBB_MASK,     PWRCOM,	 PPCVLE,	{BO, BI}},
+{"bcc",	    XLLK(19,528,0),		XLBH_MASK,     PWRCOM,	 PPCVLE,	{BO, BI, BH}},
+{"bcctrl-", XLLK(19,528,1),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BOM, BI, BH}},
+{"bcctrl+", XLLK(19,528,1),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BOP, BI, BH}},
 {"bcctrl",  XLLK(19,528,1),		XLBH_MASK,     PPCCOM,	 PPCVLE,	{BO, BI, BH}},
-{"bccl",    XLLK(19,528,1),		XLBB_MASK,     PWRCOM,	 PPCVLE,	{BO, BI}},
+{"bccl",    XLLK(19,528,1),		XLBH_MASK,     PWRCOM,	 PPCVLE,	{BO, BI, BH}},
 
-{"bctar-",  XLYLK(19,560,0,0),		XLYBB_MASK,    POWER8,	 PPCVLE,	{BOE, BI}},
-{"bctarl-", XLYLK(19,560,0,1),		XLYBB_MASK,    POWER8,	 PPCVLE,	{BOE, BI}},
-{"bctar+",  XLYLK(19,560,1,0),		XLYBB_MASK,    POWER8,	 PPCVLE,	{BOE, BI}},
-{"bctarl+", XLYLK(19,560,1,1),		XLYBB_MASK,    POWER8,	 PPCVLE,	{BOE, BI}},
+{"bdnztar",   XLO(19,BODNZ,560,0),	XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdnztarl",  XLO(19,BODNZ,560,1),	XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdztar",    XLO(19,BODZ,560,0),	XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdztarl",   XLO(19,BODZ,560,1),	XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"btar",      XLO(19,BOU,560,0),	XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"btarl",     XLO(19,BOU,560,1),	XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdnztar-",  XLO(19,BODNZM4,560,0),    XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdnztarl-", XLO(19,BODNZM4,560,1),    XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdnztar+",  XLO(19,BODNZP4,560,0),    XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdnztarl+", XLO(19,BODNZP4,560,1),    XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdztar-",   XLO(19,BODZM4,560,0),     XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdztarl-",  XLO(19,BODZM4,560,1),     XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdztar+",   XLO(19,BODZP4,560,0),     XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+{"bdztarl+",  XLO(19,BODZP4,560,1),     XLBOBIBB_MASK, POWER8,   PPCVLE,	{0}},
+
+{"bgetar",  XLOCB(19,BOF,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnltar",  XLOCB(19,BOF,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgetarl", XLOCB(19,BOF,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnltarl", XLOCB(19,BOF,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bletar",  XLOCB(19,BOF,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bngtar",  XLOCB(19,BOF,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bletarl", XLOCB(19,BOF,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bngtarl", XLOCB(19,BOF,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnetar",  XLOCB(19,BOF,CBEQ,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnetarl", XLOCB(19,BOF,CBEQ,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnstar",  XLOCB(19,BOF,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnutar",  XLOCB(19,BOF,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnstarl", XLOCB(19,BOF,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnutarl", XLOCB(19,BOF,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgetar-", XLOCB(19,BOFM4,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnltar-", XLOCB(19,BOFM4,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgetarl-",XLOCB(19,BOFM4,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnltarl-",XLOCB(19,BOFM4,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bletar-", XLOCB(19,BOFM4,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bngtar-", XLOCB(19,BOFM4,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bletarl-",XLOCB(19,BOFM4,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bngtarl-",XLOCB(19,BOFM4,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnetar-", XLOCB(19,BOFM4,CBEQ,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnetarl-",XLOCB(19,BOFM4,CBEQ,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnstar-", XLOCB(19,BOFM4,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnutar-", XLOCB(19,BOFM4,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnstarl-",XLOCB(19,BOFM4,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnutarl-",XLOCB(19,BOFM4,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgetar+", XLOCB(19,BOFP4,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnltar+", XLOCB(19,BOFP4,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgetarl+",XLOCB(19,BOFP4,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnltarl+",XLOCB(19,BOFP4,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bletar+", XLOCB(19,BOFP4,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bngtar+", XLOCB(19,BOFP4,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bletarl+",XLOCB(19,BOFP4,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bngtarl+",XLOCB(19,BOFP4,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnetar+", XLOCB(19,BOFP4,CBEQ,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnetarl+",XLOCB(19,BOFP4,CBEQ,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnstar+", XLOCB(19,BOFP4,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnutar+", XLOCB(19,BOFP4,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnstarl+",XLOCB(19,BOFP4,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bnutarl+",XLOCB(19,BOFP4,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"blttar",  XLOCB(19,BOT,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"blttarl", XLOCB(19,BOT,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgttar",  XLOCB(19,BOT,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgttarl", XLOCB(19,BOT,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"beqtar",  XLOCB(19,BOT,CBEQ,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"beqtarl", XLOCB(19,BOT,CBEQ,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bsotar",  XLOCB(19,BOT,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"buntar",  XLOCB(19,BOT,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bsotarl", XLOCB(19,BOT,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"buntarl", XLOCB(19,BOT,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"blttar-", XLOCB(19,BOTM4,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"blttarl-",XLOCB(19,BOTM4,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgttar-", XLOCB(19,BOTM4,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgttarl-",XLOCB(19,BOTM4,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"beqtar-", XLOCB(19,BOTM4,CBEQ,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"beqtarl-",XLOCB(19,BOTM4,CBEQ,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bsotar-", XLOCB(19,BOTM4,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"buntar-", XLOCB(19,BOTM4,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bsotarl-",XLOCB(19,BOTM4,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"buntarl-",XLOCB(19,BOTM4,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"blttar+", XLOCB(19,BOTP4,CBLT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"blttarl+",XLOCB(19,BOTP4,CBLT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgttar+", XLOCB(19,BOTP4,CBGT,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bgttarl+",XLOCB(19,BOTP4,CBGT,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"beqtar+", XLOCB(19,BOTP4,CBEQ,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"beqtarl+",XLOCB(19,BOTP4,CBEQ,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bsotar+", XLOCB(19,BOTP4,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"buntar+", XLOCB(19,BOTP4,CBSO,560,0),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"bsotarl+",XLOCB(19,BOTP4,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+{"buntarl+",XLOCB(19,BOTP4,CBSO,560,1),	XLBOCBBB_MASK, POWER8,	 PPCVLE,	{CR}},
+
+{"bdnzftar",  XLO(19,BODNZF,560,0),     XLBOBB_MASK,   POWER8,   PPCVLE,	{BI}},
+{"bdnzftarl", XLO(19,BODNZF,560,1),     XLBOBB_MASK,   POWER8,   PPCVLE,	{BI}},
+{"bdzftar",   XLO(19,BODZF,560,0),	XLBOBB_MASK,   POWER8,   PPCVLE,	{BI}},
+{"bdzftarl",  XLO(19,BODZF,560,1),	XLBOBB_MASK,   POWER8,   PPCVLE,	{BI}},
+
+{"bftar",     XLO(19,BOF,560,0),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bftarl",    XLO(19,BOF,560,1),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bftar-",    XLO(19,BOFM4,560,0),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bftarl-",   XLO(19,BOFM4,560,1),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bftar+",    XLO(19,BOFP4,560,0),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bftarl+",   XLO(19,BOFP4,560,1),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+
+{"bdnzttar",  XLO(19,BODNZT,560,0),     XLBOBB_MASK,   POWER8,   PPCVLE,	{BI}},
+{"bdnzttarl", XLO(19,BODNZT,560,1),     XLBOBB_MASK,   POWER8,   PPCVLE,	{BI}},
+{"bdzttar",   XLO(19,BODZT,560,0),	XLBOBB_MASK,   POWER8,   PPCVLE,	{BI}},
+{"bdzttarl",  XLO(19,BODZT,560,1),	XLBOBB_MASK,   POWER8,   PPCVLE,	{BI}},
+
+{"bttar",     XLO(19,BOT,560,0),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bttarl",    XLO(19,BOT,560,1),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bttar-",    XLO(19,BOTM4,560,0),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bttarl-",   XLO(19,BOTM4,560,1),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bttar+",    XLO(19,BOTP4,560,0),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+{"bttarl+",   XLO(19,BOTP4,560,1),	XLBOBB_MASK,   POWER8,	 PPCVLE,	{BI}},
+
+{"bctar-",  XLLK(19,560,0),		XLBH_MASK,     POWER8,	 PPCVLE,	{BOM, BI, BH}},
+{"bctar+",  XLLK(19,560,0),		XLBH_MASK,     POWER8,	 PPCVLE,	{BOP, BI, BH}},
 {"bctar",   XLLK(19,560,0),		XLBH_MASK,     POWER8,	 PPCVLE,	{BO, BI, BH}},
+{"bctarl-", XLLK(19,560,1),		XLBH_MASK,     POWER8,	 PPCVLE,	{BOM, BI, BH}},
+{"bctarl+", XLLK(19,560,1),		XLBH_MASK,     POWER8,	 PPCVLE,	{BOP, BI, BH}},
 {"bctarl",  XLLK(19,560,1),		XLBH_MASK,     POWER8,	 PPCVLE,	{BO, BI, BH}},
 
 {"rlwimi",	M(20,0),	M_MASK,	     PPCCOM,	PPCVLE,		{RA, RS, SH, MBE, ME}},
@@ -5697,8 +6081,6 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"tlbi",	X(31,306),	XRT_MASK,    POWER,	0,		{RA0, RB}},
 
 {"mfvsrld",	X(31,307),	XX1RB_MASK,  PPCVSX3,	0,		{RA, XS6}},
-
-{"ldmx",	X(31,309),	X_MASK,	     POWER9,	0,		{RT, RA0, RB}},
 
 {"eciwx",	X(31,310),	X_MASK,	     PPC,	E500|TITAN,	{RT, RA0, RB}},
 
@@ -7381,8 +7763,8 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 
 {"xsrqpxp",	Z(63,37),	Z2_MASK,     PPCVSX3,	PPCVLE,		{R, VD, VB, RMC}},
 
-{"mtfsb1",	XRC(63,38,0),	XRARB_MASK,  COM,	PPCVLE,		{BT}},
-{"mtfsb1.",	XRC(63,38,1),	XRARB_MASK,  COM,	PPCVLE,		{BT}},
+{"mtfsb1",	XRC(63,38,0),	XRARB_MASK,  COM,	PPCVLE,		{BTF}},
+{"mtfsb1.",	XRC(63,38,1),	XRARB_MASK,  COM,	PPCVLE,		{BTF}},
 
 {"fneg",	XRC(63,40,0),	XRA_MASK,    COM,	PPCEFS|PPCVLE,	{FRT, FRB}},
 {"fneg.",	XRC(63,40,1),	XRA_MASK,    COM,	PPCEFS|PPCVLE,	{FRT, FRB}},
@@ -7395,8 +7777,8 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 {"dquaiq",	ZRC(63,67,0), Z2_MASK|Q_MASK, POWER6,	PPCVLE,		{TE, FRTp, FRBp, RMC}},
 {"dquaiq.",	ZRC(63,67,1), Z2_MASK|Q_MASK, POWER6,	PPCVLE,		{TE, FRTp, FRBp, RMC}},
 
-{"mtfsb0",	XRC(63,70,0),	XRARB_MASK,  COM,	PPCVLE,		{BT}},
-{"mtfsb0.",	XRC(63,70,1),	XRARB_MASK,  COM,	PPCVLE,		{BT}},
+{"mtfsb0",	XRC(63,70,0),	XRARB_MASK,  COM,	PPCVLE,		{BTF}},
+{"mtfsb0.",	XRC(63,70,1),	XRARB_MASK,  COM,	PPCVLE,		{BTF}},
 
 {"fmr",		XRC(63,72,0),	XRA_MASK,    COM,	PPCEFS|PPCVLE,	{FRT, FRB}},
 {"fmr.",	XRC(63,72,1),	XRA_MASK,    COM,	PPCEFS|PPCVLE,	{FRT, FRB}},
@@ -7578,6 +7960,43 @@ const struct powerpc_opcode powerpc_opcodes[] = {
 
 const unsigned int powerpc_num_opcodes =
   sizeof (powerpc_opcodes) / sizeof (powerpc_opcodes[0]);
+
+/* The opcode table for 8-byte prefix instructions.
+
+   The format of this opcode table is the same as the main opcode table.  */
+
+const struct powerpc_opcode prefix_opcodes[] = {
+{"pnop",	  PMRR,		       PREFIX_MASK,	POWERXX, 0,	{0}},
+{"pli",		  PMLS|OP(14),	       P_DRAPCREL_MASK,	POWERXX, 0,	{RT, SI34}},
+{"paddi",	  PMLS|OP(14),	       P_D_MASK,	POWERXX, 0,	{RT, RA0, SI34, PCREL0}},
+{"psubi",	  PMLS|OP(14),	       P_D_MASK,	POWERXX, 0,	{RT, RA0, NSI34, PCREL0}},
+{"pla",		  PMLS|OP(14),	       P_D_MASK,	POWERXX, 0,	{RT, D34, PRA0, PCREL}},
+{"plwz",	  PMLS|OP(32),	       P_D_MASK,	POWERXX, 0,	{RT, D34, PRA0, PCREL}},
+{"plbz",	  PMLS|OP(34),	       P_D_MASK,	POWERXX, 0,	{RT, D34, PRA0, PCREL}},
+{"pstw",	  PMLS|OP(36),	       P_D_MASK,	POWERXX, 0,	{RS, D34, PRA0, PCREL}},
+{"pstb",	  PMLS|OP(38),	       P_D_MASK,	POWERXX, 0,	{RS, D34, PRA0, PCREL}},
+{"plhz",	  PMLS|OP(40),	       P_D_MASK,	POWERXX, 0,	{RT, D34, PRA0, PCREL}},
+{"plwa",	  P8LS|OP(41),	       P_D_MASK,	POWERXX, 0,	{RT, D34, PRA0, PCREL}},
+{"plxsd",	  P8LS|OP(42),	       P_D_MASK,	POWERXX, 0,	{VD, D34, PRA0, PCREL}},
+{"plha",	  PMLS|OP(42),	       P_D_MASK,	POWERXX, 0,	{RT, D34, PRA0, PCREL}},
+{"plxssp",	  P8LS|OP(43),	       P_D_MASK,	POWERXX, 0,	{VD, D34, PRA0, PCREL}},
+{"psth",	  PMLS|OP(44),	       P_D_MASK,	POWERXX, 0,	{RS, D34, PRA0, PCREL}},
+{"pstxsd",	  P8LS|OP(46),	       P_D_MASK,	POWERXX, 0,	{VS, D34, PRA0, PCREL}},
+{"pstxssp",	  P8LS|OP(47),	       P_D_MASK,	POWERXX, 0,	{VS, D34, PRA0, PCREL}},
+{"plfs",	  PMLS|OP(48),	       P_D_MASK,	POWERXX, 0,	{FRT, D34, PRA0, PCREL}},
+{"plxv",	  P8LS|OP(50),	       P_D_MASK&~OP(1),	POWERXX, 0,	{XTOP, D34, PRA0, PCREL}},
+{"plfd",	  PMLS|OP(50),	       P_D_MASK,	POWERXX, 0,	{FRT, D34, PRA0, PCREL}},
+{"pstfs",	  PMLS|OP(52),	       P_D_MASK,	POWERXX, 0,	{FRS, D34, PRA0, PCREL}},
+{"pstxv",	  P8LS|OP(54),	       P_D_MASK&~OP(1),	POWERXX, 0,	{XTOP, D34, PRA0, PCREL}},
+{"pstfd",	  PMLS|OP(54),	       P_D_MASK,	POWERXX, 0,	{FRS, D34, PRA0, PCREL}},
+{"plq",		  P8LS|OP(56),	       P_D_MASK,	POWERXX, 0,	{RTQ, D34, PRAQ, PCREL}},
+{"pld",		  P8LS|OP(57),	       P_D_MASK,	POWERXX, 0,	{RT, D34, PRA0, PCREL}},
+{"pstq",	  P8LS|OP(60),	       P_D_MASK,	POWERXX, 0,	{RSQ, D34, PRA0, PCREL}},
+{"pstd",	  P8LS|OP(61),	       P_D_MASK,	POWERXX, 0,	{RS, D34, PRA0, PCREL}},
+};
+
+const unsigned int prefix_num_opcodes =
+  sizeof (prefix_opcodes) / sizeof (prefix_opcodes[0]);
 
 /* The VLE opcode table.
 

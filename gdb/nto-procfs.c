@@ -1,7 +1,7 @@
 /* Machine independent support for QNX Neutrino /proc (process file system)
    for GDB.  Written by Colin Burgess at QNX Software Systems Limited.
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2020 Free Software Foundation, Inc.
 
    Contributed by QNX Software Systems Ltd.
 
@@ -42,8 +42,8 @@
 #include "regcache.h"
 #include "solib.h"
 #include "inf-child.h"
-#include "common/filestuff.h"
-#include "common/scoped_fd.h"
+#include "gdbsupport/filestuff.h"
+#include "gdbsupport/scoped_fd.h"
 
 #define NULL_PID		0
 #define _DEBUG_FLAG_TRACE	(_DEBUG_FLAG_TRACE_EXEC|_DEBUG_FLAG_TRACE_RD|\
@@ -115,7 +115,7 @@ struct nto_procfs_target : public inf_child_target
 
   void update_thread_list () override;
 
-  const char *pid_to_str (ptid_t) override;
+  std::string pid_to_str (ptid_t) override;
 
   void interrupt () override;
 
@@ -409,7 +409,7 @@ nto_procfs_target::update_thread_list ()
 	   (e.g. thread exited).  */
 	continue;
       ptid = ptid_t (pid, 0, tid);
-      new_thread = find_thread_ptid (ptid);
+      new_thread = find_thread_ptid (this, ptid);
       if (!new_thread)
 	new_thread = add_thread (ptid);
       update_thread_private_data (new_thread, tid, status.state, 0);
@@ -605,7 +605,7 @@ procfs_meminfo (const char *args, int from_tty)
 	      if (strcmp (map.info.path, printme.name))
 		continue;
 
-	      /* Lower debug_vaddr is always text, if nessessary, swap.  */
+	      /* Lower debug_vaddr is always text, if necessary, swap.  */
 	      if ((int) map.info.vaddr < (int) printme.text.debug_vaddr)
 		{
 		  memcpy (&(printme.data), &(printme.text),
@@ -658,7 +658,7 @@ nto_procfs_target::files_info ()
 
   printf_unfiltered ("\tUsing the running image of %s %s via %s.\n",
 		     inf->attach_flag ? "attached" : "child",
-		     target_pid_to_str (inferior_ptid),
+		     target_pid_to_str (inferior_ptid).c_str (),
 		     (nodestr != NULL) ? nodestr : "local node");
 }
 
@@ -693,7 +693,6 @@ nto_procfs_target::pid_to_exec_file (const int pid)
 void
 nto_procfs_target::attach (const char *args, int from_tty)
 {
-  char *exec_file;
   int pid;
   struct inferior *inf;
 
@@ -704,14 +703,14 @@ nto_procfs_target::attach (const char *args, int from_tty)
 
   if (from_tty)
     {
-      exec_file = (char *) get_exec_file (0);
+      const char *exec_file = get_exec_file (0);
 
       if (exec_file)
 	printf_unfiltered ("Attaching to program `%s', %s\n", exec_file,
-			   target_pid_to_str (ptid_t (pid)));
+			   target_pid_to_str (ptid_t (pid)).c_str ());
       else
 	printf_unfiltered ("Attaching to %s\n",
-			   target_pid_to_str (ptid_t (pid)));
+			   target_pid_to_str (ptid_t (pid)).c_str ());
     }
   inferior_ptid = do_attach (ptid_t (pid));
   inf = current_inferior ();
@@ -1215,7 +1214,7 @@ nto_procfs_target::create_inferior (const char *exec_file,
 
   argv = xmalloc ((allargs.size () / (unsigned) 2 + 2) *
 		  sizeof (*argv));
-  argv[0] = get_exec_file (1);
+  argv[0] = const_cast<char *> (get_exec_file (1));
   if (!argv[0])
     {
       if (exec_file)
@@ -1317,7 +1316,7 @@ nto_procfs_target::create_inferior (const char *exec_file,
     {
       /* FIXME: expected warning?  */
       /* warning( "Failed to set Kill-on-Last-Close flag: errno = %d(%s)\n",
-         errn, strerror(errn) ); */
+         errn, safe_strerror(errn) ); */
     }
   if (!target_is_pushed (ops))
     push_target (ops);
@@ -1455,17 +1454,14 @@ nto_procfs_target::pass_signals
     }
 }
 
-char *
+std::string
 nto_procfs_target::pid_to_str (ptid_t ptid)
 {
-  static char buf[1024];
-  int pid, tid, n;
+  int pid, tid;
   struct tidinfo *tip;
 
   pid = ptid.pid ();
   tid = ptid.tid ();
-
-  n = snprintf (buf, 1023, "process %d", pid);
 
 #if 0				/* NYI */
   tip = procfs_thread_info (pid, tid);
@@ -1473,7 +1469,7 @@ nto_procfs_target::pid_to_str (ptid_t ptid)
     snprintf (&buf[n], 1023, " (state = 0x%02x)", tip->state);
 #endif
 
-  return buf;
+  return string_printf ("process %d", pid);
 }
 
 /* to_can_run implementation for "target procfs".  Note this really
@@ -1509,8 +1505,9 @@ init_procfs_targets (void)
 
 #define OSTYPE_NTO 1
 
+void _initialize_procfs ();
 void
-_initialize_procfs (void)
+_initialize_procfs ()
 {
   sigset_t set;
 

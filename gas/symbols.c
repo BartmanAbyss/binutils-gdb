@@ -1,5 +1,5 @@
 /* symbols.c -symbol table-
-   Copyright (C) 1987-2019 Free Software Foundation, Inc.
+   Copyright (C) 1987-2020 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -844,6 +844,12 @@ symbol_temp_new_now (void)
 }
 
 symbolS *
+symbol_temp_new_now_octets (void)
+{
+  return symbol_temp_new (now_seg, frag_now_fix_octets (), frag_now);
+}
+
+symbolS *
 symbol_temp_make (void)
 {
   return symbol_make (FAKE_LABEL_NAME);
@@ -1085,19 +1091,6 @@ use_complex_relocs_for (symbolS * symp)
     case O_constant:
       return 0;
 
-    case O_symbol:
-    case O_symbol_rva:
-    case O_uminus:
-    case O_bit_not:
-    case O_logical_not:
-      if (  (S_IS_COMMON (symp->sy_value.X_add_symbol)
-	   || S_IS_LOCAL (symp->sy_value.X_add_symbol))
-	  &&
-	      (S_IS_DEFINED (symp->sy_value.X_add_symbol)
-	   && S_GET_SEGMENT (symp->sy_value.X_add_symbol) != expr_section))
-	return 0;
-      break;
-
     case O_multiply:
     case O_divide:
     case O_modulus:
@@ -1117,18 +1110,22 @@ use_complex_relocs_for (symbolS * symp)
     case O_gt:
     case O_logical_and:
     case O_logical_or:
-
-      if (  (S_IS_COMMON (symp->sy_value.X_add_symbol)
-	   || S_IS_LOCAL (symp->sy_value.X_add_symbol))
-	  &&
-	    (S_IS_COMMON (symp->sy_value.X_op_symbol)
+      if ((S_IS_COMMON (symp->sy_value.X_op_symbol)
 	   || S_IS_LOCAL (symp->sy_value.X_op_symbol))
-
-	  && S_IS_DEFINED (symp->sy_value.X_add_symbol)
 	  && S_IS_DEFINED (symp->sy_value.X_op_symbol)
-	  && S_GET_SEGMENT (symp->sy_value.X_add_symbol) != expr_section
 	  && S_GET_SEGMENT (symp->sy_value.X_op_symbol) != expr_section)
-	return 0;
+	{
+	case O_symbol:
+	case O_symbol_rva:
+	case O_uminus:
+	case O_bit_not:
+	case O_logical_not:
+	  if ((S_IS_COMMON (symp->sy_value.X_add_symbol)
+	       || S_IS_LOCAL (symp->sy_value.X_add_symbol))
+	      && S_IS_DEFINED (symp->sy_value.X_add_symbol)
+	      && S_GET_SEGMENT (symp->sy_value.X_add_symbol) != expr_section)
+	    return 0;
+	}
       break;
 
     default:
@@ -1209,7 +1206,7 @@ valueT
 resolve_symbol_value (symbolS *symp)
 {
   int resolved;
-  valueT final_val = 0;
+  valueT final_val;
   segT final_seg;
 
   if (LOCAL_SYMBOL_CHECK (symp))
@@ -1220,7 +1217,13 @@ resolve_symbol_value (symbolS *symp)
       if (local_symbol_resolved_p (locsym))
 	return final_val;
 
-      final_val += local_symbol_get_frag (locsym)->fr_address / OCTETS_PER_BYTE;
+      /* Symbols whose section has SEC_ELF_OCTETS set,
+	 resolve to octets instead of target bytes. */
+      if (locsym->lsy_section->flags & SEC_OCTETS)
+	final_val += local_symbol_get_frag (locsym)->fr_address;
+      else
+	final_val += (local_symbol_get_frag (locsym)->fr_address
+		      / OCTETS_PER_BYTE);
 
       if (finalize_syms)
 	{
@@ -1233,10 +1236,18 @@ resolve_symbol_value (symbolS *symp)
 
   if (symp->sy_flags.sy_resolved)
     {
+      final_val = 0;
+      while (symp->sy_value.X_op == O_symbol
+	     && symp->sy_value.X_add_symbol->sy_flags.sy_resolved)
+	{
+	  final_val += symp->sy_value.X_add_number;
+	  symp = symp->sy_value.X_add_symbol;
+	}
       if (symp->sy_value.X_op == O_constant)
-	return (valueT) symp->sy_value.X_add_number;
+	final_val += symp->sy_value.X_add_number;
       else
-	return 0;
+	final_val = 0;
+      return final_val;
     }
 
   resolved = 0;
@@ -1293,6 +1304,7 @@ resolve_symbol_value (symbolS *symp)
 	  resolved = 1;
 	}
 
+      final_val = 0;
       final_seg = undefined_section;
       goto exit_dont_set_value;
     }
@@ -1324,7 +1336,12 @@ resolve_symbol_value (symbolS *symp)
 	  /* Fall through.  */
 
 	case O_constant:
-	  final_val += symp->sy_frag->fr_address / OCTETS_PER_BYTE;
+	  /* Symbols whose section has SEC_ELF_OCTETS set,
+	     resolve to octets instead of target bytes. */
+	  if (symp->bsym->section->flags & SEC_OCTETS)
+	    final_val += symp->sy_frag->fr_address;
+	  else
+	    final_val += symp->sy_frag->fr_address / OCTETS_PER_BYTE;
 	  if (final_seg == expr_section)
 	    final_seg = absolute_section;
 	  /* Fall through.  */
@@ -1377,11 +1394,16 @@ resolve_symbol_value (symbolS *symp)
 	     relocation to detect this case, and convert the
 	     relocation to be against the symbol to which this symbol
 	     is equated.  */
-	  if (! S_IS_DEFINED (add_symbol)
+	  if (seg_left == undefined_section
+	      || bfd_is_com_section (seg_left)
 #if defined (OBJ_COFF) && defined (TE_PE)
 	      || S_IS_WEAK (add_symbol)
 #endif
-	      || S_IS_COMMON (add_symbol))
+	      || (finalize_syms
+		  && ((final_seg == expr_section
+		       && seg_left != expr_section
+		       && seg_left != absolute_section)
+		      || symbol_shadow_p (symp))))
 	    {
 	      if (finalize_syms)
 		{
@@ -1391,25 +1413,6 @@ resolve_symbol_value (symbolS *symp)
 		  /* Use X_op_symbol as a flag.  */
 		  symp->sy_value.X_op_symbol = add_symbol;
 		}
-	      final_seg = seg_left;
-	      final_val = 0;
-	      resolved = symbol_resolved_p (add_symbol);
-	      symp->sy_flags.sy_resolving = 0;
-	      goto exit_dont_set_value;
-	    }
-	  else if (finalize_syms
-		   && ((final_seg == expr_section && seg_left != expr_section)
-		       || symbol_shadow_p (symp)))
-	    {
-	      /* If the symbol is an expression symbol, do similarly
-		 as for undefined and common syms above.  Handles
-		 "sym +/- expr" where "expr" cannot be evaluated
-		 immediately, and we want relocations to be against
-		 "sym", eg. because it is weak.  */
-	      symp->sy_value.X_op = O_symbol;
-	      symp->sy_value.X_add_symbol = add_symbol;
-	      symp->sy_value.X_add_number = final_val;
-	      symp->sy_value.X_op_symbol = add_symbol;
 	      final_seg = seg_left;
 	      final_val += symp->sy_frag->fr_address + left;
 	      resolved = symbol_resolved_p (add_symbol);
@@ -1635,7 +1638,7 @@ resolve_symbol_value (symbolS *symp)
   if (finalize_syms)
     S_SET_VALUE (symp, final_val);
 
-exit_dont_set_value:
+ exit_dont_set_value:
   /* Always set the segment, even if not finalizing the value.
      The segment is used to determine whether a symbol is defined.  */
     S_SET_SEGMENT (symp, final_seg);
@@ -2309,14 +2312,14 @@ S_IS_LOCAL (symbolS *s)
   if ((flags & BSF_LOCAL) && (flags & BSF_GLOBAL))
     abort ();
 
-  if (bfd_get_section (s->bsym) == reg_section)
+  if (bfd_asymbol_section (s->bsym) == reg_section)
     return 1;
 
   if (flag_strip_local_absolute
       /* Keep BSF_FILE symbols in order to allow debuggers to identify
 	 the source file even when the object file is stripped.  */
       && (flags & (BSF_GLOBAL | BSF_FILE)) == 0
-      && bfd_get_section (s->bsym) == absolute_section)
+      && bfd_asymbol_section (s->bsym) == absolute_section)
     return 1;
 
   name = S_GET_NAME (s);
@@ -3259,7 +3262,7 @@ symbol_relc_make_sym (symbolS * sym)
      is defined as an expression or a plain value.  */
   if (   S_GET_SEGMENT (sym) == expr_section
       || S_GET_SEGMENT (sym) == absolute_section)
-    return symbol_relc_make_expr (& sym->sy_value);
+    return symbol_relc_make_expr (symbol_get_value_expression (sym));
 
   /* This may be a "fake symbol", referring to ".".
      Write out a special null symbol to refer to this position.  */

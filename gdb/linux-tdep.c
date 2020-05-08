@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux, architecture independent.
 
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -37,8 +37,8 @@
 #include "infcall.h"
 #include "gdbcmd.h"
 #include "gdb_regex.h"
-#include "common/enum-flags.h"
-#include "common/gdb_optional.h"
+#include "gdbsupport/enum-flags.h"
+#include "gdbsupport/gdb_optional.h"
 
 #include <ctype.h>
 
@@ -91,12 +91,12 @@ struct smaps_vmflags
 /* Whether to take the /proc/PID/coredump_filter into account when
    generating a corefile.  */
 
-static int use_coredump_filter = 1;
+static bool use_coredump_filter = true;
 
 /* Whether the value of smaps_vmflags->exclude_coredump should be
    ignored, including mappings marked with the VM_DONTDUMP flag in
    the dump.  */
-static int dump_excluded_mappings = 0;
+static bool dump_excluded_mappings = false;
 
 /* This enum represents the signals' numbers on a generic architecture
    running the Linux kernel.  The definition of "generic" comes from
@@ -183,9 +183,6 @@ get_linux_gdbarch_data (struct gdbarch *gdbarch)
 	  gdbarch_data (gdbarch, linux_gdbarch_data_handle));
 }
 
-/* Per-inferior data key.  */
-static const struct inferior_data *linux_inferior_data;
-
 /* Linux-specific cached data.  This is used by GDB for caching
    purposes for each inferior.  This helps reduce the overhead of
    transfering data from a remote target to the local host.  */
@@ -196,13 +193,16 @@ struct linux_info
      at this info requires an auxv lookup (which is itself cached),
      and looking through the inferior's mappings (which change
      throughout execution and therefore cannot be cached).  */
-  struct mem_range vsyscall_range;
+  struct mem_range vsyscall_range {};
 
   /* Zero if we haven't tried looking up the vsyscall's range before
      yet.  Positive if we tried looking it up, and found it.  Negative
      if we tried looking it up but failed.  */
-  int vsyscall_range_p;
+  int vsyscall_range_p = 0;
 };
+
+/* Per-inferior data key.  */
+static const struct inferior_key<linux_info> linux_inferior_data;
 
 /* Frees whatever allocated space there is to be freed and sets INF's
    linux cache data pointer to NULL.  */
@@ -210,24 +210,7 @@ struct linux_info
 static void
 invalidate_linux_cache_inf (struct inferior *inf)
 {
-  struct linux_info *info;
-
-  info = (struct linux_info *) inferior_data (inf, linux_inferior_data);
-  if (info != NULL)
-    {
-      xfree (info);
-      set_inferior_data (inf, linux_inferior_data, NULL);
-    }
-}
-
-/* Handles the cleanup of the linux cache for inferior INF.  ARG is
-   ignored.  Callback for the inferior_appeared and inferior_exit
-   events.  */
-
-static void
-linux_inferior_data_cleanup (struct inferior *inf, void *arg)
-{
-  invalidate_linux_cache_inf (inf);
+  linux_inferior_data.clear (inf);
 }
 
 /* Fetch the linux cache info for INF.  This function always returns a
@@ -239,12 +222,9 @@ get_linux_inferior_data (void)
   struct linux_info *info;
   struct inferior *inf = current_inferior ();
 
-  info = (struct linux_info *) inferior_data (inf, linux_inferior_data);
+  info = linux_inferior_data.get (inf);
   if (info == NULL)
-    {
-      info = XCNEW (struct linux_info);
-      set_inferior_data (inf, linux_inferior_data, info);
-    }
+    info = linux_inferior_data.emplace (inf);
 
   return info;
 }
@@ -414,16 +394,11 @@ linux_has_shared_address_space (struct gdbarch *gdbarch)
 
 /* This is how we want PTIDs from core files to be printed.  */
 
-static const char *
+static std::string
 linux_core_pid_to_str (struct gdbarch *gdbarch, ptid_t ptid)
 {
-  static char buf[80];
-
   if (ptid.lwp () != 0)
-    {
-      snprintf (buf, sizeof (buf), "LWP %ld", ptid.lwp ());
-      return buf;
-    }
+    return string_printf ("LWP %ld", ptid.lwp ());
 
   return normal_pid_to_str (ptid);
 }
@@ -591,8 +566,8 @@ mapping_is_anonymous_p (const char *filename)
 }
 
 /* Return 0 if the memory mapping (which is related to FILTERFLAGS, V,
-   MAYBE_PRIVATE_P, and MAPPING_ANONYMOUS_P) should not be dumped, or
-   greater than 0 if it should.
+   MAYBE_PRIVATE_P, MAPPING_ANONYMOUS_P, ADDR and OFFSET) should not
+   be dumped, or greater than 0 if it should.
 
    In a nutshell, this is the logic that we follow in order to decide
    if a mapping should be dumped or not.
@@ -630,12 +605,17 @@ mapping_is_anonymous_p (const char *filename)
      see 'p' in the permission flags, then we assume that the mapping
      is private, even though the presence of the 's' flag there would
      mean VM_MAYSHARE, which means the mapping could still be private.
-     This should work OK enough, however.  */
+     This should work OK enough, however.
+
+   - Even if, at the end, we decided that we should not dump the
+     mapping, we still have to check if it is something like an ELF
+     header (of a DSO or an executable, for example).  If it is, and
+     if the user is interested in dump it, then we should dump it.  */
 
 static int
 dump_mapping_p (filter_flags filterflags, const struct smaps_vmflags *v,
 		int maybe_private_p, int mapping_anon_p, int mapping_file_p,
-		const char *filename)
+		const char *filename, ULONGEST addr, ULONGEST offset)
 {
   /* Initially, we trust in what we received from our caller.  This
      value may not be very precise (i.e., it was probably gathered
@@ -645,6 +625,7 @@ dump_mapping_p (filter_flags filterflags, const struct smaps_vmflags *v,
      (assuming that the version of the Linux kernel being used
      supports it, of course).  */
   int private_p = maybe_private_p;
+  int dump_p;
 
   /* We always dump vDSO and vsyscall mappings, because it's likely that
      there'll be no file to read the contents from at core load time.
@@ -685,13 +666,13 @@ dump_mapping_p (filter_flags filterflags, const struct smaps_vmflags *v,
 	  /* This is a special situation.  It can happen when we see a
 	     mapping that is file-backed, but that contains anonymous
 	     pages.  */
-	  return ((filterflags & COREFILTER_ANON_PRIVATE) != 0
-		  || (filterflags & COREFILTER_MAPPED_PRIVATE) != 0);
+	  dump_p = ((filterflags & COREFILTER_ANON_PRIVATE) != 0
+		    || (filterflags & COREFILTER_MAPPED_PRIVATE) != 0);
 	}
       else if (mapping_anon_p)
-	return (filterflags & COREFILTER_ANON_PRIVATE) != 0;
+	dump_p = (filterflags & COREFILTER_ANON_PRIVATE) != 0;
       else
-	return (filterflags & COREFILTER_MAPPED_PRIVATE) != 0;
+	dump_p = (filterflags & COREFILTER_MAPPED_PRIVATE) != 0;
     }
   else
     {
@@ -700,14 +681,55 @@ dump_mapping_p (filter_flags filterflags, const struct smaps_vmflags *v,
 	  /* This is a special situation.  It can happen when we see a
 	     mapping that is file-backed, but that contains anonymous
 	     pages.  */
-	  return ((filterflags & COREFILTER_ANON_SHARED) != 0
-		  || (filterflags & COREFILTER_MAPPED_SHARED) != 0);
+	  dump_p = ((filterflags & COREFILTER_ANON_SHARED) != 0
+		    || (filterflags & COREFILTER_MAPPED_SHARED) != 0);
 	}
       else if (mapping_anon_p)
-	return (filterflags & COREFILTER_ANON_SHARED) != 0;
+	dump_p = (filterflags & COREFILTER_ANON_SHARED) != 0;
       else
-	return (filterflags & COREFILTER_MAPPED_SHARED) != 0;
+	dump_p = (filterflags & COREFILTER_MAPPED_SHARED) != 0;
     }
+
+  /* Even if we decided that we shouldn't dump this mapping, we still
+     have to check whether (a) the user wants us to dump mappings
+     containing an ELF header, and (b) the mapping in question
+     contains an ELF header.  If (a) and (b) are true, then we should
+     dump this mapping.
+
+     A mapping contains an ELF header if it is a private mapping, its
+     offset is zero, and its first word is ELFMAG.  */
+  if (!dump_p && private_p && offset == 0
+      && (filterflags & COREFILTER_ELF_HEADERS) != 0)
+    {
+      /* Let's check if we have an ELF header.  */
+      gdb::unique_xmalloc_ptr<char> header;
+      int errcode;
+
+      /* Useful define specifying the size of the ELF magical
+	 header.  */
+#ifndef SELFMAG
+#define SELFMAG 4
+#endif
+
+      /* Read the first SELFMAG bytes and check if it is ELFMAG.  */
+      if (target_read_string (addr, &header, SELFMAG, &errcode) == SELFMAG
+	  && errcode == 0)
+	{
+	  const char *h = header.get ();
+
+	  /* The EI_MAG* and ELFMAG* constants come from
+	     <elf/common.h>.  */
+	  if (h[EI_MAG0] == ELFMAG0 && h[EI_MAG1] == ELFMAG1
+	      && h[EI_MAG2] == ELFMAG2 && h[EI_MAG3] == ELFMAG3)
+	    {
+	      /* This mapping contains an ELF header, so we
+		 should dump it.  */
+	      dump_p = 1;
+	    }
+	}
+    }
+
+  return dump_p;
 }
 
 /* Implement the "info proc" command.  */
@@ -817,9 +839,10 @@ linux_info_proc (struct gdbarch *gdbarch, const char *args,
 			   "      Size", "    Offset", "objfile");
 	    }
 
-	  for (line = strtok (map.get (), "\n");
+	  char *saveptr;
+	  for (line = strtok_r (map.get (), "\n", &saveptr);
 	       line;
-	       line = strtok (NULL, "\n"))
+	       line = strtok_r (NULL, "\n", &saveptr))
 	    {
 	      ULONGEST addr, endaddr, offset, inode;
 	      const char *permissions, *device, *mapping_filename;
@@ -1024,7 +1047,7 @@ linux_core_info_proc_mappings (struct gdbarch *gdbarch, const char *args)
 
   addr_size_bits = gdbarch_addr_bit (core_gdbarch);
   addr_size = addr_size_bits / 8;
-  note_size = bfd_get_section_size (section);
+  note_size = bfd_section_size (section);
 
   if (note_size < 2 * addr_size)
     error (_("malformed core note - too short for header"));
@@ -1311,7 +1334,7 @@ linux_find_memory_regions_full (struct gdbarch *gdbarch,
 	  if (has_anonymous)
 	    should_dump_p = dump_mapping_p (filterflags, &v, priv,
 					    mapping_anon_p, mapping_file_p,
-					    filename);
+					    filename, addr, offset);
 	  else
 	    {
 	      /* Older Linux kernels did not support the "Anonymous:" counter.
@@ -1389,73 +1412,6 @@ find_signalled_thread (struct thread_info *info, void *data)
     return 1;
 
   return 0;
-}
-
-/* Generate corefile notes for SPU contexts.  */
-
-static char *
-linux_spu_make_corefile_notes (bfd *obfd, char *note_data, int *note_size)
-{
-  static const char *spu_files[] =
-    {
-      "object-id",
-      "mem",
-      "regs",
-      "fpcr",
-      "lslr",
-      "decr",
-      "decr_status",
-      "signal1",
-      "signal1_type",
-      "signal2",
-      "signal2_type",
-      "event_mask",
-      "event_status",
-      "mbox_info",
-      "ibox_info",
-      "wbox_info",
-      "dma_info",
-      "proxydma_info",
-   };
-
-  enum bfd_endian byte_order = gdbarch_byte_order (target_gdbarch ());
-
-  /* Determine list of SPU ids.  */
-  gdb::optional<gdb::byte_vector>
-    spu_ids = target_read_alloc (current_top_target (),
-				 TARGET_OBJECT_SPU, NULL);
-
-  if (!spu_ids)
-    return note_data;
-
-  /* Generate corefile notes for each SPU file.  */
-  for (size_t i = 0; i < spu_ids->size (); i += 4)
-    {
-      int fd = extract_unsigned_integer (spu_ids->data () + i, 4, byte_order);
-
-      for (size_t j = 0; j < sizeof (spu_files) / sizeof (spu_files[0]); j++)
-	{
-	  char annex[32], note_name[32];
-
-	  xsnprintf (annex, sizeof annex, "%d/%s", fd, spu_files[j]);
-	  gdb::optional<gdb::byte_vector> spu_data
-	    = target_read_alloc (current_top_target (), TARGET_OBJECT_SPU, annex);
-
-	  if (spu_data && !spu_data->empty ())
-	    {
-	      xsnprintf (note_name, sizeof note_name, "SPU/%s", annex);
-	      note_data = elfcore_write_note (obfd, note_data, note_size,
-					      note_name, NT_SPU,
-					      spu_data->data (),
-					      spu_data->size ());
-
-	      if (!note_data)
-		return nullptr;
-	    }
-	}
-    }
-
-  return note_data;
 }
 
 /* This is used to pass information from
@@ -1695,7 +1651,8 @@ linux_corefile_thread (struct thread_info *info,
 {
   struct regcache *regcache;
 
-  regcache = get_thread_arch_regcache (info->ptid, args->gdbarch);
+  regcache = get_thread_arch_regcache (info->inf->process_target (),
+				       info->ptid, args->gdbarch);
 
   target_fetch_registers (regcache, -1);
   gdb::byte_vector siginfo_data = linux_get_siginfo_data (info, args->gdbarch);
@@ -1772,7 +1729,7 @@ linux_fill_prpsinfo (struct elf_internal_linux_prpsinfo *p)
 
   /* Copying the program name.  Only the basename matters.  */
   basename = lbasename (fname.get ());
-  strncpy (p->pr_fname, basename, sizeof (p->pr_fname));
+  strncpy (p->pr_fname, basename, sizeof (p->pr_fname) - 1);
   p->pr_fname[sizeof (p->pr_fname) - 1] = '\0';
 
   infargs = get_inferior_args ();
@@ -1782,7 +1739,7 @@ linux_fill_prpsinfo (struct elf_internal_linux_prpsinfo *p)
   if (infargs != NULL)
     psargs = psargs + " " + infargs;
 
-  strncpy (p->pr_psargs, psargs.c_str (), sizeof (p->pr_psargs));
+  strncpy (p->pr_psargs, psargs.c_str (), sizeof (p->pr_psargs) - 1);
   p->pr_psargs[sizeof (p->pr_psargs) - 1] = '\0';
 
   xsnprintf (filename, sizeof (filename), "/proc/%d/stat", (int) pid);
@@ -1931,15 +1888,14 @@ linux_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
     }
 
   /* Thread register information.  */
-  TRY
+  try
     {
       update_thread_list ();
     }
-  CATCH (e, RETURN_MASK_ERROR)
+  catch (const gdb_exception_error &e)
     {
       exception_print (gdb_stderr, e);
     }
-  END_CATCH
 
   /* Like the kernel, prefer dumping the signalled thread first.
      "First thread" is what tools use to infer the signalled thread.
@@ -1986,11 +1942,6 @@ linux_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
       if (!note_data)
 	return NULL;
     }
-
-  /* SPU information.  */
-  note_data = linux_spu_make_corefile_notes (obfd, note_data, note_size);
-  if (!note_data)
-    return NULL;
 
   /* File mappings.  */
   note_data = linux_make_mappings_corefile_notes (gdbarch, obfd,
@@ -2375,7 +2326,7 @@ linux_infcall_mmap (CORE_ADDR size, unsigned prot)
      "mmap" uses 64-bit off_t on x86_64 and 32-bit off_t on i386 and x32.  */
   struct value *mmap_val = find_function_in_inferior ("mmap64", &objf);
   struct value *addr_val;
-  struct gdbarch *gdbarch = get_objfile_arch (objf);
+  struct gdbarch *gdbarch = objf->arch ();
   CORE_ADDR retval;
   enum
     {
@@ -2414,7 +2365,7 @@ linux_infcall_munmap (CORE_ADDR addr, CORE_ADDR size)
   struct objfile *objf;
   struct value *munmap_val = find_function_in_inferior ("munmap", &objf);
   struct value *retval_val;
-  struct gdbarch *gdbarch = get_objfile_arch (objf);
+  struct gdbarch *gdbarch = objf->arch ();
   LONGEST retval;
   enum
     {
@@ -2467,6 +2418,28 @@ linux_displaced_step_location (struct gdbarch *gdbarch)
   return addr;
 }
 
+/* See linux-tdep.h.  */
+
+CORE_ADDR
+linux_get_hwcap (struct target_ops *target)
+{
+  CORE_ADDR field;
+  if (target_auxv_search (target, AT_HWCAP, &field) != 1)
+    return 0;
+  return field;
+}
+
+/* See linux-tdep.h.  */
+
+CORE_ADDR
+linux_get_hwcap2 (struct target_ops *target)
+{
+  CORE_ADDR field;
+  if (target_auxv_search (target, AT_HWCAP2, &field) != 1)
+    return 0;
+  return field;
+}
+
 /* Display whether the gcore command is using the
    /proc/PID/coredump_filter file.  */
 
@@ -2513,15 +2486,13 @@ linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_gdbarch_get_siginfo_type (gdbarch, linux_get_siginfo_type);
 }
 
+void _initialize_linux_tdep ();
 void
-_initialize_linux_tdep (void)
+_initialize_linux_tdep ()
 {
   linux_gdbarch_data_handle =
     gdbarch_data_register_post_init (init_linux_gdbarch_data);
 
-  /* Set a cache per-inferior.  */
-  linux_inferior_data
-    = register_inferior_data_with_cleanup (NULL, linux_inferior_data_cleanup);
   /* Observers used to invalidate the cache when needed.  */
   gdb::observers::inferior_exit.attach (invalidate_linux_cache_inf);
   gdb::observers::inferior_appeared.attach (invalidate_linux_cache_inf);

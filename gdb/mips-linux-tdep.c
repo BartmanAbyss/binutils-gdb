@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux on MIPS processors.
 
-   Copyright (C) 2001-2019 Free Software Foundation, Inc.
+   Copyright (C) 2001-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -38,7 +38,7 @@
 #include "glibc-tdep.h"
 #include "linux-tdep.h"
 #include "xml-syscall.h"
-#include "common/gdb_signals.h"
+#include "gdbsupport/gdb_signals.h"
 
 #include "features/mips-linux.c"
 #include "features/mips-dsp-linux.c"
@@ -562,7 +562,7 @@ mips_linux_core_read_description (struct gdbarch *gdbarch,
   if (! section)
     return NULL;
 
-  switch (bfd_section_size (abfd, section))
+  switch (bfd_section_size (section))
     {
     case sizeof (mips_elf_gregset_t):
       return mips_tdesc_gp32;
@@ -1437,7 +1437,7 @@ mips_gdb_signal_to_target (struct gdbarch *gdbarch,
 }
 
 /* Translate signals based on MIPS signal values.
-   Adapted from gdb/common/signals.c.  */
+   Adapted from gdb/gdbsupport/signals.c.  */
 
 static enum gdb_signal
 mips_gdb_signal_from_target (struct gdbarch *gdbarch, int signal)
@@ -1642,8 +1642,9 @@ mips_linux_init_abi (struct gdbarch_info info,
     }
 }
 
+void _initialize_mips_linux_tdep ();
 void
-_initialize_mips_linux_tdep (void)
+_initialize_mips_linux_tdep ()
 {
   const struct bfd_arch_info *arch_info;
 

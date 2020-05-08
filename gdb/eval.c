@@ -1,6 +1,6 @@
 /* Evaluate expressions for GDB.
 
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -41,9 +41,6 @@
 #include "objfiles.h"
 #include "typeprint.h"
 #include <ctype.h>
-
-/* This is defined in valops.c */
-extern int overload_resolution;
 
 /* Prototypes for local functions.  */
 
@@ -123,7 +120,7 @@ parse_and_eval (const char *exp)
 struct value *
 parse_to_comma_and_eval (const char **expp)
 {
-  expression_up expr = parse_exp_1 (expp, 0, (struct block *) 0, 1);
+  expression_up expr = parse_exp_1 (expp, 0, nullptr, 1);
 
   return evaluate_expression (expr.get ());
 }
@@ -201,11 +198,11 @@ fetch_subexp_value (struct expression *exp, int *pc, struct value **valp,
   mark = value_mark ();
   result = NULL;
 
-  TRY
+  try
     {
       result = evaluate_subexp (NULL_TYPE, exp, pc, EVAL_NORMAL);
     }
-  CATCH (ex, RETURN_MASK_ALL)
+  catch (const gdb_exception &ex)
     {
       /* Ignore memory errors if we want watchpoints pointing at
 	 inaccessible memory to still be created; otherwise, throw the
@@ -217,11 +214,10 @@ fetch_subexp_value (struct expression *exp, int *pc, struct value **valp,
 	    break;
 	  /* Fall through.  */
 	default:
-	  throw_exception (ex);
+	  throw;
 	  break;
 	}
     }
-  END_CATCH
 
   new_mark = value_mark ();
   if (mark == new_mark)
@@ -238,15 +234,14 @@ fetch_subexp_value (struct expression *exp, int *pc, struct value **valp,
       else
 	{
 
-	  TRY
+	  try
 	    {
 	      value_fetch_lazy (result);
 	      *valp = result;
 	    }
-	  CATCH (except, RETURN_MASK_ERROR)
+	  catch (const gdb_exception_error &except)
 	    {
 	    }
-	  END_CATCH
 	}
     }
 
@@ -347,7 +342,7 @@ evaluate_struct_tuple (struct value *struct_val,
 /* Recursive helper function for setting elements of array tuples.
    The target is ARRAY (which has bounds LOW_BOUND to HIGH_BOUND); the
    element value is ELEMENT; EXP, POS and NOSIDE are as usual.
-   Evaluates index expresions and sets the specified element(s) of
+   Evaluates index expressions and sets the specified element(s) of
    ARRAY to ELEMENT.  Returns last index value.  */
 
 static LONGEST
@@ -423,7 +418,7 @@ unop_promote (const struct language_defn *language, struct gdbarch *gdbarch,
 	{
 	default:
 	  /* Perform integral promotion for ANSI C/C++.
-	     If not appropropriate for any particular language
+	     If not appropriate for any particular language
 	     it needs to modify this function.  */
 	  {
 	    struct type *builtin_int = builtin_type (gdbarch)->builtin_int;
@@ -567,20 +562,20 @@ binop_promote (const struct language_defn *language, struct gdbarch *gdbarch,
 	  break;
 	case language_opencl:
 	  if (result_len <= TYPE_LENGTH (lookup_signed_typename
-					 (language, gdbarch, "int")))
+					 (language, "int")))
 	    {
 	      promoted_type =
 		(unsigned_operation
-		 ? lookup_unsigned_typename (language, gdbarch, "int")
-		 : lookup_signed_typename (language, gdbarch, "int"));
+		 ? lookup_unsigned_typename (language, "int")
+		 : lookup_signed_typename (language, "int"));
 	    }
 	  else if (result_len <= TYPE_LENGTH (lookup_signed_typename
-					      (language, gdbarch, "long")))
+					      (language, "long")))
 	    {
 	      promoted_type =
 		(unsigned_operation
-		 ? lookup_unsigned_typename (language, gdbarch, "long")
-		 : lookup_signed_typename (language, gdbarch,"long"));
+		 ? lookup_unsigned_typename (language, "long")
+		 : lookup_signed_typename (language,"long"));
 	    }
 	  break;
 	default:
@@ -716,19 +711,18 @@ evaluate_var_value (enum noside noside, const block *blk, symbol *var)
 
   struct value *ret = NULL;
 
-  TRY
+  try
     {
       ret = value_of_variable (var, blk);
     }
 
-  CATCH (except, RETURN_MASK_ERROR)
+  catch (const gdb_exception_error &except)
     {
       if (noside != EVAL_AVOID_SIDE_EFFECTS)
-	throw_exception (except);
+	throw;
 
       ret = value_zero (SYMBOL_TYPE (var), not_lval);
     }
-  END_CATCH
 
   return ret;
 }
@@ -957,19 +951,18 @@ evaluate_funcall (type *expect_type, expression *exp, int *pos,
 	  while (unop_user_defined_p (op, arg2))
 	    {
 	      struct value *value = NULL;
-	      TRY
+	      try
 		{
 		  value = value_x_unop (arg2, op, noside);
 		}
 
-	      CATCH (except, RETURN_MASK_ERROR)
+	      catch (const gdb_exception_error &except)
 		{
 		  if (except.error == NOT_FOUND_ERROR)
 		    break;
 		  else
-		    throw_exception (except);
+		    throw;
 		}
-	      END_CATCH
 
 		arg2 = value;
 	    }
@@ -1051,12 +1044,12 @@ evaluate_funcall (type *expect_type, expression *exp, int *pos,
 	  if (op == OP_VAR_MSYM_VALUE)
 	    {
 	      minimal_symbol *msym = exp->elts[*pos + 2].msymbol;
-	      var_func_name = MSYMBOL_PRINT_NAME (msym);
+	      var_func_name = msym->print_name ();
 	    }
 	  else if (op == OP_VAR_VALUE)
 	    {
 	      symbol *sym = exp->elts[*pos + 2].symbol;
-	      var_func_name = SYMBOL_PRINT_NAME (sym);
+	      var_func_name = sym->print_name ();
 	    }
 
 	  argvec[0] = evaluate_subexp_with_coercion (exp, pos, noside);
@@ -1255,6 +1248,20 @@ skip_undetermined_arglist (int nargs, struct expression *exp, int *pos,
     evaluate_subexp (NULL_TYPE, exp, pos, noside);
 }
 
+/* Return true if type is integral or reference to integral */
+
+static bool
+is_integral_or_integral_reference (struct type *type)
+{
+  if (is_integral_type (type))
+    return true;
+
+  type = check_typedef (type);
+  return (type != nullptr
+	  && TYPE_IS_REFERENCE (type)
+	  && is_integral_type (TYPE_TARGET_TYPE (type)));
+}
+
 struct value *
 evaluate_subexp_standard (struct type *expect_type,
 			  struct expression *exp, int *pos,
@@ -1307,7 +1314,7 @@ evaluate_subexp_standard (struct type *expect_type,
 	(*pos) += 3;
 	symbol *var = exp->elts[pc + 2].symbol;
 	if (TYPE_CODE (SYMBOL_TYPE (var)) == TYPE_CODE_ERROR)
-	  error_unknown_type (SYMBOL_PRINT_NAME (var));
+	  error_unknown_type (var->print_name ());
 	if (noside != EVAL_SKIP)
 	    return evaluate_var_value (noside, exp->elts[pc + 1].block, var);
 	else
@@ -1330,7 +1337,7 @@ evaluate_subexp_standard (struct type *expect_type,
 	type = value_type (val);
 	if (TYPE_CODE (type) == TYPE_CODE_ERROR
 	    && (noside != EVAL_AVOID_SIDE_EFFECTS || pc != 0))
-	  error_unknown_type (MSYMBOL_PRINT_NAME (msymbol));
+	  error_unknown_type (msymbol->print_name ());
 	return val;
       }
 
@@ -1349,7 +1356,7 @@ evaluate_subexp_standard (struct type *expect_type,
 	if (SYMBOL_COMPUTED_OPS (sym) == NULL
 	    || SYMBOL_COMPUTED_OPS (sym)->read_variable_at_entry == NULL)
 	  error (_("Symbol \"%s\" does not have any specific entry value"),
-		 SYMBOL_PRINT_NAME (sym));
+		 sym->print_name ());
 
 	frame = get_selected_frame (NULL);
 	return SYMBOL_COMPUTED_OPS (sym)->read_variable_at_entry (sym, frame);
@@ -1554,7 +1561,7 @@ evaluate_subexp_standard (struct type *expect_type,
 		{
 		  int bit_index = (unsigned) range_low % TARGET_CHAR_BIT;
 
-		  if (gdbarch_bits_big_endian (exp->gdbarch))
+		  if (gdbarch_byte_order (exp->gdbarch) == BFD_ENDIAN_BIG)
 		    bit_index = TARGET_CHAR_BIT - 1 - bit_index;
 		  valaddr[(unsigned) range_low / TARGET_CHAR_BIT]
 		    |= 1 << bit_index;
@@ -1979,6 +1986,7 @@ evaluate_subexp_standard (struct type *expect_type,
 
 	case TYPE_CODE_PTR:
 	case TYPE_CODE_FUNC:
+	case TYPE_CODE_INTERNAL_FUNCTION:
 	  /* It's a function call.  */
 	  /* Allocate arg vector, including space for the function to be
 	     called in argvec[0] and a terminating NULL.  */
@@ -1996,10 +2004,13 @@ evaluate_subexp_standard (struct type *expect_type,
 		 results in malloc being called with a pointer to an integer
 		 followed by an attempt to malloc the arguments to malloc in
 		 target memory.  Infinite recursion ensues.  */
-	      bool is_artificial =
-		TYPE_FIELD_ARTIFICIAL (value_type (arg1), tem - 1);
-	      argvec[tem] = fortran_argument_convert (argvec[tem],
-						      is_artificial);
+	      if (code == TYPE_CODE_PTR || code == TYPE_CODE_FUNC)
+		{
+		  bool is_artificial
+		    = TYPE_FIELD_ARTIFICIAL (value_type (arg1), tem - 1);
+		  argvec[tem] = fortran_argument_convert (argvec[tem],
+							  is_artificial);
+		}
 	    }
 	  argvec[tem] = 0;	/* signal end of arglist */
 	  if (noside == EVAL_SKIP)
@@ -2043,19 +2054,18 @@ evaluate_subexp_standard (struct type *expect_type,
       while (unop_user_defined_p (op, arg1))
 	{
 	  struct value *value = NULL;
-	  TRY
+	  try
 	    {
 	      value = value_x_unop (arg1, op, noside);
 	    }
 
-	  CATCH (except, RETURN_MASK_ERROR)
+	  catch (const gdb_exception_error &except)
 	    {
 	      if (except.error == NOT_FOUND_ERROR)
 		break;
 	      else
-		throw_exception (except);
+		throw;
 	    }
-	  END_CATCH
 
 	  arg1 = value;
 	}
@@ -2155,7 +2165,14 @@ evaluate_subexp_standard (struct type *expect_type,
 
     case BINOP_ASSIGN:
       arg1 = evaluate_subexp (NULL_TYPE, exp, pos, noside);
-      arg2 = evaluate_subexp (value_type (arg1), exp, pos, noside);
+      /* Special-case assignments where the left-hand-side is a
+	 convenience variable -- in these, don't bother setting an
+	 expected type.  This avoids a weird case where re-assigning a
+	 string or array to an internal variable could error with "Too
+	 many array elements".  */
+      arg2 = evaluate_subexp (VALUE_LVAL (arg1) == lval_internalvar
+			      ? NULL_TYPE : value_type (arg1),
+			      exp, pos, noside);
 
       if (noside == EVAL_SKIP || noside == EVAL_AVOID_SIDE_EFFECTS)
 	return arg1;
@@ -2205,10 +2222,10 @@ evaluate_subexp_standard (struct type *expect_type,
       if (binop_user_defined_p (op, arg1, arg2))
 	return value_x_binop (arg1, arg2, op, OP_NULL, noside);
       else if (ptrmath_type_p (exp->language_defn, value_type (arg1))
-	       && is_integral_type (value_type (arg2)))
+	       && is_integral_or_integral_reference (value_type (arg2)))
 	return value_ptradd (arg1, value_as_long (arg2));
       else if (ptrmath_type_p (exp->language_defn, value_type (arg2))
-	       && is_integral_type (value_type (arg1)))
+	       && is_integral_or_integral_reference (value_type (arg1)))
 	return value_ptradd (arg2, value_as_long (arg1));
       else
 	{
@@ -2231,7 +2248,7 @@ evaluate_subexp_standard (struct type *expect_type,
 	  return value_from_longest (type, value_ptrdiff (arg1, arg2));
 	}
       else if (ptrmath_type_p (exp->language_defn, value_type (arg1))
-	       && is_integral_type (value_type (arg2)))
+	       && is_integral_or_integral_reference (value_type (arg2)))
 	return value_ptradd (arg1, - value_as_long (arg2));
       else
 	{
@@ -3215,7 +3232,7 @@ evaluate_subexp_for_sizeof (struct expression *exp, int *pos,
 
 	type = value_type (mval);
 	if (TYPE_CODE (type) == TYPE_CODE_ERROR)
-	  error_unknown_type (MSYMBOL_PRINT_NAME (msymbol));
+	  error_unknown_type (msymbol->print_name ());
 
 	return value_from_longest (size_type, TYPE_LENGTH (type));
       }
@@ -3223,7 +3240,7 @@ evaluate_subexp_for_sizeof (struct expression *exp, int *pos,
 
       /* Deal with the special case if NOSIDE is EVAL_NORMAL and the resulting
 	 type of the subscript is a variable length array type. In this case we
-	 must re-evaluate the right hand side of the subcription to allow
+	 must re-evaluate the right hand side of the subscription to allow
 	 side-effects. */
     case BINOP_SUBSCRIPT:
       if (noside == EVAL_NORMAL)

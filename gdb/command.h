@@ -1,6 +1,6 @@
 /* Header file for command creation.
 
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2020 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -18,8 +18,8 @@
 #if !defined (COMMAND_H)
 #define COMMAND_H 1
 
-#include "common/gdb_vecs.h"
-#include "common/scoped_restore.h"
+#include "gdbsupport/gdb_vecs.h"
+#include "gdbsupport/scoped_restore.h"
 
 struct completion_tracker;
 
@@ -41,7 +41,7 @@ enum command_class
   no_class = -1, class_run = 0, class_vars, class_stack, class_files,
   class_support, class_info, class_breakpoint, class_trace,
   class_alias, class_bookmark, class_obscure, class_maintenance,
-  class_pseudo, class_tui, class_user, class_xdb,
+  class_tui, class_user, class_xdb,
   no_set_class	/* Used for "show" commands that have no corresponding
 		   "set" command.  */
 };
@@ -62,8 +62,8 @@ cmd_types;
 /* Types of "set" or "show" command.  */
 typedef enum var_types
   {
-    /* "on" or "off".  *VAR is an integer which is nonzero for on,
-       zero for off.  */
+    /* "on" or "off".  *VAR is a bool which is true for on,
+       false for off.  */
     var_boolean,
 
     /* "on" / "true" / "enable" or "off" / "false" / "disable" or
@@ -133,7 +133,15 @@ extern struct cli_suppress_notification cli_suppress_notification;
 
 /* API to the manipulation of command lists.  */
 
-extern int valid_user_defined_cmd_name_p (const char *name);
+/* Return TRUE if NAME is a valid user-defined command name.
+   This is a stricter subset of all gdb commands,
+   see find_command_name_length.  */
+
+extern bool valid_user_defined_cmd_name_p (const char *name);
+
+/* Return TRUE if C is a valid command character.  */
+
+extern bool valid_cmd_char_p (int c);
 
 /* Const-correct variant of the above.  */
 
@@ -170,6 +178,20 @@ extern struct cmd_list_element *add_prefix_cmd (const char *, enum command_class
 						struct cmd_list_element **,
 						const char *, int,
 						struct cmd_list_element **);
+
+/* Like add_prefix_cmd, but sets the callback to a function that
+   simply calls help_list.  */
+
+extern struct cmd_list_element *add_basic_prefix_cmd
+  (const char *, enum command_class, const char *, struct cmd_list_element **,
+   const char *, int, struct cmd_list_element **);
+
+/* Like add_prefix_cmd, but useful for "show" prefixes.  This sets the
+   callback to a function that simply calls cmd_show_list.  */
+
+extern struct cmd_list_element *add_show_prefix_cmd
+  (const char *, enum command_class, const char *, struct cmd_list_element **,
+   const char *, int, struct cmd_list_element **);
 
 extern struct cmd_list_element *add_prefix_cmd_suppress_notification
 			(const char *name, enum command_class theclass,
@@ -328,15 +350,16 @@ extern void add_setshow_auto_boolean_cmd (const char *name,
 					  struct cmd_list_element **set_list,
 					  struct cmd_list_element **show_list);
 
-extern void add_setshow_boolean_cmd (const char *name,
-				     enum command_class theclass,
-				     int *var,
-				     const char *set_doc, const char *show_doc,
-				     const char *help_doc,
-				     cmd_const_sfunc_ftype *set_func,
-				     show_value_ftype *show_func,
-				     struct cmd_list_element **set_list,
-				     struct cmd_list_element **show_list);
+extern cmd_list_element *
+  add_setshow_boolean_cmd (const char *name,
+			   enum command_class theclass,
+			   bool *var,
+			   const char *set_doc, const char *show_doc,
+			   const char *help_doc,
+			   cmd_const_sfunc_ftype *set_func,
+			   show_value_ftype *show_func,
+			   struct cmd_list_element **set_list,
+			   struct cmd_list_element **show_list);
 
 extern void add_setshow_filename_cmd (const char *name,
 				      enum command_class theclass,
@@ -448,7 +471,32 @@ extern void cmd_show_list (struct cmd_list_element *, int, const char *);
 
 extern void error_no_arg (const char *) ATTRIBUTE_NORETURN;
 
-extern void dont_repeat (void);
+
+/* Command line saving and repetition.
+   Each input line executed is saved to possibly be repeated either
+   when the user types an empty line, or be repeated by a command
+   that wants to repeat the previously executed command.  The below
+   functions control command repetition.  */
+
+/* Commands call dont_repeat if they do not want to be repeated by null
+   lines or by repeat_previous ().  */
+
+extern void dont_repeat ();
+
+/* Commands call repeat_previous if they want to repeat the previous
+   command.  Such commands that repeat the previous command must
+   indicate to not repeat themselves, to avoid recursive repeat.
+   repeat_previous marks the current command as not repeating, and
+   ensures get_saved_command_line returns the previous command, so
+   that the currently executing command can repeat it.  If there's no
+   previous command, throws an error.  Otherwise, returns the result
+   of get_saved_command_line, which now points at the command to
+   repeat.  */
+
+extern const char *repeat_previous ();
+
+/* Prevent dont_repeat from working, and return a cleanup that
+   restores the previous state.  */
 
 extern scoped_restore_tmpl<int> prevent_dont_repeat (void);
 
@@ -456,6 +504,18 @@ extern scoped_restore_tmpl<int> prevent_dont_repeat (void);
    repeated.  Note that the passed-in string must be a constant.  */
 
 extern void set_repeat_arguments (const char *args);
+
+/* Returns the saved command line to repeat.
+   When a command is being executed, this is the currently executing
+   command line, unless the currently executing command has called
+   repeat_previous (): in this case, get_saved_command_line returns
+   the previously saved command line.  */
+
+extern char *get_saved_command_line ();
+
+/* Takes a copy of CMD, for possible repetition.  */
+
+extern void save_command_line (const char *cmd);
 
 /* Used to mark commands that don't do anything.  If we just leave the
    function field NULL, the command is interpreted as a help topic, or

@@ -1,5 +1,5 @@
 /* Target-dependent code for the 32-bit OpenRISC 1000, for the GDB.
-   Copyright (C) 2008-2019 Free Software Foundation, Inc.
+   Copyright (C) 2008-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,7 +35,7 @@
 #include "arch-utils.h"
 #include "frame-unwind.h"
 #include "frame-base.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "trad-frame.h"
 #include "regset.h"
 #include "remote.h"
@@ -50,7 +50,7 @@
 
 /* Global debug flag.  */
 
-static int or1k_debug = 0;
+static bool or1k_debug = false;
 
 static void
 show_or1k_debug (struct ui_file *file, int from_tty,
@@ -789,14 +789,6 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   return sp;
 }
 
-/* Implement the dummy_id gdbarch method.  */
-
-static struct frame_id
-or1k_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  return frame_id_build (get_frame_sp (this_frame),
-			 get_frame_pc (this_frame));
-}
 
 
 /* Support functions for frame handling.  */
@@ -832,7 +824,7 @@ or1k_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
 
    l.sw    lr_loc(r1),r9        # Link (return) address
 
-   The link register is usally saved at fp_loc - 4.  It may not be saved at
+   The link register is usually saved at fp_loc - 4.  It may not be saved at
    all in a leaf function.
 
    l.sw    reg_loc(r1),ry       # Save any callee saved regs
@@ -1184,7 +1176,6 @@ or1k_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_call_dummy_location (gdbarch, ON_STACK);
   set_gdbarch_push_dummy_code (gdbarch, or1k_push_dummy_code);
   set_gdbarch_push_dummy_call (gdbarch, or1k_push_dummy_call);
-  set_gdbarch_dummy_id (gdbarch, or1k_dummy_id);
 
   /* Frame unwinders.  Use DWARF debug info if available, otherwise use our
      own unwinder.  */
@@ -1278,8 +1269,9 @@ or1k_dump_tdep (struct gdbarch *gdbarch, struct ui_file *file)
 }
 
 
+void _initialize_or1k_tdep ();
 void
-_initialize_or1k_tdep (void)
+_initialize_or1k_tdep ()
 {
   /* Register this architecture.  */
   gdbarch_register (bfd_arch_or1k, or1k_gdbarch_init, or1k_dump_tdep);

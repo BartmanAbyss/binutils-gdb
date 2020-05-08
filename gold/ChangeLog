@@ -1,41 +1,103 @@
-2019-02-19  Egeyar Bagcioglu  <egeyar.bagcioglu@oracle.com>
+2020-05-02  H.J. Lu  <hongjiu.lu@intel.com>
 
-     PR gold/23870
-     * aarch64.cc (Target_aarch64::Scan::global): Check if a symbol with
-     R_AARCH64_MOVW_.ABS_* relocations requires a PLT entry.
-     * testsuite/Makefile.am: Add aarch64_pr23870 test case.
-     * testsuite/Makefile.in: Regenerate.
-     * testsuite/aarch64_pr23870_bar.c: New file.
-     * testsuite/aarch64_pr23870_foo.c: New file.
-     * testsuite/aarch64_pr23870_main.S: New file.
+	PR gold/25904
+	* testsuite/Makefile.am (COMMON_TEST_C_CFLAGS): New.
+	(common_test_1.o): New rule.
+	(common_test_2.o): Likewise.
+	(common_test_3.o): Likewise.
+	(plugin_common_test_1.o): Likewise.
+	(plugin_common_test_2.o): Likewise.
+	(common_test_1_v1.o): Likewise.
+	(common_test_1_v2.o): Likewise.
+	(common_test_2_pic.o): Compile with $(COMMON_TEST_C_CFLAGS).
+	(common_test_3_pic.o): Likewise.
+	* testsuite/Makefile.in: Regenerated.
 
-2019-02-12  Nick Clifton  <nickc@redhat.com>
+2020-05-01  H.J. Lu  <hongjiu.lu@intel.com>
 
-	* po/fr.po: Updated French translation.
+	PR gold/25426
+	* x86_64.cc (Target_x86_64<size>::Relocate::tls_desc_gd_to_ie):
+	For x32, relax "rex leal foo@tlsdesc(%rip), %reg" to
+	"rex movl foo@gottpoff(%rip), %eax" and relax ""call *(%eax)"
+	to "nopl (%rax)".
+	(Target_x86_64<size>::Relocate::tls_desc_gd_to_le): For x32,
+	relax "rex leal foo@tlsdesc(%rip), %reg" to
+	"rex movl foo@tpoff, %eax" and relax "call *foo@tlscall(%eax)"
+	to "nopl (%rax)".
+	* testsuite/Makefile.am (tls_test_gnu2.o): Depend on
+	gcctestdir/as.
+	(tls_test_file2_gnu2.o): Likewise.
+	(tls_test_c_gnu2.o): Likewise.
+	* testsuite/Makefile.in: Regenerated.
 
-2019-01-21  Nick Clifton  <nickc@redhat.com>
+2020-05-01  H.J. Lu  <hongjiu.lu@intel.com>
+
+	PR gold/25473
+	* x86_64.cc (Target_x86_64<size>::Relocate::tls_desc_gd_to_ie):
+	Properly check r8 - r15 in "lea foo@TLSDESC(%rip), %reg".
+	(Target_x86_64<size>::Relocate::tls_desc_gd_to_le): Properly
+	relax r8 - r15 in "lea foo@TLSDESC(%rip), %reg".
+	* testsuite/Makefile.am (check_SCRIPTS): Add x86_64_gd_to_le.sh.
+	(check_DATA): Add x86_64_gd_to_le.stdout.
+	(MOSTLYCLEANFILES): Add x86_64_gd_to_le.
+	(x86_64_gd_to_le.o): New target.
+	(x86_64_gd_to_le): Likewise.
+	(x86_64_gd_to_le.stdout): Likewise.
+	* testsuite/Makefile.in: Regenerated.
+	* testsuite/x86_64_gd_to_le.s: New file.
+	* testsuite/x86_64_gd_to_le.sh: Likewise.
+
+2020-05-01  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* testsuite/odr_violation2.cc (Ordering::operator()): Make
+	expression even more complex.
+
+2020-05-01  H.J. Lu  <hongjiu.lu@intel.com>
+
+	* testsuite/ver_test_pr16504.sh: Updated.
+
+2020-05-01  H.J. Lu  <hongjiu.lu@intel.com>
+
+	PR gold/25872
+	* x86_64.cc (Output_data_plt_x86_64_bnd::do_write): Increment
+	plt_offset after setting the reserved TLSDESC PLT entry.
+	(Output_data_plt_x86_64_ibt<size>::do_write): Likewise.
+
+2020-05-01  H.J. Lu  <hongjiu.lu@intel.com>
+
+	PR gold/25872
+	* x86_64.cc (Output_data_plt_x86_64_bnd::do_address_for_local):
+	Handle local IFUNC symbol.
+	(Output_data_plt_x86_64_ibt::do_address_for_local): Likewise.
+
+2020-03-19  Fangrui Song  <maskray@google.com>
+
+    * options.h (General_options): Add --no-rosegment option.
+
+2020-02-24  Nick Clifton  <nickc@redhat.com>
+
+	* po/fr.po: Update French translation.
+
+2020-01-20  Nick Clifton  <nickc@redhat.com>
 
 	* po/uk.po: Updated Ukranian translation.
 
-2019-01-19  Nick Clifton  <nickc@redhat.com>
-
-	* po/gold.pot: Regenerate.
-
-2018-06-24  Nick Clifton  <nickc@redhat.com>
-
-	2.32 branch created.
-
-2019-01-09  Andrew Paprocki  <andrew@ishiboo.com>
+2020-01-18  Nick Clifton  <nickc@redhat.com>
 
 	* configure: Regenerate.
+	* po/gold.pot: Regenerate.
 
-2019-01-01  Alan Modra  <amodra@gmail.com>
+2020-01-18  Nick Clifton  <nickc@redhat.com>
+
+	Binutils 2.34 branch created.
+
+2020-01-01  Alan Modra  <amodra@gmail.com>
 
 	Update year range in copyright notice of all files.
 
-For older changes see ChangeLog-2018
+For older changes see ChangeLog-2019
 
-Copyright (C) 2019 Free Software Foundation, Inc.
+Copyright (C) 2020 Free Software Foundation, Inc.
 
 Copying and distribution of this file, with or without modification,
 are permitted in any medium without royalty provided the copyright

@@ -1,6 +1,6 @@
 /* Core dump and executable file functions above target vector, for GDB.
 
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -32,6 +32,7 @@
 #include "completer.h"
 #include "observable.h"
 #include "cli/cli-utils.h"
+#include "gdbarch.h"
 
 /* You can have any number of hooks for `exec_file_command' command to
    call.  If there's only one hook, it is set in exec_file_display
@@ -138,9 +139,9 @@ validate_files (void)
     }
 }
 
-/* See common/common-inferior.h.  */
+/* See gdbsupport/common-inferior.h.  */
 
-char *
+const char *
 get_exec_file (int err)
 {
   if (exec_filename)
@@ -150,7 +151,6 @@ get_exec_file (int err)
 
   error (_("No executable file specified.\n\
 Use the \"file\" or \"exec-file\" command."));
-  return NULL;
 }
 
 
@@ -415,7 +415,7 @@ write_memory_signed_integer (CORE_ADDR addr, int len,
 
 /* The current default bfd target.  Points to storage allocated for
    gnutarget_string.  */
-char *gnutarget;
+const char *gnutarget;
 
 /* Same thing, except it is "auto" not NULL for the default case.  */
 static char *gnutarget_string;
@@ -478,8 +478,9 @@ set_gnutarget (const char *newtarget)
   set_gnutarget_command (NULL, 0, NULL);
 }
 
+void _initialize_core ();
 void
-_initialize_core (void)
+_initialize_core ()
 {
   struct cmd_list_element *c;
 

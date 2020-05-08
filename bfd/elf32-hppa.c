@@ -1,5 +1,5 @@
 /* BFD back-end for HP PA-RISC ELF files.
-   Copyright (C) 1990-2019 Free Software Foundation, Inc.
+   Copyright (C) 1990-2020 Free Software Foundation, Inc.
 
    Original code by
 	Center for Software Science
@@ -71,34 +71,38 @@
 
    Import stub to call shared library routine from normal object file
    (single sub-space version)
-   :		addil LR'lt_ptr+ltoff,%dp	; get procedure entry point
-   :		ldw RR'lt_ptr+ltoff(%r1),%r21
+   :		addil LR'lt_ptr+ltoff,%dp	; get PLT address
+   :		ldo RR'lt_ptr+ltoff(%r1),%r22   ; 
+   :		ldw 0(%r22),%r21		; get procedure entry point
    :		bv %r0(%r21)
-   :		ldw RR'lt_ptr+ltoff+4(%r1),%r19	; get new dlt value.
+   :		ldw 4(%r22),%r19		; get new dlt value.
 
    Import stub to call shared library routine from shared library
    (single sub-space version)
-   :		addil LR'ltoff,%r19		; get procedure entry point
-   :		ldw RR'ltoff(%r1),%r21
+   :		addil LR'ltoff,%r19		; get PLT address
+   :		ldo RR'ltoff(%r1),%r22
+   :		ldw 0(%r22),%r21		; get procedure entry point
    :		bv %r0(%r21)
-   :		ldw RR'ltoff+4(%r1),%r19	; get new dlt value.
+   :		ldw 4(%r22),%r19		; get new dlt value.
 
    Import stub to call shared library routine from normal object file
    (multiple sub-space support)
-   :		addil LR'lt_ptr+ltoff,%dp	; get procedure entry point
-   :		ldw RR'lt_ptr+ltoff(%r1),%r21
-   :		ldw RR'lt_ptr+ltoff+4(%r1),%r19	; get new dlt value.
-   :		ldsid (%r21),%r1
+   :		addil LR'lt_ptr+ltoff,%dp	; get PLT address
+   :		ldo RR'lt_ptr+ltoff(%r1),%r22   ; 
+   :		ldw 0(%r22),%r21		; get procedure entry point
+   :		ldsid (%r21),%r1		; get target sid
+   :		ldw 4(%r22),%r19		; get new dlt value.
    :		mtsp %r1,%sr0
    :		be 0(%sr0,%r21)			; branch to target
    :		stw %rp,-24(%sp)		; save rp
 
    Import stub to call shared library routine from shared library
    (multiple sub-space support)
-   :		addil LR'ltoff,%r19		; get procedure entry point
-   :		ldw RR'ltoff(%r1),%r21
-   :		ldw RR'ltoff+4(%r1),%r19	; get new dlt value.
-   :		ldsid (%r21),%r1
+   :		addil LR'ltoff,%r19		; get PLT address
+   :		ldo RR'ltoff(%r1),%r22
+   :		ldw 0(%r22),%r21		; get procedure entry point
+   :		ldsid (%r21),%r1		; get target sid
+   :		ldw 4(%r22),%r19		; get new dlt value.
    :		mtsp %r1,%sr0
    :		be 0(%sr0,%r21)			; branch to target
    :		stw %rp,-24(%sp)		; save rp
@@ -136,12 +140,17 @@
 
 #define PLT_ENTRY_SIZE 8
 #define GOT_ENTRY_SIZE 4
+#define LONG_BRANCH_STUB_SIZE 8
+#define LONG_BRANCH_SHARED_STUB_SIZE 12
+#define IMPORT_STUB_SIZE 20
+#define IMPORT_SHARED_STUB_SIZE 32
+#define EXPORT_STUB_SIZE 24
 #define ELF_DYNAMIC_INTERPRETER "/lib/ld.so.1"
 
 static const bfd_byte plt_stub[] =
 {
-  0x0e, 0x80, 0x10, 0x96,  /* 1: ldw	0(%r20),%r22		*/
-  0xea, 0xc0, 0xc0, 0x00,  /*    bv	%r0(%r22)		*/
+  0x0e, 0x80, 0x10, 0x95,  /* 1: ldw	0(%r20),%r21		*/
+  0xea, 0xa0, 0xc0, 0x00,  /*    bv	%r0(%r21)		*/
   0x0e, 0x88, 0x10, 0x95,  /*    ldw	4(%r20),%r21		*/
 #define PLT_STUB_ENTRY (3*4)
   0xea, 0x9f, 0x1f, 0xdd,  /*    b,l	1b,%r20			*/
@@ -409,7 +418,7 @@ static struct bfd_link_hash_table *
 elf32_hppa_link_hash_table_create (bfd *abfd)
 {
   struct elf32_hppa_link_hash_table *htab;
-  bfd_size_type amt = sizeof (*htab);
+  size_t amt = sizeof (*htab);
 
   htab = bfd_zmalloc (amt);
   if (htab == NULL)
@@ -662,6 +671,10 @@ hppa_type_of_stub (asection *input_sec,
 #define ADDIL_R19	0x2a600000	/* addil LR'XXX,%r19,%r1	*/
 #define LDW_R1_DP	0x483b0000	/* ldw   RR'XXX(%sr0,%r1),%dp	*/
 
+#define LDO_R1_R22	0x34360000	/* ldo   RR'XXX(%r1),%r22	*/
+#define LDW_R22_R21	0x0ec01095	/* ldw   0(%r22),%r21		*/
+#define LDW_R22_R19	0x0ec81093	/* ldw   4(%r22),%r19		*/
+
 #define LDSID_R21_R1	0x02a010a1	/* ldsid (%sr0,%r21),%r1	*/
 #define MTSP_R1		0x00011820	/* mtsp  %r1,%sr0		*/
 #define BE_SR0_R21	0xe2a00000	/* be    0(%sr0,%r21)		*/
@@ -718,6 +731,15 @@ hppa_build_one_stub (struct bfd_hash_entry *bh, void *in_arg)
   switch (hsh->stub_type)
     {
     case hppa_stub_long_branch:
+      /* Fail if the target section could not be assigned to an output
+	 section.  The user should fix his linker script.  */
+      if (hsh->target_section->output_section == NULL
+	  && info->non_contiguous_regions)
+	info->callbacks->einfo (_("%F%P: Could not assign '%pA' to an output "
+				  "section. Retry without "
+				  "--enable-non-contiguous-regions.\n"),
+				hsh->target_section);
+
       /* Create the long branch.  A long branch is formed with "ldil"
 	 loading the upper bits of the target address into a register,
 	 then branching with "be" which adds in the lower bits.
@@ -734,10 +756,19 @@ hppa_build_one_stub (struct bfd_hash_entry *bh, void *in_arg)
       insn = hppa_rebuild_insn ((int) BE_SR4_R1, val, 17);
       bfd_put_32 (stub_bfd, insn, loc + 4);
 
-      size = 8;
+      size = LONG_BRANCH_STUB_SIZE;
       break;
 
     case hppa_stub_long_branch_shared:
+      /* Fail if the target section could not be assigned to an output
+	 section.  The user should fix his linker script.  */
+      if (hsh->target_section->output_section == NULL
+	  && info->non_contiguous_regions)
+	info->callbacks->einfo (_("%F%P: Could not assign %pA to an output "
+				  "section. Retry without "
+				  "--enable-non-contiguous-regions.\n"),
+				hsh->target_section);
+
       /* Branches are relative.  This is where we are going to.  */
       sym_value = (hsh->target_value
 		   + hsh->target_section->output_offset
@@ -756,7 +787,7 @@ hppa_build_one_stub (struct bfd_hash_entry *bh, void *in_arg)
       val = hppa_field_adjust (sym_value, (bfd_signed_vma) -8, e_rrsel) >> 2;
       insn = hppa_rebuild_insn ((int) BE_SR4_R1, val, 17);
       bfd_put_32 (stub_bfd, insn, loc + 8);
-      size = 12;
+      size = LONG_BRANCH_SHARED_STUB_SIZE;
       break;
 
     case hppa_stub_import:
@@ -776,45 +807,49 @@ hppa_build_one_stub (struct bfd_hash_entry *bh, void *in_arg)
       if (hsh->stub_type == hppa_stub_import_shared)
 	insn = ADDIL_R19;
 #endif
+
+      /* Load function descriptor address into register %r22.  It is
+	 sometimes needed for lazy binding.  */
       val = hppa_field_adjust (sym_value, 0, e_lrsel),
       insn = hppa_rebuild_insn ((int) insn, val, 21);
       bfd_put_32 (stub_bfd, insn, loc);
 
-      /* It is critical to use lrsel/rrsel here because we are using
-	 two different offsets (+0 and +4) from sym_value.  If we use
-	 lsel/rsel then with unfortunate sym_values we will round
-	 sym_value+4 up to the next 2k block leading to a mis-match
-	 between the lsel and rsel value.  */
       val = hppa_field_adjust (sym_value, 0, e_rrsel);
-      insn = hppa_rebuild_insn ((int) LDW_R1_R21, val, 14);
+      insn = hppa_rebuild_insn ((int) LDO_R1_R22, val, 14);
       bfd_put_32 (stub_bfd, insn, loc + 4);
+
+      bfd_put_32 (stub_bfd, (bfd_vma) LDW_R22_R21, loc + 8);
 
       if (htab->multi_subspace)
 	{
-	  val = hppa_field_adjust (sym_value, (bfd_signed_vma) 4, e_rrsel);
-	  insn = hppa_rebuild_insn ((int) LDW_R1_DLT, val, 14);
-	  bfd_put_32 (stub_bfd, insn, loc + 8);
-
 	  bfd_put_32 (stub_bfd, (bfd_vma) LDSID_R21_R1, loc + 12);
-	  bfd_put_32 (stub_bfd, (bfd_vma) MTSP_R1,      loc + 16);
-	  bfd_put_32 (stub_bfd, (bfd_vma) BE_SR0_R21,   loc + 20);
-	  bfd_put_32 (stub_bfd, (bfd_vma) STW_RP,       loc + 24);
+	  bfd_put_32 (stub_bfd, (bfd_vma) LDW_R22_R19,  loc + 16);
+	  bfd_put_32 (stub_bfd, (bfd_vma) MTSP_R1,      loc + 20);
+	  bfd_put_32 (stub_bfd, (bfd_vma) BE_SR0_R21,   loc + 24);
+	  bfd_put_32 (stub_bfd, (bfd_vma) STW_RP,       loc + 28);
 
-	  size = 28;
+	  size = IMPORT_SHARED_STUB_SIZE;
 	}
       else
 	{
-	  bfd_put_32 (stub_bfd, (bfd_vma) BV_R0_R21, loc + 8);
-	  val = hppa_field_adjust (sym_value, (bfd_signed_vma) 4, e_rrsel);
-	  insn = hppa_rebuild_insn ((int) LDW_R1_DLT, val, 14);
-	  bfd_put_32 (stub_bfd, insn, loc + 12);
+	  bfd_put_32 (stub_bfd, (bfd_vma) BV_R0_R21, loc + 12);
+	  bfd_put_32 (stub_bfd, (bfd_vma) LDW_R22_R19, loc + 16);
 
-	  size = 16;
+	  size = IMPORT_STUB_SIZE;
 	}
 
       break;
 
     case hppa_stub_export:
+      /* Fail if the target section could not be assigned to an output
+	 section.  The user should fix his linker script.  */
+      if (hsh->target_section->output_section == NULL
+	  && info->non_contiguous_regions)
+	info->callbacks->einfo (_("%F%P: Could not assign %pA to an output "
+				  "section. Retry without "
+				  "--enable-non-contiguous-regions.\n"),
+				hsh->target_section);
+
       /* Branches are relative.  This is where we are going to.  */
       sym_value = (hsh->target_value
 		   + hsh->target_section->output_offset
@@ -858,7 +893,7 @@ hppa_build_one_stub (struct bfd_hash_entry *bh, void *in_arg)
       hsh->hh->eh.root.u.def.section = stub_sec;
       hsh->hh->eh.root.u.def.value = stub_sec->size;
 
-      size = 24;
+      size = EXPORT_STUB_SIZE;
       break;
 
     default:
@@ -906,17 +941,17 @@ hppa_size_one_stub (struct bfd_hash_entry *bh, void *in_arg)
   htab = in_arg;
 
   if (hsh->stub_type == hppa_stub_long_branch)
-    size = 8;
+    size = LONG_BRANCH_STUB_SIZE;
   else if (hsh->stub_type == hppa_stub_long_branch_shared)
-    size = 12;
+    size = LONG_BRANCH_SHARED_STUB_SIZE;
   else if (hsh->stub_type == hppa_stub_export)
-    size = 24;
+    size = EXPORT_STUB_SIZE;
   else /* hppa_stub_import or hppa_stub_import_shared.  */
     {
       if (htab->multi_subspace)
-	size = 28;
+	size = IMPORT_SHARED_STUB_SIZE;
       else
-	size = 16;
+	size = IMPORT_STUB_SIZE;
     }
 
   hsh->stub_sec->size += size;
@@ -1273,9 +1308,7 @@ elf32_hppa_check_relocs (bfd *abfd,
 	  /* This relocation describes which C++ vtable entries are actually
 	     used.  Record for later use during GC.  */
 	case R_PARISC_GNU_VTENTRY:
-	  BFD_ASSERT (hh != NULL);
-	  if (hh != NULL
-	      && !bfd_elf_gc_record_vtentry (abfd, sec, &hh->eh, rela->r_addend))
+	  if (!bfd_elf_gc_record_vtentry (abfd, sec, &hh->eh, rela->r_addend))
 	    return FALSE;
 	  continue;
 
@@ -2272,12 +2305,13 @@ elf32_hppa_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	      /* Make space for the plt stub at the end of the .plt
 		 section.  We want this stub right at the end, up
 		 against the .got section.  */
-	      int gotalign = bfd_section_alignment (dynobj, htab->etab.sgot);
-	      int pltalign = bfd_section_alignment (dynobj, sec);
+	      int gotalign = bfd_section_alignment (htab->etab.sgot);
+	      int pltalign = bfd_section_alignment (sec);
+	      int align = gotalign > 3 ? gotalign : 3;
 	      bfd_size_type mask;
 
-	      if (gotalign > pltalign)
-		(void) bfd_set_section_alignment (dynobj, sec, gotalign);
+	      if (align > pltalign)
+		bfd_set_section_alignment (sec, align);
 	      mask = ((bfd_size_type) 1 << gotalign) - 1;
 	      sec->size = (sec->size + sizeof (plt_stub) + mask) & ~mask;
 	    }
@@ -2286,7 +2320,7 @@ elf32_hppa_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	       || sec == htab->etab.sdynbss
 	       || sec == htab->etab.sdynrelro)
 	;
-      else if (CONST_STRNEQ (bfd_get_section_name (dynobj, sec), ".rela"))
+      else if (CONST_STRNEQ (bfd_section_name (sec), ".rela"))
 	{
 	  if (sec->size != 0)
 	    {
@@ -2400,7 +2434,7 @@ elf32_hppa_setup_section_lists (bfd *output_bfd, struct bfd_link_info *info)
   unsigned int top_id, top_index;
   asection *section;
   asection **input_list, **list;
-  bfd_size_type amt;
+  size_t amt;
   struct elf32_hppa_link_hash_table *htab = hppa_link_hash_table (info);
 
   if (htab == NULL)
@@ -2589,7 +2623,7 @@ get_local_syms (bfd *output_bfd, bfd *input_bfd, struct bfd_link_info *info)
   /* We want to read in symbol extension records only once.  To do this
      we need to read in the local symbols in parallel and save them for
      later use; so hold pointers to the local symbols in an array.  */
-  bfd_size_type amt = sizeof (Elf_Internal_Sym *) * htab->bfd_count;
+  size_t amt = sizeof (Elf_Internal_Sym *) * htab->bfd_count;
   all_local_syms = bfd_zmalloc (amt);
   htab->all_local_syms = all_local_syms;
   if (all_local_syms == NULL)
@@ -3214,7 +3248,7 @@ final_link_relocate (asection *input_section,
 		     struct elf32_hppa_link_hash_entry *hh,
 		     struct bfd_link_info *info)
 {
-  int insn;
+  unsigned int insn;
   unsigned int r_type = ELF32_R_TYPE (rela->r_info);
   unsigned int orig_r_type = r_type;
   reloc_howto_type *howto = elf_hppa_howto_table + r_type;
@@ -3333,7 +3367,7 @@ final_link_relocate (asection *input_section,
 	      /* GCC sometimes uses a register other than r19 for the
 		 operation, so we must convert any addil instruction
 		 that uses this relocation.  */
-	      if ((insn & 0xfc000000) == ((int) OP_ADDIL << 26))
+	      if ((insn & 0xfc000000) == OP_ADDIL << 26)
 		insn = ADDIL_DP;
 	      else
 		/* We must have a ldil instruction.  It's too hard to find
@@ -3367,8 +3401,8 @@ final_link_relocate (asection *input_section,
 	 instance: "extern int foo" with foo defined as "const int foo".  */
       if (sym_sec == NULL || (sym_sec->flags & SEC_CODE) != 0)
 	{
-	  if ((insn & ((0x3f << 26) | (0x1f << 21)))
-	      == (((int) OP_ADDIL << 26) | (27 << 21)))
+	  if ((insn & ((0x3fu << 26) | (0x1f << 21)))
+	      == ((OP_ADDIL << 26) | (27 << 21)))
 	    {
 	      insn &= ~ (0x1f << 21);
 	    }
@@ -4153,7 +4187,7 @@ elf32_hppa_relocate_section (bfd *output_bfd,
 		    if (sym_name == NULL)
 		      return FALSE;
 		    if (*sym_name == '\0')
-		      sym_name = bfd_section_name (input_bfd, sym_sec);
+		      sym_name = bfd_section_name (sym_sec);
 		    _bfd_error_handler
 		      (_("%pB:%s has both normal and TLS relocs"),
 		       input_bfd, sym_name);
@@ -4203,7 +4237,7 @@ elf32_hppa_relocate_section (bfd *output_bfd,
 	  if (sym_name == NULL)
 	    return FALSE;
 	  if (*sym_name == '\0')
-	    sym_name = bfd_section_name (input_bfd, sym_sec);
+	    sym_name = bfd_section_name (sym_sec);
 	}
 
       howto = elf_hppa_howto_table + r_type;

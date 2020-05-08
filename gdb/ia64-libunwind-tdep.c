@@ -1,6 +1,6 @@
 /* Frame unwinder for ia64 frames using the libunwind library.
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2020 Free Software Foundation, Inc.
 
    Written by Jeff Johnston, contributed by Red Hat Inc.
 
@@ -36,7 +36,7 @@
 #include "ia64-libunwind-tdep.h"
 
 #include "complaints.h"
-#include "common/preprocessor.h"
+#include "gdbsupport/preprocessor.h"
 
 /* IA-64 is the only target that currently uses ia64-libunwind-tdep.
    Note how UNW_TARGET, UNW_OBJ, etc. are compile time constants below.
@@ -197,7 +197,7 @@ libunwind_frame_cache (struct frame_info *this_frame, void **this_cache)
        The best we can do, in that case, is use the frame PC as the function
        address.  We don't need to give up since we still have the unwind
        record to help us perform the unwinding.  There is also another
-       compelling to continue, because abandonning now means stopping
+       compelling to continue, because abandoning now means stopping
        the backtrace, which can never be helpful for the user.  */
     cache->func_addr = get_frame_pc (this_frame);
 
@@ -591,8 +591,9 @@ libunwind_is_initialized (void)
   return libunwind_initialized;
 }
 
+void _initialize_libunwind_frame ();
 void
-_initialize_libunwind_frame (void)
+_initialize_libunwind_frame ()
 {
   libunwind_descr_handle
     = gdbarch_data_register_post_init (libunwind_descr_init);

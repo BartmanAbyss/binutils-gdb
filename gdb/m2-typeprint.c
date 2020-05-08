@@ -1,5 +1,5 @@
 /* Support for printing Modula 2 types for GDB, the GNU debugger.
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -31,6 +31,7 @@
 #include "c-lang.h"
 #include "typeprint.h"
 #include "cp-abi.h"
+#include "cli/cli-style.h"
 
 static void m2_print_bounds (struct type *type,
 			     struct ui_file *stream, int show, int level,
@@ -81,7 +82,7 @@ m2_print_type (struct type *type, const char *varstring,
   wrap_here ("    ");
   if (type == NULL)
     {
-      fputs_filtered (_("<type unknown>"), stream);
+      fputs_styled (_("<type unknown>"), metadata_style.style (), stream);
       return;
     }
 
@@ -164,12 +165,12 @@ m2_print_typedef (struct type *type, struct symbol *new_symbol,
   fprintf_filtered (stream, "TYPE ");
   if (!TYPE_NAME (SYMBOL_TYPE (new_symbol))
       || strcmp (TYPE_NAME ((SYMBOL_TYPE (new_symbol))),
-		 SYMBOL_LINKAGE_NAME (new_symbol)) != 0)
-    fprintf_filtered (stream, "%s = ", SYMBOL_PRINT_NAME (new_symbol));
+		 new_symbol->linkage_name ()) != 0)
+    fprintf_filtered (stream, "%s = ", new_symbol->print_name ());
   else
     fprintf_filtered (stream, "<builtin> = ");
   type_print (type, "", stream, 0);
-  fprintf_filtered (stream, ";\n");
+  fprintf_filtered (stream, ";");
 }
 
 /* m2_type_name - if a, type, has a name then print it.  */
@@ -234,9 +235,9 @@ static void m2_array (struct type *type, struct ui_file *stream,
 	  m2_print_bounds (TYPE_INDEX_TYPE (type), stream, show, -1, 1);
 	}
       else
-	fprintf_filtered (stream, "%d",
-			  (TYPE_LENGTH (type)
-			   / TYPE_LENGTH (TYPE_TARGET_TYPE (type))));
+	fputs_filtered (pulongest ((TYPE_LENGTH (type)
+				    / TYPE_LENGTH (TYPE_TARGET_TYPE (type)))),
+			stream);
     }
   fprintf_filtered (stream, "] OF ");
   m2_print_type (TYPE_TARGET_TYPE (type), "", stream, show, level, flags);
@@ -562,7 +563,8 @@ m2_record_fields (struct type *type, struct ui_file *stream, int show,
 	  QUIT;
 
 	  print_spaces_filtered (level + 4, stream);
-	  fputs_filtered (TYPE_FIELD_NAME (type, i), stream);
+	  fputs_styled (TYPE_FIELD_NAME (type, i),
+			variable_name_style.style (), stream);
 	  fputs_filtered (" : ", stream);
 	  m2_print_type (TYPE_FIELD_TYPE (type, i),
 			 "",
@@ -607,7 +609,8 @@ m2_enum (struct type *type, struct ui_file *stream, int show, int level)
 	  if (i > 0)
 	    fprintf_filtered (stream, ", ");
 	  wrap_here ("    ");
-	  fputs_filtered (TYPE_FIELD_NAME (type, i), stream);
+	  fputs_styled (TYPE_FIELD_NAME (type, i),
+			variable_name_style.style (), stream);
 	  if (lastval != TYPE_FIELD_ENUMVAL (type, i))
 	    {
 	      fprintf_filtered (stream, " = %s",

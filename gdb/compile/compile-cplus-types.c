@@ -1,6 +1,6 @@
 /* Convert types from GDB to GCC
 
-   Copyright (C) 2014-2019 Free Software Foundation, Inc.
+   Copyright (C) 2014-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,11 +19,11 @@
 
 
 #include "defs.h"
-#include "common/preprocessor.h"
+#include "gdbsupport/preprocessor.h"
 #include "gdbtypes.h"
 #include "compile-internal.h"
 #include "compile-cplus.h"
-#include "common/gdb_assert.h"
+#include "gdbsupport/gdb_assert.h"
 #include "symtab.h"
 #include "source.h"
 #include "cp-support.h"
@@ -41,11 +41,11 @@ const char *compile_cplus_instance::m_default_cflags = "-std=gnu++11";
 
 /* Flag to enable internal debugging.  */
 
-static int debug_compile_cplus_types = 0;
+static bool debug_compile_cplus_types = false;
 
 /* Flag to enable internal scope switching debugging.  */
 
-static int debug_compile_cplus_scopes = 0;
+static bool debug_compile_cplus_scopes = false;
 
 /* Forward declarations.  */
 
@@ -65,7 +65,7 @@ compile_cplus_instance::decl_name (const char *natural)
   if (name != nullptr)
     return name;
 
-  return gdb::unique_xmalloc_ptr<char> (xstrdup (natural));
+  return make_unique_xstrdup (natural);
 }
 
 /* Get the access flag for the NUM'th field of TYPE.  */
@@ -112,7 +112,7 @@ debug_print_scope (const compile_scope &scope)
   for (const auto &comp: scope)
     {
       const char *symbol = (comp.bsymbol.symbol != nullptr
-			    ? SYMBOL_NATURAL_NAME (comp.bsymbol.symbol)
+			    ? comp.bsymbol.symbol->natural_name ()
 			    : "<none>");
 
       printf_unfiltered ("\tname = %s, symbol = %s\n", comp.name.c_str (),
@@ -910,7 +910,7 @@ static gcc_type
 compile_cplus_convert_enum (compile_cplus_instance *instance, struct type *type,
 			    enum gcc_cp_symbol_kind nested_access)
 {
-  int scoped_enum_p = FALSE;
+  bool scoped_enum_p = false;
 
   /* Create a new scope for this type.  */
   compile_scope scope = instance->new_scope (TYPE_NAME (type), type);
@@ -1404,6 +1404,7 @@ gcc_cp_plugin::pop_binding_level (const char *debug_name)
   return pop_binding_level ();
 }
 
+void _initialize_compile_cplus_types ();
 void
 _initialize_compile_cplus_types ()
 {

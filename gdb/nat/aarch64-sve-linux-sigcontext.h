@@ -1,4 +1,4 @@
-/* Copyright (C) 2018-2019 Free Software Foundation, Inc.
+/* Copyright (C) 2018-2020 Free Software Foundation, Inc.
    Contributed by Arm Ltd.
 
    This file is part of GDB.
@@ -133,7 +133,7 @@ struct sve_context {
 
 struct user_sve_header {
 	__u32 size; /* total meaningful regset content in bytes */
-	__u32 max_size; /* maxmium possible size for this thread */
+	__u32 max_size; /* maximum possible size for this thread */
 	__u16 vl; /* current vector length */
 	__u16 max_vl; /* maximum possible vector length */
 	__u16 flags;

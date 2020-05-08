@@ -1,6 +1,6 @@
 /* Language independent support for printing types for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2019 Free Software Foundation, Inc.
+   Copyright (C) 1986-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -36,6 +36,7 @@
 #include "cli/cli-utils.h"
 #include "extension.h"
 #include "completer.h"
+#include "cli/cli-style.h"
 
 const struct type_print_options type_print_raw_options =
 {
@@ -94,11 +95,11 @@ print_offset_data::maybe_print_hole (struct ui_file *stream,
       unsigned int hole_bit = hole % TARGET_CHAR_BIT;
 
       if (hole_bit > 0)
-	fprintf_filtered (stream, "/* XXX %2u-bit %s  */\n", hole_bit,
+	fprintf_filtered (stream, "/* XXX %2u-bit %s   */\n", hole_bit,
 			  for_what);
 
       if (hole_byte > 0)
-	fprintf_filtered (stream, "/* XXX %2u-byte %s */\n", hole_byte,
+	fprintf_filtered (stream, "/* XXX %2u-byte %s  */\n", hole_byte,
 			  for_what);
     }
 }
@@ -120,7 +121,8 @@ print_offset_data::update (struct type *type, unsigned int field_idx,
     {
       /* Since union fields don't have the concept of offsets, we just
 	 print their sizes.  */
-      fprintf_filtered (stream, "/*              %4u */", TYPE_LENGTH (ftype));
+      fprintf_filtered (stream, "/*              %4s */",
+			pulongest (TYPE_LENGTH (ftype)));
       return;
     }
 
@@ -130,32 +132,16 @@ print_offset_data::update (struct type *type, unsigned int field_idx,
 
   maybe_print_hole (stream, bitpos, "hole");
 
-  if (TYPE_FIELD_PACKED (type, field_idx))
+  if (TYPE_FIELD_PACKED (type, field_idx)
+      || offset_bitpos % TARGET_CHAR_BIT != 0)
     {
-      /* We're dealing with a bitfield.  Print how many bits are left
-	 to be used.  */
-      unsigned int bitsize = TYPE_FIELD_BITSIZE (type, field_idx);
-      /* The bitpos relative to the beginning of our container
-	 field.  */
-      unsigned int relative_bitpos;
+      /* We're dealing with a bitfield.  Print the bit offset.  */
+      fieldsize_bit = TYPE_FIELD_BITSIZE (type, field_idx);
 
-      /* The following was copied from
-	 value.c:value_primitive_field.  */
-      if ((bitpos % fieldsize_bit) + bitsize <= fieldsize_bit)
-	relative_bitpos = bitpos % fieldsize_bit;
-      else
-	relative_bitpos = bitpos % TARGET_CHAR_BIT;
+      unsigned real_bitpos = bitpos + offset_bitpos;
 
-      /* This is the exact offset (in bits) of this bitfield.  */
-      unsigned int bit_offset
-	= (bitpos - relative_bitpos) + offset_bitpos;
-
-      /* The position of the field, relative to the beginning of the
-	 struct, and how many bits are left to be used in this
-	 container.  */
-      fprintf_filtered (stream, "/* %4u:%2u", bit_offset / TARGET_CHAR_BIT,
-			fieldsize_bit - (relative_bitpos + bitsize));
-      fieldsize_bit = bitsize;
+      fprintf_filtered (stream, "/* %4u:%2u", real_bitpos / TARGET_CHAR_BIT,
+			real_bitpos % TARGET_CHAR_BIT);
     }
   else
     {
@@ -183,8 +169,8 @@ print_offset_data::finish (struct type *type, int level,
 
   fputs_filtered ("\n", stream);
   print_spaces_filtered (level + 4 + print_offset_data::indentation, stream);
-  fprintf_filtered (stream, "/* total size (bytes): %4u */\n",
-		    TYPE_LENGTH (type));
+  fprintf_filtered (stream, "/* total size (bytes): %4s */\n",
+		    pulongest (TYPE_LENGTH (type)));
 }
 
 
@@ -253,7 +239,7 @@ typedef_hash_table::add_template_parameters (struct type *t)
 	continue;
 
       tf = XOBNEW (&m_storage, struct decl_field);
-      tf->name = SYMBOL_LINKAGE_NAME (TYPE_TEMPLATE_ARGUMENT (t, i));
+      tf->name = TYPE_TEMPLATE_ARGUMENT (t, i)->linkage_name ();
       tf->type = SYMBOL_TYPE (TYPE_TEMPLATE_ARGUMENT (t, i));
 
       slot = htab_find_slot (m_table, tf, INSERT);
@@ -340,9 +326,8 @@ typedef_hash_table::find_global_typedef (const struct type_print_options *flags,
 
   if (applied != NULL)
     {
-      new_tf->name
-	= (const char *) obstack_copy0 (&flags->global_typedefs->m_storage,
-					applied, strlen (applied));
+      new_tf->name = obstack_strdup (&flags->global_typedefs->m_storage,
+				     applied);
       xfree (applied);
     }
 
@@ -412,17 +397,16 @@ type_print (struct type *type, const char *varstring, struct ui_file *stream,
 std::string
 type_to_string (struct type *type)
 {
-  TRY
+  try
     {
       string_file stb;
 
       type_print (type, "", &stb, -1);
       return std::move (stb.string ());
     }
-  CATCH (except, RETURN_MASK_ALL)
+  catch (const gdb_exception &except)
     {
     }
-  END_CATCH
 
   return {};
 }
@@ -432,7 +416,8 @@ type_to_string (struct type *type)
 void
 type_print_unknown_return_type (struct ui_file *stream)
 {
-  fprintf_filtered (stream, _("<unknown return type>"));
+  fprintf_styled (stream, metadata_style.style (),
+		  _("<unknown return type>"));
 }
 
 /* See typeprint.h.  */
@@ -730,21 +715,7 @@ struct cmd_list_element *setprinttypelist;
 
 struct cmd_list_element *showprinttypelist;
 
-static void
-set_print_type (const char *arg, int from_tty)
-{
-  printf_unfiltered (
-     "\"set print type\" must be followed by the name of a subcommand.\n");
-  help_list (setprintlist, "set print type ", all_commands, gdb_stdout);
-}
-
-static void
-show_print_type (const char *args, int from_tty)
-{
-  cmd_show_list (showprinttypelist, from_tty, "");
-}
-
-static int print_methods = 1;
+static bool print_methods = true;
 
 static void
 set_print_type_methods (const char *args,
@@ -761,7 +732,7 @@ show_print_type_methods (struct ui_file *file, int from_tty,
 		    value);
 }
 
-static int print_typedefs = 1;
+static bool print_typedefs = true;
 
 static void
 set_print_type_typedefs (const char *args,
@@ -813,8 +784,9 @@ show_print_type_nested_types  (struct ui_file *file, int from_tty,
     }
 }
 
+void _initialize_typeprint ();
 void
-_initialize_typeprint (void)
+_initialize_typeprint ()
 {
   struct cmd_list_element *c;
 
@@ -833,7 +805,7 @@ Available FLAGS are:\n\
   /M    print methods defined in a class\n\
   /t    do not print typedefs defined in a class\n\
   /T    print typedefs defined in a class\n\
-  /o    print offsets and sizes of fields in a struct (like pahole)\n"));
+  /o    print offsets and sizes of fields in a struct (like pahole)"));
   set_cmd_completer (c, expression_completer);
 
   c = add_com ("whatis", class_vars, whatis_command,
@@ -841,12 +813,14 @@ Available FLAGS are:\n\
 Only one level of typedefs is unrolled.  See also \"ptype\"."));
   set_cmd_completer (c, expression_completer);
 
-  add_prefix_cmd ("type", no_class, show_print_type,
-		  _("Generic command for showing type-printing settings."),
-		  &showprinttypelist, "show print type ", 0, &showprintlist);
-  add_prefix_cmd ("type", no_class, set_print_type,
-		  _("Generic command for setting how types print."),
-		  &setprinttypelist, "set print type ", 0, &setprintlist);
+  add_show_prefix_cmd ("type", no_class,
+		       _("Generic command for showing type-printing settings."),
+		       &showprinttypelist, "show print type ", 0,
+		       &showprintlist);
+  add_basic_prefix_cmd ("type", no_class,
+			_("Generic command for setting how types print."),
+			&setprinttypelist, "set print type ", 0,
+			&setprintlist);
 
   add_setshow_boolean_cmd ("methods", no_class, &print_methods,
 			   _("\
@@ -879,7 +853,7 @@ Show the number of recursive nested type definitions to print."), NULL,
 void
 val_print_not_allocated (struct ui_file *stream)
 {
-  fprintf_filtered (stream, _("<not allocated>"));
+  fprintf_styled (stream, metadata_style.style (), _("<not allocated>"));
 }
 
 /* Print <not associated> status to stream STREAM.  */
@@ -887,5 +861,5 @@ val_print_not_allocated (struct ui_file *stream)
 void
 val_print_not_associated (struct ui_file *stream)
 {
-  fprintf_filtered (stream, _("<not associated>"));
+  fprintf_styled (stream, metadata_style.style (), _("<not associated>"));
 }

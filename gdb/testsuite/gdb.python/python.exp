@@ -1,4 +1,4 @@
-# Copyright (C) 2008-2019 Free Software Foundation, Inc.
+# Copyright (C) 2008-2020 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -94,7 +94,7 @@ gdb_py_test_multiple "indented multi-line python command" \
 
 gdb_test "source $remote_source2_py" "yes" "source source2.py"
 
-gdb_test "source -s source2.py" "yes" "source -s source2.py"
+gdb_test "source -s source2.py" "yes"
 
 set remote_source2_symlink_notpy \
     [gdb_remote_download host ${srcdir}/${subdir}/source2.py \
@@ -234,6 +234,10 @@ gdb_test "python print (len(symtab))" "2" "test decode_line current location"
 gdb_test "python print (symtab\[0\])" "None" "test decode_line expression parse"
 gdb_test "python print (len(symtab\[1\]))" "1" "test decode_line current location"
 
+# Test that decode_line with an empty string argument does not crash.
+gdb_py_test_silent_cmd "python symtab2 = gdb.decode_line('')" \
+    "test decode_line with empty string" 1
+
 if { [is_remote host] } {
     set python_c [string_to_regexp "python.c"]
 } else {
@@ -288,12 +292,15 @@ gdb_test "python print (symtab\[1\]\[0\].symtab)" "None" "test decode_line *0 fi
 gdb_test "python print (symtab\[1\]\[0\].pc)" "0" "test decode_line *0 pc"
 
 # gdb.write
-gdb_test "python print (sys.stderr)" ".*gdb.GdbOutputErrorFile (instance|object) at.*" "test stderr location"
-gdb_test "python print (sys.stdout)" ".*gdb.GdbOutputFile (instance|object) at.*" "test stdout location"
+gdb_test "python print (sys.stderr)" ".*gdb._GdbOutputErrorFile (instance|object) at.*" "test stderr location"
+gdb_test "python print (sys.stdout)" ".*gdb._GdbOutputFile (instance|object) at.*" "test stdout location"
 gdb_test "python gdb.write(\"Foo\\n\")" "Foo" "test default write"
 gdb_test "python gdb.write(\"Error stream\\n\", stream=gdb.STDERR)" "Error stream" "test stderr write"
 gdb_test "python gdb.write(\"Normal stream\\n\", stream=gdb.STDOUT)" "Normal stream" "test stdout write"
-gdb_test "python gdb.write(\"Log stream\\n\", stream=gdb.STDLOG)" "Log stream" "test stdlog write"
+
+if ![gdb_debug_enabled] {
+  gdb_test "python gdb.write(\"Log stream\\n\", stream=gdb.STDLOG)" "Log stream" "test stdlog write"
+}
 
 # Turn on full stack printing for subsequent tests.
 gdb_py_test_silent_cmd "set python print-stack full" \
@@ -450,7 +457,7 @@ gdb_py_test_multiple "prompt substitution readline" \
   "end" ""
 
 gdb_test_multiple "python gdb.prompt_hook = error_prompt" "set the hook" {
-    -re "Python Exception (exceptions.RuntimeError|<(type 'exceptions.|class ')RuntimeError'>) Python exception called.*" {
+    -re "Python Exception (exceptions.RuntimeError|<(type 'exceptions.|class ')RuntimeError'>) Python exception called.*$gdb_prompt $" {
 	pass "set hook"
     }
 }
@@ -462,7 +469,7 @@ gdb_py_test_silent_cmd "set python print-stack full" \
     "set print-stack full for prompt error test" 1
 
 gdb_test_multiple "python gdb.prompt_hook = error_prompt" "set the hook" {
-    -re "Traceback.*File.*line.*RuntimeError.*Python exception called.*" {
+    -re "Traceback.*File.*line.*RuntimeError.*Python exception called.*$gdb_prompt $" {
 	pass "set hook"
     }
 }

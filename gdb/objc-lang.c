@@ -1,6 +1,6 @@
 /* Objective-C language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+   Copyright (C) 2002-2020 Free Software Foundation, Inc.
 
    Contributed by Apple Computer, Inc.
    Written by Michael Snyder.
@@ -75,7 +75,7 @@ struct objc_method {
   CORE_ADDR imp;
 };
 
-static const struct objfile_data *objc_objfile_data;
+static const struct objfile_key<unsigned int> objc_objfile_data;
 
 /* Lookup a structure type named "struct NAME", visible in lexical
    block BLOCK.  If NOERR is nonzero, return zero if NAME is not
@@ -381,7 +381,7 @@ extern const struct language_defn objc_language_defn = {
   c_emit_char,
   c_print_type,			/* Print a type using appropriate syntax */
   c_print_typedef,		/* Print a typedef using appropriate syntax */
-  c_val_print,			/* Print a value using appropriate syntax */
+  c_value_print_inner,		/* la_value_print_inner */
   c_value_print,		/* Print a top-level value */
   default_read_var_value,	/* la_read_var_value */
   objc_skip_trampoline, 	/* Language specific skip_trampoline */
@@ -401,7 +401,6 @@ extern const struct language_defn objc_language_defn = {
   c_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
-  default_get_string,
   c_watch_location_expression,
   NULL,				/* la_get_symbol_name_matcher */
   iterate_over_symbols,
@@ -409,7 +408,8 @@ extern const struct language_defn objc_language_defn = {
   &default_varobj_ops,
   NULL,
   NULL,
-  LANG_MAGIC
+  c_is_string_type_p,
+  "{...}"			/* la_struct_too_deep_ellipsis */
 };
 
 /*
@@ -491,7 +491,7 @@ end_msglist (struct parser_state *ps)
   selname_chain = sel->next;
   msglist_len = sel->msglist_len;
   msglist_sel = sel->msglist_sel;
-  selid = lookup_child_selector (parse_gdbarch (ps), p);
+  selid = lookup_child_selector (ps->gdbarch (), p);
   if (!selid)
     error (_("Can't find selector \"%s\""), p);
   write_exp_elt_longcst (ps, selid);
@@ -537,8 +537,8 @@ compare_selectors (const void *a, const void *b)
 {
   const char *aname, *bname;
 
-  aname = SYMBOL_PRINT_NAME (*(struct symbol **) a);
-  bname = SYMBOL_PRINT_NAME (*(struct symbol **) b);
+  aname = (*(struct symbol **) a)->print_name ();
+  bname = (*(struct symbol **) b)->print_name ();
   if (aname == NULL || bname == NULL)
     error (_("internal: compare_selectors(1)"));
 
@@ -610,7 +610,7 @@ info_selectors_command (const char *regexp, int from_tty)
       for (minimal_symbol *msymbol : objfile->msymbols ())
 	{
 	  QUIT;
-	  name = MSYMBOL_NATURAL_NAME (msymbol);
+	  name = msymbol->natural_name ();
 	  if (name
 	      && (name[0] == '-' || name[0] == '+')
 	      && name[1] == '[')		/* Got a method name.  */
@@ -623,7 +623,7 @@ info_selectors_command (const char *regexp, int from_tty)
 	      if (name == NULL)
 		{
 		  complaint (_("Bad method name '%s'"),
-			     MSYMBOL_NATURAL_NAME (msymbol));
+			     msymbol->natural_name ());
 		  continue;
 		}
 	      if (regexp == NULL || re_exec(++name) != 0)
@@ -650,7 +650,7 @@ info_selectors_command (const char *regexp, int from_tty)
 	  for (minimal_symbol *msymbol : objfile->msymbols ())
 	    {
 	      QUIT;
-	      name = MSYMBOL_NATURAL_NAME (msymbol);
+	      name = msymbol->natural_name ();
 	      if (name &&
 		  (name[0] == '-' || name[0] == '+') &&
 		  name[1] == '[')		/* Got a method name.  */
@@ -675,7 +675,7 @@ info_selectors_command (const char *regexp, int from_tty)
 	  char *p = asel;
 
 	  QUIT;
-	  name = SYMBOL_NATURAL_NAME (sym_arr[ix]);
+	  name = sym_arr[ix]->natural_name ();
 	  name = strchr (name, ' ') + 1;
 	  if (p[0] && specialcmp(name, p) == 0)
 	    continue;		/* Seen this one already (not unique).  */
@@ -706,8 +706,8 @@ compare_classes (const void *a, const void *b)
 {
   const char *aname, *bname;
 
-  aname = SYMBOL_PRINT_NAME (*(struct symbol **) a);
-  bname = SYMBOL_PRINT_NAME (*(struct symbol **) b);
+  aname = (*(struct symbol **) a)->print_name ();
+  bname = (*(struct symbol **) b)->print_name ();
   if (aname == NULL || bname == NULL)
     error (_("internal: compare_classes(1)"));
 
@@ -764,7 +764,7 @@ info_classes_command (const char *regexp, int from_tty)
       for (minimal_symbol *msymbol : objfile->msymbols ())
 	{
 	  QUIT;
-	  name = MSYMBOL_NATURAL_NAME (msymbol);
+	  name = msymbol->natural_name ();
 	  if (name &&
 	      (name[0] == '-' || name[0] == '+') &&
 	      name[1] == '[')			/* Got a method name.  */
@@ -791,7 +791,7 @@ info_classes_command (const char *regexp, int from_tty)
 	  for (minimal_symbol *msymbol : objfile->msymbols ())
 	    {
 	      QUIT;
-	      name = MSYMBOL_NATURAL_NAME (msymbol);
+	      name = msymbol->natural_name ();
 	      if (name &&
 		  (name[0] == '-' || name[0] == '+') &&
 		  name[1] == '[') /* Got a method name.  */
@@ -809,7 +809,7 @@ info_classes_command (const char *regexp, int from_tty)
 	  char *p = aclass;
 
 	  QUIT;
-	  name = SYMBOL_NATURAL_NAME (sym_arr[ix]);
+	  name = sym_arr[ix]->natural_name ();
 	  name += 2;
 	  if (p[0] && specialcmp(name, p) == 0)
 	    continue;	/* Seen this one already (not unique).  */
@@ -1003,7 +1003,7 @@ find_methods (char type, const char *theclass, const char *category,
 
       unsigned int objfile_csym = 0;
 
-      objc_csym = (unsigned int *) objfile_data (objfile, objc_objfile_data);
+      objc_csym = objc_objfile_data.get (objfile);
       if (objc_csym != NULL && *objc_csym == 0)
 	/* There are no ObjC symbols in this objfile.  Skip it entirely.  */
 	continue;
@@ -1014,7 +1014,7 @@ find_methods (char type, const char *theclass, const char *category,
 
 	  /* Check the symbol name first as this can be done entirely without
 	     sending any query to the target.  */
-	  symname = MSYMBOL_NATURAL_NAME (msymbol);
+	  symname = msymbol->natural_name ();
 	  if (symname == NULL)
 	    continue;
 
@@ -1055,18 +1055,14 @@ find_methods (char type, const char *theclass, const char *category,
 	}
 
       if (objc_csym == NULL)
-	{
-	  objc_csym = XOBNEW (&objfile->objfile_obstack, unsigned int);
-	  *objc_csym = objfile_csym;
-	  set_objfile_data (objfile, objc_objfile_data, objc_csym);
-	}
+	objc_csym = objc_objfile_data.emplace (objfile, objfile_csym);
       else
 	/* Count of ObjC methods in this objfile should be constant.  */
 	gdb_assert (*objc_csym == objfile_csym);
     }
 }
 
-/* Uniquify a VEC of strings.  */
+/* Uniquify a vector of strings.  */
 
 static void
 uniquify_strings (std::vector<const char *> *strings)
@@ -1149,14 +1145,14 @@ find_imps (const char *method, std::vector<const char *> *symbol_names)
 					  0).symbol;
 
       if (sym != NULL) 
-	symbol_names->push_back (SYMBOL_NATURAL_NAME (sym));
+	symbol_names->push_back (sym->natural_name ());
       else
 	{
 	  struct bound_minimal_symbol msym
 	    = lookup_minimal_symbol (selector, 0, 0);
 
 	  if (msym.minsym != NULL) 
-	    symbol_names->push_back (MSYMBOL_NATURAL_NAME (msym.minsym));
+	    symbol_names->push_back (msym.minsym->natural_name ());
 	}
     }
 
@@ -1297,18 +1293,17 @@ find_objc_msgcall_submethod (int (*f) (CORE_ADDR, CORE_ADDR *),
 			     CORE_ADDR pc, 
 			     CORE_ADDR *new_pc)
 {
-  TRY
+  try
     {
       if (f (pc, new_pc) == 0)
 	return 1;
     }
-  CATCH (ex, RETURN_MASK_ALL)
+  catch (const gdb_exception &ex)
     {
       exception_fprintf (gdb_stderr, ex,
 			 "Unable to determine target of "
 			 "Objective-C method call (ignoring):\n");
     }
-  END_CATCH
 
   return 0;
 }
@@ -1337,8 +1332,9 @@ find_objc_msgcall (CORE_ADDR pc, CORE_ADDR *new_pc)
   return 0;
 }
 
+void _initialize_objc_language ();
 void
-_initialize_objc_language (void)
+_initialize_objc_language ()
 {
   add_info ("selectors", info_selectors_command,
 	    _("All Objective-C selectors, or those matching REGEXP."));
@@ -1575,10 +1571,4 @@ resolve_msgsend_super_stret (CORE_ADDR pc, CORE_ADDR *new_pc)
   if (res == 0)
     return 1;
   return 0;
-}
-
-void
-_initialize_objc_lang (void)
-{
-  objc_objfile_data = register_objfile_data ();
 }

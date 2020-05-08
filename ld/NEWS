@@ -1,5 +1,57 @@
 -*- text -*-
 
+* Add command-line options --enable-non-contiguous-regions and
+  --enable-non-contiguous-regions-warnings.
+
+* Add command-line option --imagic for the pdp11-aout target to output format
+  IMAGIC (0411) for separate instruction and data spaces, and change the
+  default format option for pdp11-aout to be --omagic.
+
+* Relative pathnames in INPUT() and GROUP() directives in linker scripts are
+  searched relative to the directory of the linker script before other search
+  paths.
+
+Changes in 2.34:
+
+* The ld check for "PHDR segment not covered by LOAD segment" is more
+  effective, catching cases that were wrongly allowed by previous versions of
+  ld.  If you see this error it is likely you are linking with a bad linker
+  script or the binary you are building is not intended to be loaded by a
+  dynamic loader.  In the latter case --no-dynamic-linker is appropriate.
+
+* cr16c support removed.
+
+* Add support for z80-elf.
+
+* Add support for relocation of each byte or word of multibyte value to Z80
+  targets.
+
+* Add support for Zilog eZ80 (both ADL and Z80 mode) and Zilog Z180 CPUs.
+
+Changes in 2.33:
+
+* Add command-line option --no-print-map-discarded.
+
+* The Cortex-A53 Erratum 843419 workaround now supports a choice of which
+  workaround to use.  The option --fix-cortex-a53-843419 now takes an
+  optional argument --fix-cortex-a53-843419[=full|adr|adrp] which can be
+  used to force a particular workaround to be used.  See --help for AArch64
+  for more details.
+
+* Add target handlers for AArch64 for ELF GNU program properties.
+
+* Add support for GNU_PROPERTY_AARCH64_FEATURE_1_BTI in ELF GNU program
+  properties in the AArch64 ELF linker.
+
+* Add support for GNU_PROPERTY_AARCH64_FEATURE_1_PAC in ELF GNU program
+  properties in the AArch64 ELF linker.
+
+* Add -z force-bti for AArch64 to enable GNU_PROPERTY_AARCH64_FEATURE_1_BTI
+  on output while warning about missing GNU_PROPERTY_AARCH64_FEATURE_1_BTI
+  on inputs and use PLTs protected with BTI.
+
+* Add -z pac-plt for AArch64 to pick PAC enabled PLTs.
+
 Changes in 2.32:
 
 * Report property change in linker map file when merging GNU properties.
@@ -740,7 +792,7 @@ Changes in version 2.1:
   other utilities should work on Risc/Ultrix and Irix.
 
 
-Copyright (C) 2012-2019 Free Software Foundation, Inc.
+Copyright (C) 2012-2020 Free Software Foundation, Inc.
 
 Copying and distribution of this file, with or without modification,
 are permitted in any medium without royalty provided the copyright

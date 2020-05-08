@@ -1,6 +1,6 @@
 // options.h -- handle command line options for gold  -*- C++ -*-
 
-// Copyright (C) 2006-2019 Free Software Foundation, Inc.
+// Copyright (C) 2006-2020 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -946,7 +946,7 @@ class General_options
 	      {"none", "all", "safe"});
 
   DEFINE_uint(icf_iterations, options::TWO_DASHES , '\0', 0,
-	      N_("Number of iterations of ICF (default 2)"), N_("COUNT"));
+	      N_("Number of iterations of ICF (default 3)"), N_("COUNT"));
 
   DEFINE_special(incremental, options::TWO_DASHES, '\0',
 		 N_("Do an incremental link if possible; "
@@ -1182,7 +1182,7 @@ class General_options
 
   DEFINE_bool(rosegment, options::TWO_DASHES, '\0', false,
 	      N_("Put read-only non-executable sections in their own segment"),
-	      NULL);
+	      N_("Do not put read-only non-executable sections in their own segment"));
 
   DEFINE_uint64(rosegment_gap, options::TWO_DASHES, '\0', -1U,
 		N_("Set offset between executable and read-only segments"),

@@ -1,6 +1,6 @@
 /* Definitions for BFD wrappers used by GDB.
 
-   Copyright (C) 2011-2019 Free Software Foundation, Inc.
+   Copyright (C) 2011-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,7 +21,8 @@
 #define GDB_BFD_H
 
 #include "registry.h"
-#include "common/gdb_ref_ptr.h"
+#include "gdbsupport/byte-vector.h"
+#include "gdbsupport/gdb_ref_ptr.h"
 
 DECLARE_REGISTRY (bfd);
 
@@ -106,7 +107,7 @@ void gdb_bfd_record_inclusion (bfd *includer, bfd *includee);
 
 /* Try to read or map the contents of the section SECT.  If successful, the
    section data is returned and *SIZE is set to the size of the section data;
-   this may not be the same as the size according to bfd_get_section_size if the
+   this may not be the same as the size according to bfd_section_size if the
    section was compressed.  The returned section data is associated with the BFD
    and will be destroyed when the BFD is destroyed.  There is no other way to
    free it; for temporary uses of section data, see bfd_malloc_and_get_section.
@@ -180,5 +181,13 @@ int gdb_bfd_count_sections (bfd *abfd);
    otherwise.  */
 
 int gdb_bfd_requires_relocations (bfd *abfd);
+
+/* Alternative to bfd_get_full_section_contents that returns the section
+   contents in *CONTENTS, instead of an allocated buffer.
+
+   Return true on success, false otherwise.  */
+
+bool gdb_bfd_get_full_section_contents (bfd *abfd, asection *section,
+					gdb::byte_vector *contents);
 
 #endif /* GDB_BFD_H */

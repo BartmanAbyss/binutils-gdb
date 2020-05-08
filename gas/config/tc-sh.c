@@ -1,5 +1,5 @@
 /* tc-sh.c -- Assemble code for the Renesas / SuperH SH
-   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+   Copyright (C) 1993-2020 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -2091,7 +2091,8 @@ build_Mytes (sh_opcode_info *opcode, sh_operand_info *operand)
 	    case IMM0_8BY2:
 	      insert (output + low_byte, BFD_RELOC_SH_IMM8BY2, 0, operand);
 	      break;
-	    case IMM0_8:
+	    case IMM0_8U:
+	    case IMM0_8S:
 	      insert (output + low_byte, BFD_RELOC_SH_IMM8, 0, operand);
 	      break;
 	    case IMM1_8BY4:
@@ -2525,37 +2526,31 @@ md_assemble (char *str)
       char *name = initial_str;
       int name_length = 0;
       const sh_opcode_info *op;
-      int found = 0;
+      bfd_boolean found = FALSE;
 
-      /* identify opcode in string */
+      /* Identify opcode in string.  */
       while (ISSPACE (*name))
-	{
-	  name++;
-	}
-      while (!ISSPACE (name[name_length]))
-	{
-	  name_length++;
-	}
+	name++;
 
-      /* search for opcode in full list */
+      while (name[name_length] != '\0' && !ISSPACE (name[name_length]))
+	name_length++;
+
+      /* Search for opcode in full list.  */
       for (op = sh_table; op->name; op++)
 	{
 	  if (strncasecmp (op->name, name, name_length) == 0
 	      && op->name[name_length] == '\0')
 	    {
-	      found = 1;
+	      found = TRUE;
 	      break;
 	    }
 	}
 
-      if ( found )
-	{
-	  as_bad (_("opcode not valid for this cpu variant"));
-	}
+      if (found)
+	as_bad (_("opcode not valid for this cpu variant"));
       else
-	{
-	  as_bad (_("unknown opcode"));
-	}
+	as_bad (_("unknown opcode"));
+
       return;
     }
 
@@ -3168,8 +3163,8 @@ md_section_align (segT seg ATTRIBUTE_UNUSED, valueT size)
 #ifdef OBJ_ELF
   return size;
 #else /* ! OBJ_ELF */
-  return ((size + (1 << bfd_get_section_alignment (stdoutput, seg)) - 1)
-	  & -(1 << bfd_get_section_alignment (stdoutput, seg)));
+  return ((size + (1 << bfd_section_alignment (seg)) - 1)
+	  & -(1 << bfd_section_alignment (seg)));
 #endif /* ! OBJ_ELF */
 }
 

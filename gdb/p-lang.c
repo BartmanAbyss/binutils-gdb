@@ -1,6 +1,6 @@
 /* Pascal language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 2000-2019 Free Software Foundation, Inc.
+   Copyright (C) 2000-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -31,6 +31,8 @@
 #include "value.h"
 #include <ctype.h>
 #include "c-lang.h"
+#include "gdbarch.h"
+#include "cli/cli-style.h"
 
 /* All GPC versions until now (2007-09-27) also define a symbol called
    '_p_initialize'.  Check for the presence of this symbol first.  */
@@ -150,6 +152,16 @@ is_pascal_string_type (struct type *type,int *length_pos,
   return 0;
 }
 
+/* This is a wrapper around IS_PASCAL_STRING_TYPE that returns true if TYPE
+   is a string.  */
+
+static bool
+pascal_is_string_type_p (struct type *type)
+{
+  return is_pascal_string_type (type, nullptr, nullptr, nullptr,
+				nullptr, nullptr) > 0;
+}
+
 static void pascal_one_char (int, struct ui_file *, int *);
 
 /* Print the character C on STREAM as part of the contents of a literal
@@ -218,7 +230,7 @@ pascal_printstr (struct ui_file *stream, struct type *type,
 		 const char *encoding, int force_ellipses,
 		 const struct value_print_options *options)
 {
-  enum bfd_endian byte_order = gdbarch_byte_order (get_type_arch (type));
+  enum bfd_endian byte_order = type_byte_order (type);
   unsigned int i;
   unsigned int things_printed = 0;
   int in_quotes = 0;
@@ -281,7 +293,9 @@ pascal_printstr (struct ui_file *stream, struct type *type,
 	      in_quotes = 0;
 	    }
 	  pascal_printchar (current_char, type, stream);
-	  fprintf_filtered (stream, " <repeats %u times>", reps);
+	  fprintf_filtered (stream, " %p[<repeats %u times>%p]",
+			    metadata_style.style ().ptr (),
+			    reps, nullptr);
 	  i = rep1 - 1;
 	  things_printed += options->repeat_count_threshold;
 	  need_comma = 1;
@@ -433,7 +447,7 @@ extern const struct language_defn pascal_language_defn =
   pascal_emit_char,		/* Print a single char */
   pascal_print_type,		/* Print a type using appropriate syntax */
   pascal_print_typedef,		/* Print a typedef using appropriate syntax */
-  pascal_val_print,		/* Print a value using appropriate syntax */
+  pascal_value_print_inner,	/* la_value_print_inner */
   pascal_value_print,		/* Print a top-level value */
   default_read_var_value,	/* la_read_var_value */
   NULL,				/* Language specific skip_trampoline */
@@ -452,7 +466,6 @@ extern const struct language_defn pascal_language_defn =
   pascal_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
-  default_get_string,
   c_watch_location_expression,
   NULL,				/* la_compare_symbol_for_completion */
   iterate_over_symbols,
@@ -460,5 +473,6 @@ extern const struct language_defn pascal_language_defn =
   &default_varobj_ops,
   NULL,
   NULL,
-  LANG_MAGIC
+  pascal_is_string_type_p,
+  "{...}"			/* la_struct_too_deep_ellipsis */
 };

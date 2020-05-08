@@ -1,6 +1,6 @@
 /* Definitions for BFD wrappers used by GDB.
 
-   Copyright (C) 2011-2019 Free Software Foundation, Inc.
+   Copyright (C) 2011-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,8 +22,7 @@
 #include "ui-out.h"
 #include "gdbcmd.h"
 #include "hashtab.h"
-#include "common/filestuff.h"
-#include "common/vec.h"
+#include "gdbsupport/filestuff.h"
 #ifdef HAVE_MMAP
 #include <sys/mman.h>
 #ifndef MAP_FAILED
@@ -137,7 +136,7 @@ static htab_t gdb_bfd_cache;
 /* When true gdb will reuse an existing bfd object if the filename,
    modification time, and file size all match.  */
 
-static int bfd_sharing = 1;
+static bool bfd_sharing = true;
 static void
 show_bfd_sharing  (struct ui_file *file, int from_tty,
 		   struct cmd_list_element *c, const char *value)
@@ -480,7 +479,7 @@ static void
 free_one_bfd_section (bfd *abfd, asection *sectp, void *ignore)
 {
   struct gdb_bfd_section_data *sect
-    = (struct gdb_bfd_section_data *) bfd_get_section_userdata (abfd, sectp);
+    = (struct gdb_bfd_section_data *) bfd_section_userdata (sectp);
 
   if (sect != NULL && sect->data != NULL)
     {
@@ -504,7 +503,7 @@ static int
 gdb_bfd_close_or_warn (struct bfd *abfd)
 {
   int ret;
-  char *name = bfd_get_filename (abfd);
+  const char *name = bfd_get_filename (abfd);
 
   bfd_map_over_sections (abfd, free_one_bfd_section, NULL);
 
@@ -546,7 +545,7 @@ gdb_bfd_ref (struct bfd *abfd)
   abfd->flags |= BFD_DECOMPRESS;
 
   gdata = new gdb_bfd_data (abfd);
-  bfd_usrdata (abfd) = gdata;
+  bfd_set_usrdata (abfd, gdata);
   bfd_alloc_data (abfd);
 
   /* This is the first we've seen it, so add it to the hash table.  */
@@ -608,7 +607,7 @@ gdb_bfd_unref (struct bfd *abfd)
 
   bfd_free_data (abfd);
   delete gdata;
-  bfd_usrdata (abfd) = NULL;  /* Paranoia.  */
+  bfd_set_usrdata (abfd, NULL);  /* Paranoia.  */
 
   htab_remove_elt (all_bfds, abfd);
 
@@ -626,14 +625,13 @@ get_section_descriptor (asection *section)
 {
   struct gdb_bfd_section_data *result;
 
-  result = ((struct gdb_bfd_section_data *)
-	    bfd_get_section_userdata (section->owner, section));
+  result = (struct gdb_bfd_section_data *) bfd_section_userdata (section);
 
   if (result == NULL)
     {
       result = ((struct gdb_bfd_section_data *)
 		bfd_zalloc (section->owner, sizeof (*result)));
-      bfd_set_section_userdata (section->owner, section, result);
+      bfd_set_section_userdata (section, result);
     }
 
   return result;
@@ -671,9 +669,9 @@ gdb_bfd_map_section (asection *sectp, bfd_size_type *size)
       /* Only try to mmap sections which are large enough: we don't want
 	 to waste space due to fragmentation.  */
 
-      if (bfd_get_section_size (sectp) > 4 * pagesize)
+      if (bfd_section_size (sectp) > 4 * pagesize)
 	{
-	  descriptor->size = bfd_get_section_size (sectp);
+	  descriptor->size = bfd_section_size (sectp);
 	  descriptor->data = bfd_mmap (abfd, 0, descriptor->size, PROT_READ,
 				       MAP_PRIVATE, sectp->filepos,
 				       &descriptor->map_addr,
@@ -697,19 +695,19 @@ gdb_bfd_map_section (asection *sectp, bfd_size_type *size)
   /* Handle compressed sections, or ordinary uncompressed sections in
      the no-mmap case.  */
 
-  descriptor->size = bfd_get_section_size (sectp);
+  descriptor->size = bfd_section_size (sectp);
   descriptor->data = NULL;
 
   data = NULL;
   if (!bfd_get_full_section_contents (abfd, sectp, &data))
     {
       warning (_("Can't read data for section '%s' in file '%s'"),
-	       bfd_get_section_name (abfd, sectp),
+	       bfd_section_name (sectp),
 	       bfd_get_filename (abfd));
       /* Set size to 0 to prevent further attempts to read the invalid
 	 section.  */
       *size = 0;
-      return (const gdb_byte *) NULL;
+      return NULL;
     }
   descriptor->data = data;
 
@@ -928,7 +926,19 @@ gdb_bfd_requires_relocations (bfd *abfd)
   return gdata->needs_relocations;
 }
 
-
+/* See gdb_bfd.h.  */
+
+bool
+gdb_bfd_get_full_section_contents (bfd *abfd, asection *section,
+				   gdb::byte_vector *contents)
+{
+  bfd_size_type section_size = bfd_section_size (section);
+
+  contents->resize (section_size);
+
+  return bfd_get_section_contents (abfd, section, contents->data (), 0,
+				   section_size);
+}
 
 /* A callback for htab_traverse that prints a single BFD.  */
 
@@ -940,7 +950,7 @@ print_one_bfd (void **slot, void *data)
   struct ui_out *uiout = (struct ui_out *) data;
 
   ui_out_emit_tuple tuple_emitter (uiout, NULL);
-  uiout->field_int ("refcount", gdata->refc);
+  uiout->field_signed ("refcount", gdata->refc);
   uiout->field_string ("addr", host_address_to_string (abfd));
   uiout->field_string ("filename", bfd_get_filename (abfd));
   uiout->text ("\n");
@@ -964,8 +974,9 @@ maintenance_info_bfds (const char *arg, int from_tty)
   htab_traverse (all_bfds, print_one_bfd, uiout);
 }
 
+void _initialize_gdb_bfd ();
 void
-_initialize_gdb_bfd (void)
+_initialize_gdb_bfd ()
 {
   all_bfds = htab_create_alloc (10, htab_hash_pointer, htab_eq_pointer,
 				NULL, xcalloc, xfree);

@@ -1,6 +1,6 @@
 /* varobj support for C and C++.
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2020 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@ static void cplus_class_num_children (struct type *type, int children[3]);
 #define ANONYMOUS_UNION_NAME _("<anonymous union>")
 
 /* Does CHILD represent a child with no name?  This happens when
-   the child is an anonmous struct or union and it has no field name
+   the child is an anonymous struct or union and it has no field name
    in its parent variable.
 
    This has already been determined by *_describe_child. The easiest
@@ -82,7 +82,7 @@ adjust_value_for_child_access (struct value **value,
 
   /* Pointers to structures are treated just like
      structures when accessing children.  Don't
-     dererences pointers to other types.  */
+     dereference pointers to other types.  */
   if (TYPE_CODE (*type) == TYPE_CODE_PTR)
     {
       struct type *target_type = get_target_type (*type);
@@ -92,16 +92,15 @@ adjust_value_for_child_access (struct value **value,
 	  if (value && *value)
 	    {
 
-	      TRY
+	      try
 		{
 		  *value = value_ind (*value);
 		}
 
-	      CATCH (except, RETURN_MASK_ERROR)
+	      catch (const gdb_exception_error &except)
 		{
 		  *value = NULL;
 		}
-	      END_CATCH
 	    }
 	  *type = target_type;
 	  if (was_ptr)
@@ -253,18 +252,17 @@ value_struct_element_index (struct value *value, int type_index)
   gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
 	      || TYPE_CODE (type) == TYPE_CODE_UNION);
 
-  TRY
+  try
     {
       if (field_is_static (&TYPE_FIELD (type, type_index)))
 	result = value_static_field (type, type_index);
       else
 	result = value_primitive_field (value, 0, type_index, type);
     }
-  CATCH (e, RETURN_MASK_ERROR)
+  catch (const gdb_exception_error &e)
     {
       return NULL;
     }
-  END_CATCH
 
   return result;
 }
@@ -316,14 +314,13 @@ c_describe_child (const struct varobj *parent, int index,
 	{
 	  int real_index = index + TYPE_LOW_BOUND (TYPE_INDEX_TYPE (type));
 
-	  TRY
+	  try
 	    {
 	      *cvalue = value_subscript (value, real_index);
 	    }
-	  CATCH (except, RETURN_MASK_ERROR)
+	  catch (const gdb_exception_error &except)
 	    {
 	    }
-	  END_CATCH
 	}
 
       if (ctype)
@@ -393,16 +390,15 @@ c_describe_child (const struct varobj *parent, int index,
 
       if (cvalue && value)
 	{
-	  TRY
+	  try
 	    {
 	      *cvalue = value_ind (value);
 	    }
 
-	  CATCH (except, RETURN_MASK_ERROR)
+	  catch (const gdb_exception_error &except)
 	    {
 	      *cvalue = NULL;
 	    }
-	  END_CATCH
 	}
 
       /* Don't use get_target_type because it calls
@@ -769,7 +765,7 @@ cplus_describe_child (const struct varobj *parent, int index,
 	  --type_index;
 
 	  /* If the type is anonymous and the field has no name,
-	     set an appopriate name.  */
+	     set an appropriate name.  */
 	  field_name = TYPE_FIELD_NAME (type, type_index);
 	  if (field_name == NULL || *field_name == '\0')
 	    {

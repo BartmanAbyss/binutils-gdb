@@ -1,7 +1,7 @@
 /* Functions specific to running gdb native on IA-64 running
    GNU/Linux.
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -28,7 +28,7 @@
 
 #include <signal.h>
 #include "nat/gdb_ptrace.h"
-#include "common/gdb_wait.h"
+#include "gdbsupport/gdb_wait.h"
 #ifdef HAVE_SYS_REG_H
 #include <sys/reg.h>
 #endif
@@ -921,8 +921,9 @@ ia64_linux_nat_target::low_status_is_event (int status)
 				 || WSTOPSIG (status) == SIGILL);
 }
 
+void _initialize_ia64_linux_nat ();
 void
-_initialize_ia64_linux_nat (void)
+_initialize_ia64_linux_nat ()
 {
   /* Register the target.  */
   linux_target = &the_ia64_linux_nat_target;

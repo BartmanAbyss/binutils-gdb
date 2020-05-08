@@ -1,6 +1,6 @@
 /* C language support definitions for GDB, the GNU debugger.
 
-   Copyright (C) 1992-2019 Free Software Foundation, Inc.
+   Copyright (C) 1992-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,7 +29,7 @@ struct parser_state;
 #include "value.h"
 #include "macroexp.h"
 #include "parser-defs.h"
-#include "common/enum-flags.h"
+#include "gdbsupport/enum-flags.h"
 
 
 /* The various kinds of C string and character.  Note that these
@@ -81,11 +81,10 @@ extern void c_print_typedef (struct type *,
 			     struct symbol *,
 			     struct ui_file *);
 
-extern void c_val_print (struct type *,
-			 int, CORE_ADDR,
-			 struct ui_file *, int,
-			 struct value *,
-			 const struct value_print_options *);
+/* Implement la_value_print_inner for the C family of languages.  */
+
+extern void c_value_print_inner (struct value *, struct ui_file *, int,
+				 const struct value_print_options *);
 
 extern void c_value_print (struct value *, struct ui_file *,
 			   const struct value_print_options *);
@@ -130,23 +129,25 @@ extern void c_type_print_base (struct type *, struct ui_file *,
 extern void cp_print_class_member (const gdb_byte *, struct type *,
 				   struct ui_file *, const char *);
 
-extern void cp_print_value_fields (struct type *, struct type *,
-				   LONGEST, CORE_ADDR,
+extern void cp_print_value_fields (struct value *,
 				   struct ui_file *, int,
-				   struct value *,
 				   const struct value_print_options *,
 				   struct type **, int);
 
-extern void cp_print_value_fields_rtti (struct type *,
-					const gdb_byte *, LONGEST, CORE_ADDR,
-					struct ui_file *, int,
-					struct value *,
-					const struct value_print_options *,
-					struct type **, int);
+/* gcc-2.6 or later (when using -fvtable-thunks)
+   emits a unique named type for a vtable entry.
+   Some gdb code depends on that specific name.  */
+
+extern const char vtbl_ptr_name[];
 
 extern int cp_is_vtbl_ptr_type (struct type *);
 
 extern int cp_is_vtbl_member (struct type *);
+
+/* Return true if TYPE is a string type.  Unlike DEFAULT_IS_STRING_TYPE_P
+   this will detect arrays of characters not just TYPE_CODE_STRING.  */
+
+extern bool c_is_string_type_p (struct type *type);
 
 /* These are in c-valprint.c.  */
 

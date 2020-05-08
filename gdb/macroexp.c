@@ -1,5 +1,5 @@
 /* C preprocessor macro expansion for GDB.
-   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+   Copyright (C) 2002-2020 Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of GDB.
@@ -1333,7 +1333,7 @@ expand (const char *id,
 
 
 /* If the single token in SRC_FIRST followed by the tokens in SRC_REST
-   constitute a macro invokation not forbidden in NO_LOOP, append its
+   constitute a macro invocation not forbidden in NO_LOOP, append its
    expansion to DEST and return non-zero.  Otherwise, return zero, and
    leave DEST unchanged.
 

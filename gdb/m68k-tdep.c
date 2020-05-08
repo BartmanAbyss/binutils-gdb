@@ -1,6 +1,6 @@
 /* Target-dependent code for the Motorola 68000 series.
 
-   Copyright (C) 1990-2019 Free Software Foundation, Inc.
+   Copyright (C) 1990-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,7 +18,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "frame.h"
 #include "frame-base.h"
 #include "frame-unwind.h"
@@ -261,7 +261,7 @@ m68k_value_to_register (struct frame_info *frame, int regnum,
 
    The 68020/030/040/060 do support an FPU, either as a coprocessor
    (68881/2) or built-in (68040/68060).  That's why System V release 4
-   (SVR4) instroduces a new calling convention specified by the SVR4
+   (SVR4) introduces a new calling convention specified by the SVR4
    psABI.  Integer values are returned in %d0/%d1, pointer return
    values in %a0 and floating values in %fp0.  When calling functions
    returning a structure the caller should pass a pointer to a buffer
@@ -1285,8 +1285,9 @@ m68k_dump_tdep (struct gdbarch *gdbarch, struct ui_file *file)
     return;
 }
 
+void _initialize_m68k_tdep ();
 void
-_initialize_m68k_tdep (void)
+_initialize_m68k_tdep ()
 {
   gdbarch_register (bfd_arch_m68k, m68k_gdbarch_init, m68k_dump_tdep);
 }

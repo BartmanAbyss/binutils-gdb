@@ -1,5 +1,5 @@
 /* tc-xtensa.c -- Assemble Xtensa instructions.
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2020 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -33,6 +33,10 @@
 /* Provide default values for new configuration settings.  */
 #ifndef XSHAL_ABI
 #define XSHAL_ABI 0
+#endif
+
+#ifndef XTENSA_MARCH_EARLIEST
+#define XTENSA_MARCH_EARLIEST 0
 #endif
 
 #ifndef uint32
@@ -73,6 +77,8 @@ const char FLT_CHARS[] = "rRsSfFdDxXpP";
 
 bfd_boolean density_supported;
 bfd_boolean absolute_literals_supported;
+
+static unsigned microarch_earliest;
 
 static vliw_insn cur_vinsn;
 
@@ -497,6 +503,7 @@ static fixS *xg_append_jump (fragS *fragP, symbolS *sym, offsetT offset);
 static void xtensa_maybe_create_literal_pool_frag (bfd_boolean, bfd_boolean);
 static bfd_boolean auto_litpools = FALSE;
 static int auto_litpool_limit = 0;
+static bfd_boolean xtensa_is_init_fini (segT seg);
 
 /* Alignment Functions.  */
 
@@ -627,6 +634,7 @@ static bfd_boolean maybe_has_short_loop = FALSE;
 static bfd_boolean workaround_close_loop_end = FALSE;
 static bfd_boolean maybe_has_close_loop_end = FALSE;
 static bfd_boolean enforce_three_byte_loop_align = FALSE;
+static bfd_boolean opt_linkrelax = TRUE;
 
 /* When workaround_short_loops is TRUE, all loops with early exits must
    have at least 3 instructions.  workaround_all_short_loops is a modifier
@@ -826,10 +834,10 @@ md_parse_option (int c, const char *arg)
       as_warn (_("--no-density option is ignored"));
       return 1;
     case option_link_relax:
-      linkrelax = 1;
+      opt_linkrelax = TRUE;
       return 1;
     case option_no_link_relax:
-      linkrelax = 0;
+      opt_linkrelax = FALSE;
       return 1;
     case option_flix:
       produce_flix = FLIX_ALL;
@@ -1530,7 +1538,6 @@ xtensa_literal_pseudo (int ignored ATTRIBUTE_UNUSED)
   emit_state state;
   char *p, *base_name;
   char c;
-  segT dest_seg;
 
   if (inside_directive (directive_literal))
     {
@@ -1546,20 +1553,9 @@ xtensa_literal_pseudo (int ignored ATTRIBUTE_UNUSED)
   saved_insn_labels = insn_labels;
   insn_labels = NULL;
 
-  /* If we are using text-section literals, then this is the right value... */
-  dest_seg = now_seg;
-
   base_name = input_line_pointer;
 
   xtensa_switch_to_literal_fragment (&state);
-
-  /* ...but if we aren't using text-section-literals, then we
-     need to put them in the section we just switched to.  */
-  if (use_literal_section || directive_state[directive_absolute_literals])
-    dest_seg = now_seg;
-
-  /* FIXME, despite the previous comments, dest_seg is unused...  */
-  (void) dest_seg;
 
   /* All literals are aligned to four-byte boundaries.  */
   frag_align (2, 0, 0);
@@ -2057,13 +2053,13 @@ tokenize_arguments (char **args, char *str)
 	}
     }
 
-fini:
+ fini:
   if (saw_comma || saw_colon)
     goto err;
   input_line_pointer = old_input_line_pointer;
   return num_args;
 
-err:
+ err:
   if (saw_comma)
     as_bad (_("extra comma"));
   else if (saw_colon)
@@ -2508,6 +2504,18 @@ xg_translate_idioms (char **popname, int *pnum_args, char **arg_strings)
 	  xg_replace_opname (popname, (has_underbar ? "_or" : "or"));
 	  arg_strings[2] = xstrdup (arg_strings[1]);
 	  *pnum_args = 3;
+	}
+      return 0;
+    }
+
+  /* Without an operand, this is given a default immediate operand of 0.  */
+  if ((strcmp (opname, "simcall") == 0 && microarch_earliest >= 280000))
+    {
+      if (*pnum_args == 0)
+	{
+	  arg_strings[0] = (char *) xmalloc (2);
+	  strcpy (arg_strings[0], "0");
+	  *pnum_args = 1;
 	}
       return 0;
     }
@@ -4125,7 +4133,7 @@ get_is_linkonce_section (bfd *abfd ATTRIBUTE_UNUSED, segT sec)
 {
   flagword flags, link_once_flags;
 
-  flags = bfd_get_section_flags (abfd, sec);
+  flags = bfd_section_flags (sec);
   link_once_flags = (flags & SEC_LINK_ONCE);
 
   /* Flags might not be set yet.  */
@@ -4797,7 +4805,6 @@ xtensa_mark_literal_pool_location (void)
 {
   /* Any labels pointing to the current location need
      to be adjusted to after the literal pool.  */
-  emit_state s;
   fragS *pool_location;
 
   if (use_literal_section)
@@ -4818,19 +4825,7 @@ xtensa_mark_literal_pool_location (void)
 		RELAX_LITERAL_POOL_END, NULL, 0, NULL);
   xtensa_set_frag_assembly_state (frag_now);
 
-  /* Now put a frag into the literal pool that points to this location.  */
   set_literal_pool_location (now_seg, pool_location);
-  xtensa_switch_to_non_abs_literal_fragment (&s);
-  frag_align (2, 0, 0);
-  record_alignment (now_seg, 2);
-
-  /* Close whatever frag is there.  */
-  frag_variant (rs_fill, 0, 0, 0, NULL, 0, NULL);
-  xtensa_set_frag_assembly_state (frag_now);
-  frag_now->tc_frag_data.literal_frag = pool_location;
-  frag_variant (rs_fill, 0, 0, 0, NULL, 0, NULL);
-  xtensa_restore_emit_state (&s);
-  xtensa_set_frag_assembly_state (frag_now);
 }
 
 
@@ -4914,29 +4909,32 @@ get_expanded_loop_offset (xtensa_opcode opcode)
 static fragS *
 get_literal_pool_location (segT seg)
 {
-  struct litpool_seg *lps = litpool_seg_list.next;
-  struct litpool_frag *lpf;
-  for ( ; lps && lps->seg->id != seg->id; lps = lps->next)
-    ;
-  if (lps)
+  if (auto_litpools)
     {
-      for (lpf = lps->frag_list.prev; lpf->fragP; lpf = lpf->prev)
-	{ /* Skip "candidates" for now.  */
-	  if (lpf->fragP->fr_subtype == RELAX_LITERAL_POOL_BEGIN &&
-	      lpf->priority == 1)
-	    return lpf->fragP;
-	}
-      /* Must convert a lower-priority pool.  */
-      for (lpf = lps->frag_list.prev; lpf->fragP; lpf = lpf->prev)
+      struct litpool_seg *lps = litpool_seg_list.next;
+      struct litpool_frag *lpf;
+      for ( ; lps && lps->seg->id != seg->id; lps = lps->next)
+	;
+      if (lps)
 	{
-	  if (lpf->fragP->fr_subtype == RELAX_LITERAL_POOL_BEGIN)
-	    return lpf->fragP;
-	}
-      /* Still no match -- try for a low priority pool.  */
-      for (lpf = lps->frag_list.prev; lpf->fragP; lpf = lpf->prev)
-	{
-	  if (lpf->fragP->fr_subtype == RELAX_LITERAL_POOL_CANDIDATE_BEGIN)
-	    return lpf->fragP;
+	  for (lpf = lps->frag_list.prev; lpf->fragP; lpf = lpf->prev)
+	    { /* Skip "candidates" for now.  */
+	      if (lpf->fragP->fr_subtype == RELAX_LITERAL_POOL_BEGIN &&
+		  lpf->priority == 1)
+		return lpf->fragP;
+	    }
+	  /* Must convert a lower-priority pool.  */
+	  for (lpf = lps->frag_list.prev; lpf->fragP; lpf = lpf->prev)
+	    {
+	      if (lpf->fragP->fr_subtype == RELAX_LITERAL_POOL_BEGIN)
+		return lpf->fragP;
+	    }
+	  /* Still no match -- try for a low priority pool.  */
+	  for (lpf = lps->frag_list.prev; lpf->fragP; lpf = lpf->prev)
+	    {
+	      if (lpf->fragP->fr_subtype == RELAX_LITERAL_POOL_CANDIDATE_BEGIN)
+		return lpf->fragP;
+	    }
 	}
     }
   return seg_info (seg)->tc_segment_info_data.literal_pool_loc;
@@ -5000,7 +4998,7 @@ xtensa_mark_frags_for_org (void)
       segment_info_type *seginfo;
       fragS *fragP;
       flagword flags;
-      flags = bfd_get_section_flags (stdoutput, sec);
+      flags = bfd_section_flags (sec);
       if (flags & SEC_DEBUGGING)
 	continue;
       if (!(flags & SEC_ALLOC))
@@ -5045,7 +5043,7 @@ xtensa_find_unmarked_state_frags (void)
       segment_info_type *seginfo;
       fragS *fragP;
       flagword flags;
-      flags = bfd_get_section_flags (stdoutput, sec);
+      flags = bfd_section_flags (sec);
       if (flags & SEC_DEBUGGING)
 	continue;
       if (!(flags & SEC_ALLOC))
@@ -5093,7 +5091,7 @@ xtensa_find_unaligned_branch_targets (bfd *abfd ATTRIBUTE_UNUSED,
 				      asection *sec,
 				      void *unused ATTRIBUTE_UNUSED)
 {
-  flagword flags = bfd_get_section_flags (abfd, sec);
+  flagword flags = bfd_section_flags (sec);
   segment_info_type *seginfo = seg_info (sec);
   fragS *frag = seginfo->frchainP->frch_root;
 
@@ -5132,7 +5130,7 @@ xtensa_find_unaligned_loops (bfd *abfd ATTRIBUTE_UNUSED,
 			     asection *sec,
 			     void *unused ATTRIBUTE_UNUSED)
 {
-  flagword flags = bfd_get_section_flags (abfd, sec);
+  flagword flags = bfd_section_flags (sec);
   segment_info_type *seginfo = seg_info (sec);
   fragS *frag = seginfo->frchainP->frch_root;
   xtensa_isa isa = xtensa_default_isa;
@@ -5256,6 +5254,8 @@ xg_init_global_config (void)
 
   directive_state[directive_density] = XCHAL_HAVE_DENSITY;
   directive_state[directive_absolute_literals] = XSHAL_USE_ABSOLUTE_LITERALS;
+
+  microarch_earliest = XTENSA_MARCH_EARLIEST;
 }
 
 void
@@ -5279,7 +5279,7 @@ md_begin (void)
   xtensa_default_isa = xtensa_isa_init (0, 0);
   isa = xtensa_default_isa;
 
-  linkrelax = 1;
+  linkrelax = opt_linkrelax;
 
   /* Set up the literal sections.  */
   memset (&default_lit_sections, 0, sizeof (default_lit_sections));
@@ -5334,6 +5334,9 @@ md_begin (void)
   /* Set up the assembly state.  */
   if (!frag_now->tc_frag_data.is_assembly_state_set)
     xtensa_set_frag_assembly_state (frag_now);
+
+  if (!use_literal_section)
+    xtensa_mark_literal_pool_location ();
 }
 
 
@@ -5933,6 +5936,11 @@ xtensa_elf_section_change_hook (void)
   /* Set up the assembly state.  */
   if (!frag_now->tc_frag_data.is_assembly_state_set)
     xtensa_set_frag_assembly_state (frag_now);
+
+  if (!use_literal_section
+      && seg_info (now_seg)->tc_segment_info_data.literal_pool_loc == NULL
+      && !xtensa_is_init_fini (now_seg))
+    xtensa_mark_literal_pool_location ();
 }
 
 
@@ -5986,18 +5994,24 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg)
     case BFD_RELOC_8:
       if (fixP->fx_subsy)
 	{
+	  bfd_boolean neg = S_GET_VALUE (fixP->fx_addsy) + fixP->fx_offset
+	    < S_GET_VALUE (fixP->fx_subsy);
+
 	  switch (fixP->fx_r_type)
 	    {
 	    case BFD_RELOC_8:
-	      fixP->fx_r_type = BFD_RELOC_XTENSA_DIFF8;
+	      fixP->fx_r_type = neg
+		? BFD_RELOC_XTENSA_NDIFF8 : BFD_RELOC_XTENSA_PDIFF8;
 	      fixP->fx_signed = 0;
 	      break;
 	    case BFD_RELOC_16:
-	      fixP->fx_r_type = BFD_RELOC_XTENSA_DIFF16;
+	      fixP->fx_r_type = neg
+		? BFD_RELOC_XTENSA_NDIFF16 : BFD_RELOC_XTENSA_PDIFF16;
 	      fixP->fx_signed = 0;
 	      break;
 	    case BFD_RELOC_32:
-	      fixP->fx_r_type = BFD_RELOC_XTENSA_DIFF32;
+	      fixP->fx_r_type = neg
+		? BFD_RELOC_XTENSA_NDIFF32 : BFD_RELOC_XTENSA_PDIFF32;
 	      fixP->fx_signed = 0;
 	      break;
 	    default:
@@ -7596,14 +7610,17 @@ static int xg_order_trampoline_chain_entry (const void *a, const void *b)
   const struct trampoline_chain_entry *pa = a;
   const struct trampoline_chain_entry *pb = b;
 
-  if (pa->sym == pb->sym ||
-      S_GET_VALUE (pa->sym) == S_GET_VALUE (pb->sym))
-    if (pa->offset == pb->offset)
-      return 0;
-    else
-      return pa->offset < pb->offset ? -1 : 1;
-  else
-    return S_GET_VALUE (pa->sym) < S_GET_VALUE (pb->sym) ? -1 : 1;
+  if (pa->sym != pb->sym)
+    {
+      valueT aval = S_GET_VALUE (pa->sym);
+      valueT bval = S_GET_VALUE (pb->sym);
+
+      if (aval != bval)
+	return aval < bval ? -1 : 1;
+    }
+  if (pa->offset != pb->offset)
+    return pa->offset < pb->offset ? -1 : 1;
+  return 0;
 }
 
 static void xg_sort_trampoline_chain (struct trampoline_chain *tc)
@@ -7686,23 +7703,24 @@ static int xg_order_trampoline_chain (const void *a, const void *b)
   const struct trampoline_chain_entry *pb = &_pb->target;
   symbolS *s1 = pa->sym;
   symbolS *s2 = pb->sym;
-  symbolS *tmp;
 
-  tmp = symbol_symbolS (s1);
-  if (tmp)
-    s1 = tmp;
+  if (s1 != s2)
+    {
+      symbolS *tmp = symbol_symbolS (s1);
+      if (tmp)
+	s1 = tmp;
 
-  tmp = symbol_symbolS (s2);
-  if (tmp)
-    s2 = tmp;
+      tmp = symbol_symbolS (s2);
+      if (tmp)
+	s2 = tmp;
 
-  if (s1 == s2)
-    if (pa->offset == pb->offset)
-      return 0;
-    else
-      return pa->offset < pb->offset ? -1 : 1;
-  else
-    return s1 < s2 ? -1 : 1;
+      if (s1 != s2)
+	return s1 < s2 ? -1 : 1;
+    }
+
+  if (pa->offset != pb->offset)
+    return pa->offset < pb->offset ? -1 : 1;
+  return 0;
 }
 
 static struct trampoline_chain *
@@ -8308,7 +8326,7 @@ next_instrs_are_b_retw (fragS *fragP)
   static xtensa_insnbuf insnbuf = NULL;
   static xtensa_insnbuf slotbuf = NULL;
   xtensa_isa isa = xtensa_default_isa;
-  int offset = 0;
+  unsigned int offset = 0;
   int slot;
   bfd_boolean branch_seen = FALSE;
 
@@ -8701,7 +8719,7 @@ unrelaxed_frag_min_insn_count (fragS *fragP)
   xtensa_isa isa = xtensa_default_isa;
   static xtensa_insnbuf insnbuf = NULL;
   int insn_count = 0;
-  int offset = 0;
+  unsigned int offset = 0;
 
   if (!fragP->tc_frag_data.is_insn)
     return insn_count;
@@ -8754,7 +8772,7 @@ unrelaxed_frag_has_b_j (fragS *fragP)
 {
   static xtensa_insnbuf insnbuf = NULL;
   xtensa_isa isa = xtensa_default_isa;
-  int offset = 0;
+  unsigned int offset = 0;
 
   if (!fragP->tc_frag_data.is_insn)
     return FALSE;
@@ -8953,7 +8971,7 @@ xtensa_add_config_info (void)
   int sz;
 
   info_sec = subseg_new (".xtensa.info", 0);
-  bfd_set_section_flags (stdoutput, info_sec, SEC_HAS_CONTENTS | SEC_READONLY);
+  bfd_set_section_flags (info_sec, SEC_HAS_CONTENTS | SEC_READONLY);
 
   data = XNEWVEC (char, 100);
   sprintf (data, "USE_ABSOLUTE_LITERALS=%d\nABI=%d\n",
@@ -10668,7 +10686,6 @@ convert_frag_fill_nop (fragS *fragP)
 static fixS *fix_new_exp_in_seg
   (segT, subsegT, fragS *, int, int, expressionS *, int,
    bfd_reloc_code_real_type);
-static void convert_frag_immed_finish_loop (segT, fragS *, TInsn *);
 
 static void
 convert_frag_immed (segT segP,
@@ -10910,9 +10927,6 @@ convert_frag_immed (segT segP,
 	}
     }
 
-  if (expanded && xtensa_opcode_is_loop (isa, orig_tinsn.opcode) == 1)
-    convert_frag_immed_finish_loop (segP, fragP, &orig_tinsn);
-
   if (expanded && is_direct_call_opcode (orig_tinsn.opcode))
     {
       /* Add an expansion note on the expanded instruction.  */
@@ -10948,122 +10962,6 @@ fix_new_exp_in_seg (segT new_seg,
   return new_fix;
 }
 
-
-/* Relax a loop instruction so that it can span loop >256 bytes.
-
-                  loop    as, .L1
-          .L0:
-                  rsr     as, LEND
-                  wsr     as, LBEG
-                  addi    as, as, lo8 (label-.L1)
-                  addmi   as, as, mid8 (label-.L1)
-                  wsr     as, LEND
-                  isync
-                  rsr     as, LCOUNT
-                  addi    as, as, 1
-          .L1:
-                  <<body>>
-          label:
-*/
-
-static void
-convert_frag_immed_finish_loop (segT segP, fragS *fragP, TInsn *tinsn)
-{
-  TInsn loop_insn;
-  TInsn addi_insn;
-  TInsn addmi_insn;
-  unsigned long target;
-  static xtensa_insnbuf insnbuf = NULL;
-  unsigned int loop_length, loop_length_hi, loop_length_lo;
-  xtensa_isa isa = xtensa_default_isa;
-  addressT loop_offset;
-  addressT addi_offset = 9;
-  addressT addmi_offset = 12;
-  fragS *next_fragP;
-  int target_count;
-
-  if (!insnbuf)
-    insnbuf = xtensa_insnbuf_alloc (isa);
-
-  /* Get the loop offset.  */
-  loop_offset = get_expanded_loop_offset (tinsn->opcode);
-
-  /* Validate that there really is a LOOP at the loop_offset.  Because
-     loops are not bundleable, we can assume that the instruction will be
-     in slot 0.  */
-  tinsn_from_chars (&loop_insn, fragP->fr_opcode + loop_offset, 0);
-  tinsn_immed_from_frag (&loop_insn, fragP, 0);
-
-  gas_assert (xtensa_opcode_is_loop (isa, loop_insn.opcode) == 1);
-  addi_offset += loop_offset;
-  addmi_offset += loop_offset;
-
-  gas_assert (tinsn->ntok == 2);
-  if (tinsn->tok[1].X_op == O_constant)
-    target = tinsn->tok[1].X_add_number;
-  else if (tinsn->tok[1].X_op == O_symbol)
-    {
-      /* Find the fragment.  */
-      symbolS *sym = tinsn->tok[1].X_add_symbol;
-      gas_assert (S_GET_SEGMENT (sym) == segP
-	      || S_GET_SEGMENT (sym) == absolute_section);
-      target = (S_GET_VALUE (sym) + tinsn->tok[1].X_add_number);
-    }
-  else
-    {
-      as_bad (_("invalid expression evaluation type %d"), tinsn->tok[1].X_op);
-      target = 0;
-    }
-
-  loop_length = target - (fragP->fr_address + fragP->fr_fix);
-  loop_length_hi = loop_length & ~0x0ff;
-  loop_length_lo = loop_length & 0x0ff;
-  if (loop_length_lo >= 128)
-    {
-      loop_length_lo -= 256;
-      loop_length_hi += 256;
-    }
-
-  /* Because addmi sign-extends the immediate, 'loop_length_hi' can be at most
-     32512.  If the loop is larger than that, then we just fail.  */
-  if (loop_length_hi > 32512)
-    as_bad_where (fragP->fr_file, fragP->fr_line,
-		  _("loop too long for LOOP instruction"));
-
-  tinsn_from_chars (&addi_insn, fragP->fr_opcode + addi_offset, 0);
-  gas_assert (addi_insn.opcode == xtensa_addi_opcode);
-
-  tinsn_from_chars (&addmi_insn, fragP->fr_opcode + addmi_offset, 0);
-  gas_assert (addmi_insn.opcode == xtensa_addmi_opcode);
-
-  set_expr_const (&addi_insn.tok[2], loop_length_lo);
-  tinsn_to_insnbuf (&addi_insn, insnbuf);
-
-  fragP->tc_frag_data.is_insn = TRUE;
-  xtensa_insnbuf_to_chars
-    (isa, insnbuf, (unsigned char *) fragP->fr_opcode + addi_offset, 0);
-
-  set_expr_const (&addmi_insn.tok[2], loop_length_hi);
-  tinsn_to_insnbuf (&addmi_insn, insnbuf);
-  xtensa_insnbuf_to_chars
-    (isa, insnbuf, (unsigned char *) fragP->fr_opcode + addmi_offset, 0);
-
-  /* Walk through all of the frags from here to the loop end
-     and mark them as no_transform to keep them from being modified
-     by the linker.  If we ever have a relocation for the
-     addi/addmi of the difference of two symbols we can remove this.  */
-
-  target_count = 0;
-  for (next_fragP = fragP; next_fragP != NULL;
-       next_fragP = next_fragP->fr_next)
-    {
-      next_fragP->tc_frag_data.is_no_transform = TRUE;
-      if (next_fragP->tc_frag_data.is_loop_target)
-	target_count++;
-      if (target_count == 2)
-	break;
-    }
-}
 
 
 /* A map that keeps information on a per-subsegment basis.  This is
@@ -11293,29 +11191,9 @@ static bfd_boolean xtensa_is_init_fini (segT seg)
 }
 
 static void
-xtensa_move_literals (void)
+xtensa_assign_litpool_addresses (void)
 {
-  seg_list *segment;
-  frchainS *frchain_from, *frchain_to;
-  fragS *search_frag, *next_frag, *literal_pool, *insert_after;
-  fragS **frag_splice;
-  emit_state state;
-  segT dest_seg;
-  fixS *fix, *next_fix, **fix_splice;
-  sym_list *lit;
   struct litpool_seg *lps;
-  const char *init_name = INIT_SECTION_NAME;
-  const char *fini_name = FINI_SECTION_NAME;
-  int init_name_len = strlen(init_name);
-  int fini_name_len = strlen(fini_name);
-
-  mark_literal_frags (literal_head->next);
-
-  if (use_literal_section)
-    return;
-
-  /* Assign addresses (rough estimates) to the potential literal pool locations
-     and create new ones if the gaps are too large.  */
 
   for (lps = litpool_seg_list.next; lps; lps = lps->next)
     {
@@ -11372,7 +11250,35 @@ xtensa_move_literals (void)
 	    }
 	}
     }
+}
 
+static void
+xtensa_move_literals (void)
+{
+  seg_list *segment;
+  frchainS *frchain_from, *frchain_to;
+  fragS *search_frag, *next_frag, *literal_pool, *insert_after;
+  fragS **frag_splice;
+  emit_state state;
+  segT dest_seg;
+  fixS *fix, *next_fix, **fix_splice;
+  sym_list *lit;
+  const char *init_name = INIT_SECTION_NAME;
+  const char *fini_name = FINI_SECTION_NAME;
+  int init_name_len = strlen(init_name);
+  int fini_name_len = strlen(fini_name);
+
+  mark_literal_frags (literal_head->next);
+
+  if (use_literal_section)
+    return;
+
+  /* Assign addresses (rough estimates) to the potential literal pool locations
+     and create new ones if the gaps are too large.  */
+
+  xtensa_assign_litpool_addresses ();
+
+  /* Walk through the literal segments.  */
   for (segment = literal_head->next; segment; segment = segment->next)
     {
       const char *seg_name = segment_name (segment->seg);
@@ -11398,12 +11304,7 @@ xtensa_move_literals (void)
 	}
 
       if (!search_frag)
-	{
-	  search_frag = frchain_from->frch_root;
-	  as_bad_where (search_frag->fr_file, search_frag->fr_line,
-			_("literal pool location required for text-section-literals; specify with .literal_position"));
-	  continue;
-	}
+	continue;
 
       gas_assert (search_frag->tc_frag_data.literal_frag->fr_subtype
 	      == RELAX_LITERAL_POOL_BEGIN);
@@ -11811,8 +11712,8 @@ cache_literal_section (bfd_boolean use_abs_literals)
 
       elf_group_name (seg) = group_name;
 
-      bfd_set_section_flags (stdoutput, seg, flags);
-      bfd_set_section_alignment (stdoutput, seg, 2);
+      bfd_set_section_flags (seg, flags);
+      bfd_set_section_alignment (seg, 2);
     }
 
   *pcached = seg;
@@ -11943,7 +11844,7 @@ xtensa_create_property_segments (frag_predicate property_function,
 	    num_recs++;
 
 	  rec_size = num_recs * 8;
-	  bfd_set_section_size (stdoutput, sec, rec_size);
+	  bfd_set_section_size (sec, rec_size);
 
 	  if (num_recs)
 	    {
@@ -12040,7 +11941,7 @@ xtensa_create_xproperty_segments (frag_flags_fn flag_fn,
 	    num_recs++;
 
 	  rec_size = num_recs * (8 + 4);
-	  bfd_set_section_size (stdoutput, sec, rec_size);
+	  bfd_set_section_size (sec, rec_size);
 	  /* elf_section_data (sec)->this_hdr.sh_entsize = 12; */
 
 	  if (num_recs)
@@ -12084,7 +11985,7 @@ xtensa_create_xproperty_segments (frag_flags_fn flag_fn,
 static bfd_boolean
 exclude_section_from_property_tables (segT sec)
 {
-  flagword flags = bfd_get_section_flags (stdoutput, sec);
+  flagword flags = bfd_section_flags (sec);
 
   /* Sections that don't contribute to the memory footprint are excluded.  */
   if ((flags & SEC_DEBUGGING)

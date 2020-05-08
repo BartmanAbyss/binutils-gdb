@@ -1,6 +1,6 @@
-/* Target dependent code for ARC arhitecture, for GDB.
+/* Target dependent code for ARC architecture, for GDB.
 
-   Copyright 2005-2019 Free Software Foundation, Inc.
+   Copyright 2005-2020 Free Software Foundation, Inc.
    Contributed by Synopsys Inc.
 
    This file is part of GDB.
@@ -22,26 +22,25 @@
 #include "defs.h"
 #include "arch-utils.h"
 #include "disasm.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "frame-base.h"
 #include "frame-unwind.h"
 #include "gdbcore.h"
 #include "gdbcmd.h"
 #include "objfiles.h"
+#include "osabi.h"
 #include "prologue-value.h"
+#include "target-descriptions.h"
 #include "trad-frame.h"
 
 /* ARC header files.  */
 #include "opcode/arc.h"
-#include "../opcodes/arc-dis.h"
+#include "opcodes/arc-dis.h"
 #include "arc-tdep.h"
+#include "arch/arc.h"
 
 /* Standard headers.  */
 #include <algorithm>
-
-/* Default target descriptions.  */
-#include "features/arc-v2.c"
-#include "features/arc-arcompact.c"
 
 /* The frame unwind cache for ARC.  */
 
@@ -147,6 +146,9 @@ static const char *const core_arcompact_register_names[] = {
 
 static char *arc_disassembler_options = NULL;
 
+/* Possible arc target descriptors.  */
+static struct target_desc *tdesc_arc_list[ARC_SYS_TYPE_NUM];
+
 /* Functions are sorted in the order as they are used in the
    _initialize_arc_tdep (), which uses the same order as gdbarch.h.  Static
    functions are defined before the first invocation.  */
@@ -208,7 +210,7 @@ arc_insn_get_operand_value_signed (const struct arc_instruction &insn,
 
 /* Get register with base address of memory operation.  */
 
-int
+static int
 arc_insn_get_memory_base_reg (const struct arc_instruction &insn)
 {
   /* POP_S and PUSH_S have SP as an implicit argument in a disassembler.  */
@@ -227,7 +229,7 @@ arc_insn_get_memory_base_reg (const struct arc_instruction &insn)
 
 /* Get offset of a memory operation INSN.  */
 
-CORE_ADDR
+static CORE_ADDR
 arc_insn_get_memory_offset (const struct arc_instruction &insn)
 {
   /* POP_S and PUSH_S have offset as an implicit argument in a
@@ -334,7 +336,7 @@ arc_insn_get_branch_target (const struct arc_instruction &insn)
 
 /* Dump INSN into gdb_stdlog.  */
 
-void
+static void
 arc_insn_dump (const struct arc_instruction &insn)
 {
   struct gdbarch *gdbarch = target_gdbarch ();
@@ -969,7 +971,7 @@ arc_is_in_prologue (struct gdbarch *gdbarch, const struct arc_instruction &insn,
   /* Store of some register.  May or may not update base address register.  */
   if (insn.insn_class == STORE || insn.insn_class == PUSH)
     {
-      /* There is definetely at least one operand - register/value being
+      /* There is definitely at least one operand - register/value being
 	 stored.  */
       gdb_assert (insn.operands_count > 0);
 
@@ -1203,7 +1205,7 @@ arc_disassemble_info (struct gdbarch *gdbarch)
    If CACHE is not NULL, then it will be filled with information about saved
    registers.
 
-   There are several variations of prologue which GDB may encouter.  "Full"
+   There are several variations of prologue which GDB may encounter.  "Full"
    prologue looks like this:
 
 	sub	sp,sp,<imm>   ; Space for variadic arguments.
@@ -1224,7 +1226,7 @@ arc_disassemble_info (struct gdbarch *gdbarch)
     store, that doesn't update SP.  Like this:
 
 
-	sub	sp,sp,8		; Create space for calee-saved registers.
+	sub	sp,sp,8		; Create space for callee-saved registers.
 	st	r13,[sp,4]      ; Store callee saved registers (up to R26/GP).
 	st	r14,[sp,0]
 
@@ -1391,7 +1393,7 @@ arc_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 int
 arc_delayed_print_insn (bfd_vma addr, struct disassemble_info *info)
 {
-  /* Standard BFD "machine number" field allows libocodes disassembler to
+  /* Standard BFD "machine number" field allows libopcodes disassembler to
      distinguish ARC 600, 700 and v2 cores, however v2 encompasses both ARC EM
      and HS, which have some difference between.  There are two ways to specify
      what is the target core:
@@ -1720,7 +1722,7 @@ static const struct frame_base arc_normal_base = {
    Returns TRUE if input tdesc was valid and in this case it will assign TDESC
    and TDESC_DATA output parameters.  */
 
-static int
+static bool
 arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
 		struct tdesc_arch_data **tdesc_data)
 {
@@ -1746,25 +1748,17 @@ arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
      tag.  */
   /* Cannot use arc_mach_is_arcv2 (), because gdbarch is not created yet.  */
   const int is_arcv2 = (info.bfd_arch_info->mach == bfd_mach_arc_arcv2);
-  int is_reduced_rf;
+  bool is_reduced_rf;
   const char *const *core_regs;
   const char *core_feature_name;
 
-  /* If target doesn't provide a description - use default one.  */
+  /* If target doesn't provide a description, use the default ones.  */
   if (!tdesc_has_registers (tdesc_loc))
     {
       if (is_arcv2)
-	{
-	  tdesc_loc = tdesc_arc_v2;
-	  if (arc_debug)
-	    debug_printf ("arc: Using default register set for ARC v2.\n");
-	}
+	tdesc_loc = arc_read_description (ARC_SYS_TYPE_ARCV2);
       else
-	{
-	  tdesc_loc = tdesc_arc_arcompact;
-	  if (arc_debug)
-	    debug_printf ("arc: Using default register set for ARCompact.\n");
-	}
+	tdesc_loc = arc_read_description (ARC_SYS_TYPE_ARCOMPACT);
     }
   else
     {
@@ -1803,10 +1797,10 @@ arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
 	{
 	  arc_print (_("Error: ARC v2 target description supplied for "
 		       "non-ARCv2 target.\n"));
-	  return FALSE;
+	  return false;
 	}
 
-      is_reduced_rf = FALSE;
+      is_reduced_rf = false;
       core_feature_name = core_v2_feature_name;
       core_regs = core_v2_register_names;
     }
@@ -1819,10 +1813,10 @@ arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
 	    {
 	      arc_print (_("Error: ARC v2 target description supplied for "
 			   "non-ARCv2 target.\n"));
-	      return FALSE;
+	      return false;
 	    }
 
-	  is_reduced_rf = TRUE;
+	  is_reduced_rf = true;
 	  core_feature_name = core_reduced_v2_feature_name;
 	  core_regs = core_v2_register_names;
 	}
@@ -1836,10 +1830,10 @@ arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
 		{
 		  arc_print (_("Error: ARCompact target description supplied "
 			       "for non-ARCompact target.\n"));
-		  return FALSE;
+		  return false;
 		}
 
-	      is_reduced_rf = FALSE;
+	      is_reduced_rf = false;
 	      core_feature_name = core_arcompact_feature_name;
 	      core_regs = core_arcompact_register_names;
 	    }
@@ -1847,7 +1841,7 @@ arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
 	    {
 	      arc_print (_("Error: Couldn't find core register feature in "
 			   "supplied target description."));
-	      return FALSE;
+	      return false;
 	    }
 	}
     }
@@ -1882,11 +1876,11 @@ arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
 	  arc_print (_("Error: Cannot find required register `%s' in "
 		       "feature `%s'.\n"), core_regs[i], core_feature_name);
 	  tdesc_data_cleanup (tdesc_data_loc);
-	  return FALSE;
+	  return false;
 	}
     }
 
-  /* Mandatory AUX registeres are intentionally few and are common between
+  /* Mandatory AUX registers are intentionally few and are common between
      ARCompact and ARC v2, so same code can be used for both.  */
   feature = tdesc_find_feature (tdesc_loc, aux_minimal_feature_name);
   if (feature == NULL)
@@ -1894,7 +1888,7 @@ arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
       arc_print (_("Error: Cannot find required feature `%s' in supplied "
 		   "target description.\n"), aux_minimal_feature_name);
       tdesc_data_cleanup (tdesc_data_loc);
-      return FALSE;
+      return false;
     }
 
   for (int i = ARC_FIRST_AUX_REGNUM; i <= ARC_LAST_AUX_REGNUM; i++)
@@ -1907,14 +1901,14 @@ arc_tdesc_init (struct gdbarch_info info, const struct target_desc **tdesc,
 		       "in feature `%s'.\n"),
 		     name, tdesc_feature_name (feature));
 	  tdesc_data_cleanup (tdesc_data_loc);
-	  return FALSE;
+	  return false;
 	}
     }
 
   *tdesc = tdesc_loc;
   *tdesc_data = tdesc_data_loc;
 
-  return TRUE;
+  return true;
 }
 
 /* Implement the type_align gdbarch function.  */
@@ -2117,14 +2111,6 @@ arc_dump_tdep (struct gdbarch *gdbarch, struct ui_file *file)
   fprintf_unfiltered (file, "arc_dump_tdep: jb_pc = %i\n", tdep->jb_pc);
 }
 
-/* Wrapper for "maintenance print arc" list of commands.  */
-
-static void
-maintenance_print_arc_command (const char *args, int from_tty)
-{
-  cmd_show_list (maintenance_print_arc_list, from_tty, "");
-}
-
 /* This command accepts single argument - address of instruction to
    disassemble.  */
 
@@ -2145,22 +2131,52 @@ dump_arc_instruction_command (const char *args, int from_tty)
   arc_insn_dump (insn);
 }
 
+/* See arc-tdep.h.  */
+
+const target_desc *
+arc_read_description (arc_sys_type sys_type)
+{
+  if (arc_debug)
+    debug_printf ("arc: Reading target description for \"%s\".\n",
+		  arc_sys_type_to_str (sys_type));
+
+  gdb_assert ((sys_type >= 0) && (sys_type < ARC_SYS_TYPE_NUM));
+  struct target_desc *tdesc = tdesc_arc_list[sys_type];
+
+  if (tdesc == nullptr)
+    {
+      tdesc = arc_create_target_description (sys_type);
+      tdesc_arc_list[sys_type] = tdesc;
+
+      if (arc_debug)
+	{
+	  const char *arch = tdesc_architecture_name (tdesc);
+	  const char *abi = tdesc_osabi_name (tdesc);
+	  arch = arch != NULL ? arch : "";
+	  abi = abi != NULL ? abi : "";
+	  debug_printf ("arc: Created target description for "
+			"\"%s\": arch=\"%s\", ABI=\"%s\"\n",
+			arc_sys_type_to_str (sys_type), arch, abi);
+	}
+    }
+
+  return tdesc;
+}
+
+void _initialize_arc_tdep ();
 void
-_initialize_arc_tdep (void)
+_initialize_arc_tdep ()
 {
   gdbarch_register (bfd_arch_arc, arc_gdbarch_init, arc_dump_tdep);
-
-  initialize_tdesc_arc_v2 ();
-  initialize_tdesc_arc_arcompact ();
 
   /* Register ARC-specific commands with gdb.  */
 
   /* Add root prefix command for "maintenance print arc" commands.  */
-  add_prefix_cmd ("arc", class_maintenance, maintenance_print_arc_command,
-		  _("ARC-specific maintenance commands for printing GDB "
-		    "internal state."),
-		  &maintenance_print_arc_list, "maintenance print arc ", 0,
-		  &maintenanceprintlist);
+  add_show_prefix_cmd ("arc", class_maintenance,
+		       _("ARC-specific maintenance commands for printing GDB "
+			 "internal state."),
+		       &maintenance_print_arc_list, "maintenance print arc ",
+		       0, &maintenanceprintlist);
 
   add_cmd ("arc-instruction", class_maintenance,
 	   dump_arc_instruction_command,

@@ -1,5 +1,5 @@
 /* tc-nds32.c -- Assemble for the nds32
-   Copyright (C) 2012-2019 Free Software Foundation, Inc.
+   Copyright (C) 2012-2020 Free Software Foundation, Inc.
    Contributed by Andes Technology Corporation.
 
    This file is part of GAS, the GNU Assembler.
@@ -3501,7 +3501,7 @@ nds32_pseudo_opcode_wrapper (char *line, struct nds32_pseudo_opcode *opcode)
 	}
       ++s;
     } while (s[0] != '\0');
-end:
+ end:
   /* Put the origin line for debugging.  */
   argv[argc] = line;
   opcode->proc (argc, argv, opcode->pseudo_val);
@@ -3841,7 +3841,7 @@ do_nds32_seg (int i, subsegT sub)
       seg->s = subseg_new (seg->name, sub);
       if (OUTPUT_FLAVOR == bfd_target_elf_flavour)
 	{
-	  bfd_set_section_flags (stdoutput, seg->s, seg->flags);
+	  bfd_set_section_flags (seg->s, seg->flags);
 	  if ((seg->flags & SEC_LOAD) == 0)
 	    seg_info (seg->s)->bss = 1;
 	}
@@ -4287,7 +4287,7 @@ nds32_relax_hint (int mode ATTRIBUTE_UNUSED)
     relax_hint_begin = 0;
   name = nds_itoa (relax_hint_id_current);
 
-reordered_id:
+ reordered_id:
 
   /* Find relax hint entry for next instruction, and all member will be
      initialized at that time.  */
@@ -5278,8 +5278,8 @@ nds32_elf_sethi_range (struct nds32_relocs_pattern *pattern)
    not, optimize option, 16 bit instruction is enable.  */
 
 #define SET_ADDEND(size, convertible, optimize, insn16_on) \
-  (((size) & 0xff) | ((convertible) ? 1 << 31 : 0) \
-   | ((optimize) ? 1<< 30 : 0) | (insn16_on ? 1 << 29 : 0))
+  (((size) & 0xff) | ((convertible) ? 1u << 31 : 0) \
+   | ((optimize) ? 1 << 30 : 0) | (insn16_on ? 1 << 29 : 0))
 #define MAC_COMBO (E_NDS32_HAS_FPU_MAC_INST|E_NDS32_HAS_MAC_DX_INST)
 
 static void
@@ -6267,7 +6267,7 @@ nds32_elf_append_relax_relocs (const char *key, void *value)
       pattern_now = pattern_now->next;
     }
 
-restore:
+ restore:
   now_seg = seg_bak;
   frchain_now = frchain_bak;
 }
@@ -6609,7 +6609,7 @@ md_operand (expressionS *expressionP)
 valueT
 md_section_align (segT segment, valueT size)
 {
-  int align = bfd_get_section_alignment (stdoutput, segment);
+  int align = bfd_section_alignment (segment);
 
   return ((size + (1 << align) - 1) & ((valueT) -1 << align));
 }
@@ -7316,9 +7316,6 @@ md_number_to_chars (char *buf, valueT val, int n)
     number_to_chars_littleendian (buf, val, n);
 }
 
-/* Equal to MAX_PRECISION in atof-ieee.c.  */
-#define MAX_LITTLENUMS 6
-
 /* This function is called to convert an ASCII string into a floating point
    value in format used by the CPU.  */
 
@@ -7568,13 +7565,13 @@ compar_relent (const void *lhs, const void *rhs)
    relocation.  */
 
 void
-nds32_set_section_relocs (asection *sec, arelent ** relocs ATTRIBUTE_UNUSED,
-			  unsigned int n ATTRIBUTE_UNUSED)
+nds32_set_section_relocs (asection *sec ATTRIBUTE_UNUSED,
+			  arelent **relocs, unsigned int n)
 {
-  bfd *abfd ATTRIBUTE_UNUSED = sec->owner;
-  if (bfd_get_section_flags (abfd, sec) & (flagword) SEC_RELOC)
-    nds32_insertion_sort (sec->orelocation, sec->reloc_count,
-			  sizeof (arelent**), compar_relent);
+  if (n <= 1)
+    return;
+
+  nds32_insertion_sort (relocs, n, sizeof (*relocs), compar_relent);
 }
 
 long

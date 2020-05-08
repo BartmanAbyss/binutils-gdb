@@ -1,5 +1,5 @@
 /* Interface GDB to the GNU Hurd.
-   Copyright (C) 1992-2019 Free Software Foundation, Inc.
+   Copyright (C) 1992-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -63,7 +63,7 @@ extern "C"
 #include "value.h"
 #include "language.h"
 #include "target.h"
-#include "common/gdb_wait.h"
+#include "gdbsupport/gdb_wait.h"
 #include "gdbcmd.h"
 #include "gdbcore.h"
 #include "gdbthread.h"
@@ -93,7 +93,7 @@ int proc_wait_pid = 0;
 /* The number of wait requests we've sent, and expect replies from.  */
 int proc_waits_pending = 0;
 
-int gnu_debug_flag = 0;
+bool gnu_debug_flag = false;
 
 /* Forward decls */
 
@@ -1493,7 +1493,7 @@ gnu_nat_target::wait (ptid_t ptid, struct target_waitstatus *status,
 
   waiting_inf = inf;
 
-  inf_debug (inf, "waiting for: %s", target_pid_to_str (ptid));
+  inf_debug (inf, "waiting for: %s", target_pid_to_str (ptid).c_str ());
 
 rewait:
   if (proc_wait_pid != inf->pid && !inf->no_wait)
@@ -1647,15 +1647,9 @@ rewait:
       inf_update_suspends (inf);
     }
 
-  inf_debug (inf, "returning ptid = %s, status = %s (%d)",
-	     target_pid_to_str (ptid),
-	     status->kind == TARGET_WAITKIND_EXITED ? "EXITED"
-	     : status->kind == TARGET_WAITKIND_STOPPED ? "STOPPED"
-	     : status->kind == TARGET_WAITKIND_SIGNALLED ? "SIGNALLED"
-	     : status->kind == TARGET_WAITKIND_LOADED ? "LOADED"
-	     : status->kind == TARGET_WAITKIND_SPURIOUS ? "SPURIOUS"
-	     : "?",
-	     status->value.integer);
+  inf_debug (inf, "returning ptid = %s, %s",
+	     target_pid_to_str (ptid).c_str (),
+	     target_waitstatus_to_string (status).c_str ());
 
   return ptid;
 }
@@ -1737,7 +1731,7 @@ S_exception_raise_request (mach_port_t port, mach_port_t reply_port,
 	}
     }
   else
-    /* A supppressed exception, which ignore.  */
+    /* A suppressed exception, which ignore.  */
     {
       inf->wait.suppress = 1;
       mach_port_deallocate (mach_task_self (), reply_port);
@@ -2012,7 +2006,7 @@ gnu_nat_target::resume (ptid_t ptid, int step, enum gdb_signal sig)
   struct inf *inf = gnu_current_inf;
 
   inf_debug (inf, "ptid = %s, step = %d, sig = %d",
-	     target_pid_to_str (ptid), step, sig);
+	     target_pid_to_str (ptid).c_str (), step, sig);
 
   inf_validate_procinfo (inf);
 
@@ -2058,8 +2052,9 @@ gnu_nat_target::resume (ptid_t ptid, int step, enum gdb_signal sig)
 
       if (!thread)
 	error (_("Can't run single thread id %s: no such thread!"),
-	       target_pid_to_str (ptid));
-      inf_debug (inf, "running one thread: %s", target_pid_to_str (ptid));
+	       target_pid_to_str (ptid).c_str ());
+      inf_debug (inf, "running one thread: %s",
+		 target_pid_to_str (ptid).c_str ());
       inf_set_threads_resume_sc (inf, thread, 0);
     }
 
@@ -2068,9 +2063,10 @@ gnu_nat_target::resume (ptid_t ptid, int step, enum gdb_signal sig)
       step_thread = inf_tid_to_thread (inf, ptid.lwp ());
       if (!step_thread)
 	warning (_("Can't step thread id %s: no such thread."),
-		 target_pid_to_str (ptid));
+		 target_pid_to_str (ptid).c_str ());
       else
-	inf_debug (inf, "stepping thread: %s", target_pid_to_str (ptid));
+	inf_debug (inf, "stepping thread: %s",
+		   target_pid_to_str (ptid).c_str ());
     }
   if (step_thread != inf->step_thread)
     inf_set_step_thread (inf, step_thread);
@@ -2199,7 +2195,6 @@ void
 gnu_nat_target::attach (const char *args, int from_tty)
 {
   int pid;
-  char *exec_file;
   struct inf *inf = cur_inf ();
   struct inferior *inferior;
 
@@ -2210,7 +2205,7 @@ gnu_nat_target::attach (const char *args, int from_tty)
 
   if (from_tty)
     {
-      exec_file = (char *) get_exec_file (0);
+      const char *exec_file = get_exec_file (0);
 
       if (exec_file)
 	printf_unfiltered ("Attaching to program `%s', pid %d\n",
@@ -2264,7 +2259,7 @@ gnu_nat_target::detach (inferior *inf, int from_tty)
 
   if (from_tty)
     {
-      char *exec_file = get_exec_file (0);
+      const char *exec_file = get_exec_file (0);
 
       if (exec_file)
 	printf_unfiltered ("Detaching from program `%s' pid %d\n",
@@ -2714,7 +2709,7 @@ proc_string (struct proc *proc)
   return tid_str;
 }
 
-const char *
+std::string
 gnu_nat_target::pid_to_str (ptid_t ptid)
 {
   struct inf *inf = gnu_current_inf;
@@ -2724,12 +2719,7 @@ gnu_nat_target::pid_to_str (ptid_t ptid)
   if (thread)
     return proc_string (thread);
   else
-    {
-      static char tid_str[80];
-
-      xsnprintf (tid_str, sizeof (tid_str), "bogus thread id %d", tid);
-      return tid_str;
-    }
+    return string_printf ("bogus thread id %d", tid);
 }
 
 
@@ -3321,15 +3311,15 @@ This is the same as setting `task pause', `exceptions', and\n\
 
   /* Commands to show information about the task's ports.  */
   add_info ("send-rights", info_send_rights_cmd,
-	    _("Show information about the task's send rights"));
+	    _("Show information about the task's send rights."));
   add_info ("receive-rights", info_recv_rights_cmd,
-	    _("Show information about the task's receive rights"));
+	    _("Show information about the task's receive rights."));
   add_info ("port-rights", info_port_rights_cmd,
-	    _("Show information about the task's port rights"));
+	    _("Show information about the task's port rights."));
   add_info ("port-sets", info_port_sets_cmd,
-	    _("Show information about the task's port sets"));
+	    _("Show information about the task's port sets."));
   add_info ("dead-names", info_dead_names_cmd,
-	    _("Show information about the task's dead names"));
+	    _("Show information about the task's dead names."));
   add_info_alias ("ports", "port-rights", 1);
   add_info_alias ("port", "port-rights", 1);
   add_info_alias ("psets", "port-sets", 1);
@@ -3510,8 +3500,9 @@ to the thread's initial suspend-count when gdb notices the threads."),
 	   &thread_cmd_list);
 }
 
+void _initialize_gnu_nat ();
 void
-_initialize_gnu_nat (void)
+_initialize_gnu_nat ()
 {
   proc_server = getproc ();
 

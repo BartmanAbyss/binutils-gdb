@@ -1,7 +1,7 @@
 /* Target-dependent code for the IQ2000 architecture, for GDB, the GNU
    Debugger.
 
-   Copyright (C) 2000-2019 Free Software Foundation, Inc.
+   Copyright (C) 2000-2020 Free Software Foundation, Inc.
 
    Contributed by Red Hat.
 
@@ -24,7 +24,7 @@
 #include "frame.h"
 #include "frame-base.h"
 #include "frame-unwind.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "gdbtypes.h"
 #include "value.h"
 #include "dis-asm.h"
@@ -435,25 +435,6 @@ static const struct frame_unwind iq2000_frame_unwind = {
 };
 
 static CORE_ADDR
-iq2000_unwind_sp (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame, E_SP_REGNUM);
-}   
-
-static CORE_ADDR
-iq2000_unwind_pc (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame, E_PC_REGNUM);
-}
-
-static struct frame_id
-iq2000_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  CORE_ADDR sp = get_frame_register_unsigned (this_frame, E_SP_REGNUM);
-  return frame_id_build (sp, get_frame_pc (this_frame));
-}
-
-static CORE_ADDR
 iq2000_frame_base_address (struct frame_info *this_frame, void **this_cache)
 {
   struct iq2000_frame_cache *cache = iq2000_frame_cache (this_frame,
@@ -843,9 +824,6 @@ iq2000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_inner_than           (gdbarch, core_addr_lessthan);
   set_gdbarch_register_type (gdbarch, iq2000_register_type);
   set_gdbarch_frame_align (gdbarch, iq2000_frame_align);
-  set_gdbarch_unwind_sp (gdbarch, iq2000_unwind_sp);
-  set_gdbarch_unwind_pc (gdbarch, iq2000_unwind_pc);
-  set_gdbarch_dummy_id (gdbarch, iq2000_dummy_id);
   frame_base_set_default (gdbarch, &iq2000_frame_base);
   set_gdbarch_push_dummy_call (gdbarch, iq2000_push_dummy_call);
 
@@ -861,8 +839,9 @@ iq2000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
    Initializer function for the iq2000 module.
    Called by gdb at start-up.  */
 
+void _initialize_iq2000_tdep ();
 void
-_initialize_iq2000_tdep (void)
+_initialize_iq2000_tdep ()
 {
   register_gdbarch_init (bfd_arch_iq2000, iq2000_gdbarch_init);
 }

@@ -1,6 +1,6 @@
 /* Interface between gdb and its extension languages.
 
-   Copyright (C) 2014-2019 Free Software Foundation, Inc.
+   Copyright (C) 2014-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -153,6 +153,9 @@ get_ext_lang_of_file (const char *file)
 {
   int i;
   const struct extension_language_defn *extlang;
+
+  if (has_extension (file, extension_language_gdb.suffix))
+    return &extension_language_gdb;
 
   ALL_EXTENSION_LANGUAGES (i, extlang)
     {
@@ -467,12 +470,9 @@ ext_lang_type_printers::~ext_lang_type_printers ()
     }
 }
 
-/* Try to pretty-print a value of type TYPE located at VAL's contents
-   buffer + EMBEDDED_OFFSET, which came from the inferior at address
-   ADDRESS + EMBEDDED_OFFSET, onto stdio stream STREAM according to
-   OPTIONS.
-   VAL is the whole object that came from ADDRESS.
-   Returns non-zero if the value was successfully pretty-printed.
+/* Try to pretty-print a value onto stdio stream STREAM according to
+   OPTIONS.  VAL is the object to print.  Returns non-zero if the
+   value was successfully pretty-printed.
 
    Extension languages are tried in the order specified by
    extension_languages.  The first one to provide a pretty-printed
@@ -485,10 +485,8 @@ ext_lang_type_printers::~ext_lang_type_printers ()
    errors that trigger an exception in the extension language.  */
 
 int
-apply_ext_lang_val_pretty_printer (struct type *type,
-				   LONGEST embedded_offset, CORE_ADDR address,
+apply_ext_lang_val_pretty_printer (struct value *val,
 				   struct ui_file *stream, int recurse,
-				   struct value *val,
 				   const struct value_print_options *options,
 				   const struct language_defn *language)
 {
@@ -501,10 +499,8 @@ apply_ext_lang_val_pretty_printer (struct type *type,
 
       if (extlang->ops->apply_val_pretty_printer == NULL)
 	continue;
-      rc = extlang->ops->apply_val_pretty_printer (extlang, type,
-						   embedded_offset, address,
-						   stream, recurse, val,
-						   options, language);
+      rc = extlang->ops->apply_val_pretty_printer (extlang, val, stream,
+						   recurse, options, language);
       switch (rc)
 	{
 	case EXT_LANG_RC_OK:
@@ -900,6 +896,27 @@ xmethod_worker::get_result_type (value *object, gdb::array_view<value *> args)
   return result_type;
 }
 
+/* See extension.h.  */
+
+gdb::optional<std::string>
+ext_lang_colorize (const std::string &filename, const std::string &contents)
+{
+  int i;
+  const struct extension_language_defn *extlang;
+  gdb::optional<std::string> result;
+
+  ALL_ENABLED_EXTENSION_LANGUAGES (i, extlang)
+    {
+      if (extlang->ops->colorize == nullptr)
+	continue;
+      result = extlang->ops->colorize (filename, contents);
+      if (result.has_value ())
+	return result;
+    }
+
+  return result;
+}
+
 /* Called via an observer before gdb prints its prompt.
    Iterate over the extension languages giving them a chance to
    change the prompt.  The first one to change the prompt wins,
@@ -931,8 +948,9 @@ ext_lang_before_prompt (const char *current_gdb_prompt)
     }
 }
 
+void _initialize_extension ();
 void
-_initialize_extension (void)
+_initialize_extension ()
 {
   gdb::observers::before_prompt.attach (ext_lang_before_prompt);
 }

@@ -1,5 +1,5 @@
 /* 32-bit ELF support for TI C6X
-   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+   Copyright (C) 2010-2020 Free Software Foundation, Inc.
    Contributed by Joseph Myers <joseph@codesourcery.com>
 		  Bernd Schmidt  <bernds@codesourcery.com>
 
@@ -1595,7 +1595,7 @@ static struct bfd_link_hash_table *
 elf32_tic6x_link_hash_table_create (bfd *abfd)
 {
   struct elf32_tic6x_link_hash_table *ret;
-  bfd_size_type amt = sizeof (struct elf32_tic6x_link_hash_table);
+  size_t amt = sizeof (struct elf32_tic6x_link_hash_table);
 
   ret = bfd_zmalloc (amt);
   if (ret == NULL)
@@ -1684,8 +1684,8 @@ elf32_tic6x_create_dynamic_sections (bfd *dynobj, struct bfd_link_info *info)
   htab->dsbt = bfd_make_section_anyway_with_flags (dynobj, ".dsbt",
 						   flags);
   if (htab->dsbt == NULL
-      || ! bfd_set_section_alignment (dynobj, htab->dsbt, 2)
-      || ! bfd_set_section_alignment (dynobj, htab->elf.splt, 5))
+      || !bfd_set_section_alignment (htab->dsbt, 2)
+      || !bfd_set_section_alignment (htab->elf.splt, 5))
     return FALSE;
 
   return TRUE;
@@ -1992,7 +1992,7 @@ elf32_tic6x_fake_sections (bfd *abfd ATTRIBUTE_UNUSED,
 {
   const char * name;
 
-  name = bfd_get_section_name (abfd, sec);
+  name = bfd_section_name (sec);
 
   if (is_tic6x_elf_unwind_section_name (name))
     {
@@ -2147,7 +2147,7 @@ elf32_tic6x_new_section_hook (bfd *abfd, asection *sec)
   if (!sec->used_by_bfd)
     {
       _tic6x_elf_section_data *sdata;
-      bfd_size_type amt = sizeof (*sdata);
+      size_t amt = sizeof (*sdata);
 
       sdata = (_tic6x_elf_section_data *) bfd_zalloc (abfd, amt);
       if (sdata == NULL)
@@ -2683,7 +2683,7 @@ elf32_tic6x_relocate_section (bfd *output_bfd,
 	      if (name == NULL)
 		return FALSE;
 	      if (*name == '\0')
-		name = bfd_section_name (input_bfd, sec);
+		name = bfd_section_name (sec);
 	    }
 
 	  switch (r)
@@ -2945,7 +2945,7 @@ elf32_tic6x_check_relocs (bfd *abfd, struct bfd_link_info *info,
 	      p = *head;
 	      if (p == NULL || p->sec != sec)
 		{
-		  bfd_size_type amt = sizeof *p;
+		  size_t amt = sizeof *p;
 		  p = bfd_alloc (htab->elf.dynobj, amt);
 		  if (p == NULL)
 		    return FALSE;
@@ -3016,7 +3016,7 @@ elf32_tic6x_add_symbol_hook (bfd *abfd,
       *secp = bfd_make_section_old_way (abfd, ".scommon");
       (*secp)->flags |= SEC_IS_COMMON;
       *valp = sym->st_size;
-      (void) bfd_set_section_alignment (abfd, *secp, bfd_log2 (sym->st_value));
+      bfd_set_section_alignment (*secp, bfd_log2 (sym->st_value));
       break;
     }
 
@@ -3072,7 +3072,7 @@ elf32_tic6x_section_from_bfd_section (bfd *abfd ATTRIBUTE_UNUSED,
 				      asection *sec,
 				      int *retval)
 {
-  if (strcmp (bfd_get_section_name (abfd, sec), ".scommon") == 0)
+  if (strcmp (bfd_section_name (sec), ".scommon") == 0)
     {
       *retval = SHN_TIC6X_SCOMMON;
       return TRUE;
@@ -3385,7 +3385,7 @@ elf32_tic6x_size_dynamic_sections (bfd *output_bfd, struct bfd_link_info *info)
 	  if (s == htab->elf.splt && s->size > 0)
 	    s->size = (s->size + 31) & ~(bfd_vma)31;
 	}
-      else if (CONST_STRNEQ (bfd_get_section_name (dynobj, s), ".rela"))
+      else if (CONST_STRNEQ (bfd_section_name (s), ".rela"))
 	{
 	  if (s->size != 0
 	      && s != htab->elf.srelplt)
@@ -3724,6 +3724,10 @@ elf32_tic6x_merge_attributes (bfd *ibfd, struct bfd_link_info *info)
   int i;
   int array_align_in, array_align_out, array_expect_in, array_expect_out;
 
+  /* FIXME: What should be checked when linking shared libraries?  */
+  if ((ibfd->flags & DYNAMIC) != 0)
+    return TRUE;
+
   if (!elf_known_obj_attributes_proc (obfd)[0].i)
     {
       /* This is the first object.  Copy the attributes.  */
@@ -3862,6 +3866,9 @@ elf32_tic6x_merge_attributes (bfd *ibfd, struct bfd_link_info *info)
 
 	case Tag_ABI_PIC:
 	case Tag_ABI_PID:
+	  /* Don't transfer these tags from dynamic objects.  */
+	  if ((ibfd->flags & DYNAMIC) != 0)
+	    continue;
 	  if (out_attr[i].i > in_attr[i].i)
 	    out_attr[i].i = in_attr[i].i;
 	  break;
@@ -3992,10 +3999,10 @@ elf32_tic6x_adjust_exidx_size (asection *exidx_sec, int adjust)
   if (!exidx_sec->rawsize)
     exidx_sec->rawsize = exidx_sec->size;
 
-  bfd_set_section_size (exidx_sec->owner, exidx_sec, exidx_sec->size + adjust);
+  bfd_set_section_size (exidx_sec, exidx_sec->size + adjust);
   out_sec = exidx_sec->output_section;
   /* Adjust size of output section.  */
-  bfd_set_section_size (out_sec->owner, out_sec, out_sec->size +adjust);
+  bfd_set_section_size (out_sec, out_sec->size +adjust);
 }
 
 /* Insert an EXIDX_CANTUNWIND marker at the end of a section.  */

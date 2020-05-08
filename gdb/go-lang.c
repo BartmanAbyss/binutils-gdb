@@ -1,6 +1,6 @@
 /* Go language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 2012-2019 Free Software Foundation, Inc.
+   Copyright (C) 2012-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -40,6 +40,7 @@
 #include "go-lang.h"
 #include "c-lang.h"
 #include "parser-defs.h"
+#include "gdbarch.h"
 
 #include <ctype.h>
 
@@ -128,6 +129,16 @@ go_classify_struct_type (struct type *type)
     return GO_TYPE_STRING;
 
   return GO_TYPE_NONE;
+}
+
+/* Return true if TYPE is a string.  */
+
+static bool
+go_is_string_type_p (struct type *type)
+{
+  type = check_typedef (type);
+  return (TYPE_CODE (type) == TYPE_CODE_STRUCT
+	  && go_classify_struct_type (type) == GO_TYPE_STRING);
 }
 
 /* Subroutine of unpack_mangled_go_symbol to simplify it.
@@ -400,7 +411,7 @@ go_sniff_from_mangled_name (const char *mangled, char **demangled)
 char *
 go_symbol_package_name (const struct symbol *sym)
 {
-  const char *mangled_name = SYMBOL_LINKAGE_NAME (sym);
+  const char *mangled_name = sym->linkage_name ();
   const char *package_name;
   const char *object_name;
   const char *method_type_package_name;
@@ -409,7 +420,7 @@ go_symbol_package_name (const struct symbol *sym)
   char *name_buf;
   char *result;
 
-  gdb_assert (SYMBOL_LANGUAGE (sym) == language_go);
+  gdb_assert (sym->language () == language_go);
   name_buf = unpack_mangled_go_symbol (mangled_name,
 				       &package_name, &object_name,
 				       &method_type_package_name,
@@ -584,7 +595,7 @@ extern const struct language_defn go_language_defn =
   go_print_type,		/* Print a type using appropriate syntax.  */
   c_print_typedef,		/* Print a typedef using appropriate
 				   syntax.  */
-  go_val_print,			/* Print a value using appropriate syntax.  */
+  go_value_print_inner,		/* la_value_print_inner */
   c_value_print,		/* Print a top-level value.  */
   default_read_var_value,	/* la_read_var_value */
   NULL,				/* Language specific skip_trampoline.  */
@@ -604,7 +615,6 @@ extern const struct language_defn go_language_defn =
   go_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
-  c_get_string,
   c_watch_location_expression,
   NULL,				/* la_get_symbol_name_matcher */
   iterate_over_symbols,
@@ -612,7 +622,8 @@ extern const struct language_defn go_language_defn =
   &default_varobj_ops,
   NULL,
   NULL,
-  LANG_MAGIC
+  go_is_string_type_p,
+  "{...}"			/* la_struct_too_deep_ellipsis */
 };
 
 static void *
@@ -654,11 +665,9 @@ build_go_types (struct gdbarch *gdbarch)
   builtin_go_type->builtin_float64
     = arch_float_type (gdbarch, 64, "float64", floatformats_ieee_double);
   builtin_go_type->builtin_complex64
-    = arch_complex_type (gdbarch, "complex64",
-			 builtin_go_type->builtin_float32);
+    = init_complex_type ("complex64", builtin_go_type->builtin_float32);
   builtin_go_type->builtin_complex128
-    = arch_complex_type (gdbarch, "complex128",
-			 builtin_go_type->builtin_float64);
+    = init_complex_type ("complex128", builtin_go_type->builtin_float64);
 
   return builtin_go_type;
 }
@@ -671,8 +680,9 @@ builtin_go_type (struct gdbarch *gdbarch)
   return (const struct builtin_go_type *) gdbarch_data (gdbarch, go_type_data);
 }
 
+void _initialize_go_language ();
 void
-_initialize_go_language (void)
+_initialize_go_language ()
 {
   go_type_data = gdbarch_data_register_post_init (build_go_types);
 }

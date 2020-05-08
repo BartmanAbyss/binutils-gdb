@@ -1,6 +1,6 @@
 # cpexprs.exp - C++ expressions tests
 #
-# Copyright 2008-2019 Free Software Foundation, Inc.
+# Copyright 2008-2020 Free Software Foundation, Inc.
 #
 # Contributed by Red Hat, originally written by Keith Seitz.
 #
@@ -681,22 +681,27 @@ add {policyd5::function} \
 # Start the test
 if {[skip_cplus_tests]} { continue }
 
-# On SPU this test fails because the executable exceeds local storage size.
-if { [istarget "spu*-*-*"] } {
-        return 0
-}
-
 #
 # test running programs
 #
 
-standard_testfile .cc
+standard_testfile cpexprs.cc
 
 if {[get_compiler_info "c++"]} {
     return -1
 }
 
-if {[prepare_for_testing "failed to prepare" $testfile $srcfile {debug c++}]} {
+if { [info exists flags] } {
+    # Already set externally.
+} else {
+    # Initialize to empty.
+    set flags {}
+}
+
+# Include required flags.
+set flags "$flags debug c++"
+
+if {[prepare_for_testing "failed to prepare" $testfile $srcfile "$flags"]} {
     return -1
 }
 
@@ -710,12 +715,12 @@ gdb_test "set listsize 1"
 
 # "print METHOD"
 foreach name [get_functions print] {
-    gdb_test "print $name" [get $name print] "print $name"
+    gdb_test "print $name" [get $name print]
 }
 
 # "list METHOD"
 foreach name [get_functions list] {
-    gdb_test "list $name" [get $name list] "list $name"
+    gdb_test "list $name" [get $name list]
 }
 
 # Running to breakpoint -- use any function we can "list"
@@ -735,9 +740,6 @@ foreach cv {{} { const} { volatile} { const volatile}} {
 	  set correct $expect_out(1,string)
 	  pass $test
       }
-  }
-  if {"$cv" != ""} {
-      setup_kfail c++/14186 *-*-*
   }
   gdb_test "p CV::m(int)$cv" [string_to_regexp $correct]
 }

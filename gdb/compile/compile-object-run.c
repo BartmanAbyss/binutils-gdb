@@ -1,6 +1,6 @@
 /* Call module for 'compile' command.
 
-   Copyright (C) 2014-2019 Free Software Foundation, Inc.
+   Copyright (C) 2014-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -77,7 +77,7 @@ do_module_cleanup (void *arg, int registers_valid)
 
 	  addr_value = value_from_pointer (ptr_type, data->out_value_addr);
 
-	  /* SCOPE_DATA would be stale unlesse EXECUTEDP != NULL.  */
+	  /* SCOPE_DATA would be stale unless EXECUTEDP != NULL.  */
 	  compile_print_value (value_ind (addr_value), data->scope_data);
 	}
     }
@@ -86,7 +86,7 @@ do_module_cleanup (void *arg, int registers_valid)
     if ((objfile->flags & OBJF_USERLOADED) == 0
         && (strcmp (objfile_name (objfile), data->objfile_name_string) == 0))
       {
-	delete objfile;
+	objfile->unlink ();
 
 	/* It may be a bit too pervasive in this dummy_frame dtor callback.  */
 	clear_symtab_users (0);
@@ -137,7 +137,7 @@ compile_object_run (struct compile_module *module)
   xfree (module);
   module = NULL;
 
-  TRY
+  try
     {
       struct type *func_type = SYMBOL_TYPE (func_sym);
       htab_t copied_types;
@@ -173,7 +173,7 @@ compile_object_run (struct compile_module *module)
       call_function_by_hand_dummy (func_val, NULL, args,
 				   do_module_cleanup, data);
     }
-  CATCH (ex, RETURN_MASK_ERROR)
+  catch (const gdb_exception_error &ex)
     {
       /* In the case of DTOR_FOUND or in the case of EXECUTED nothing
 	 needs to be done.  */
@@ -183,9 +183,8 @@ compile_object_run (struct compile_module *module)
       gdb_assert (!(dtor_found && executed));
       if (!dtor_found && !executed)
 	do_module_cleanup (data, 0);
-      throw_exception (ex);
+      throw;
     }
-  END_CATCH
 
   dtor_found = find_dummy_frame_dtor (do_module_cleanup, data);
   gdb_assert (!dtor_found && executed);

@@ -1,5 +1,5 @@
 /* as.c - GAS main program.
-   Copyright (C) 1987-2019 Free Software Foundation, Inc.
+   Copyright (C) 1987-2020 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -94,6 +94,16 @@ int debug_memory = 0;
 
 /* Enable verbose mode.  */
 int verbose = 0;
+
+/* Which version of DWARF CIE to produce.  This default value of -1
+   indicates that this value has not been set yet, a default value is
+   provided in dwarf2_init.  A different value can also be supplied by the
+   command line flag --gdwarf-cie-version, or by a target in
+   MD_AFTER_PARSE_ARGS.  */
+int flag_dwarf_cie_version = -1;
+
+/* The maximum level of DWARF DEBUG information we should manufacture.  */
+unsigned int dwarf_level = 0;
 
 #if defined OBJ_ELF || defined OBJ_MAYBE_ELF
 int flag_use_elf_stt_common = DEFAULT_GENERATE_ELF_STT_COMMON;
@@ -331,7 +341,7 @@ Options:\n\
   fprintf (stream, _("\
   --gstabs+               generate STABS debug info with GNU extensions\n"));
   fprintf (stream, _("\
-  --gdwarf-2              generate DWARF2 debugging information\n"));
+  --gdwarf-<N>            generate DWARF<N> debugging information. 2 <= <N> <= 5\n"));
   fprintf (stream, _("\
   --gdwarf-sections       generate per-function section names for DWARF line information\n"));
   fprintf (stream, _("\
@@ -477,8 +487,12 @@ parse_args (int * pargc, char *** pargv)
       OPTION_DEPFILE,
       OPTION_GSTABS,
       OPTION_GSTABS_PLUS,
-      OPTION_GDWARF2,
+      OPTION_GDWARF_2,
+      OPTION_GDWARF_3,
+      OPTION_GDWARF_4,
+      OPTION_GDWARF_5,
       OPTION_GDWARF_SECTIONS,
+      OPTION_GDWARF_CIE_VERSION,
       OPTION_STRIP_LOCAL_ABSOLUTE,
       OPTION_TRADITIONAL_FORMAT,
       OPTION_WARN,
@@ -529,11 +543,15 @@ parse_args (int * pargc, char *** pargv)
     ,{"generate-missing-build-notes", required_argument, NULL, OPTION_ELF_BUILD_NOTES}
 #endif
     ,{"fatal-warnings", no_argument, NULL, OPTION_WARN_FATAL}
-    ,{"gdwarf-2", no_argument, NULL, OPTION_GDWARF2}
-    /* GCC uses --gdwarf-2 but GAS uses to use --gdwarf2,
+    ,{"gdwarf-2", no_argument, NULL, OPTION_GDWARF_2}
+    ,{"gdwarf-3", no_argument, NULL, OPTION_GDWARF_3}
+    ,{"gdwarf-4", no_argument, NULL, OPTION_GDWARF_4}
+    ,{"gdwarf-5", no_argument, NULL, OPTION_GDWARF_5}
+    /* GCC uses --gdwarf-2 but GAS used to to use --gdwarf2,
        so we keep it here for backwards compatibility.  */
-    ,{"gdwarf2", no_argument, NULL, OPTION_GDWARF2}
+    ,{"gdwarf2", no_argument, NULL, OPTION_GDWARF_2}
     ,{"gdwarf-sections", no_argument, NULL, OPTION_GDWARF_SECTIONS}
+    ,{"gdwarf-cie-version", required_argument, NULL, OPTION_GDWARF_CIE_VERSION}
     ,{"gen-debug", no_argument, NULL, 'g'}
     ,{"gstabs", no_argument, NULL, OPTION_GSTABS}
     ,{"gstabs+", no_argument, NULL, OPTION_GSTABS_PLUS}
@@ -675,7 +693,7 @@ parse_args (int * pargc, char *** pargv)
 	case OPTION_VERSION:
 	  /* This output is intended to follow the GNU standards document.  */
 	  printf (_("GNU assembler %s\n"), BFD_VERSION_STRING);
-	  printf (_("Copyright (C) 2019 Free Software Foundation, Inc.\n"));
+	  printf (_("Copyright (C) 2020 Free Software Foundation, Inc.\n"));
 	  printf (_("\
 This program is free software; you may redistribute it under the terms of\n\
 the GNU General Public License version 3 or later.\n\
@@ -808,7 +826,10 @@ This program has absolutely no warranty.\n"));
 	  if (md_debug_format_selector)
 	    debug_type = md_debug_format_selector (& use_gnu_debug_info_extensions);
 	  else if (IS_ELF)
-	    debug_type = DEBUG_DWARF2;
+	    {
+	      debug_type = DEBUG_DWARF2;
+	      dwarf_level = 2;
+	    }
 	  else
 	    debug_type = DEBUG_STABS;
 	  break;
@@ -820,12 +841,53 @@ This program has absolutely no warranty.\n"));
 	  debug_type = DEBUG_STABS;
 	  break;
 
-	case OPTION_GDWARF2:
+	case OPTION_GDWARF_2:
 	  debug_type = DEBUG_DWARF2;
+	  dwarf_level = 2;
+	  break;
+
+	case OPTION_GDWARF_3:
+	  debug_type = DEBUG_DWARF2;
+	  dwarf_level = 3;
+	  break;
+
+	case OPTION_GDWARF_4:
+	  debug_type = DEBUG_DWARF2;
+	  dwarf_level = 4;
+	  break;
+
+	case OPTION_GDWARF_5:
+	  debug_type = DEBUG_DWARF2;
+	  dwarf_level = 5;
 	  break;
 
 	case OPTION_GDWARF_SECTIONS:
 	  flag_dwarf_sections = TRUE;
+	  break;
+
+        case OPTION_GDWARF_CIE_VERSION:
+	  flag_dwarf_cie_version = atoi (optarg);
+          /* The available CIE versions are 1 (DWARF 2), 3 (DWARF 3), and 4
+             (DWARF 4 and 5).  */
+	  if (flag_dwarf_cie_version < 1
+              || flag_dwarf_cie_version == 2
+              || flag_dwarf_cie_version > 4)
+            as_fatal (_("Invalid --gdwarf-cie-version `%s'"), optarg);
+	  switch (flag_dwarf_cie_version)
+	    {
+	    case 1:
+	      if (dwarf_level < 2)
+		dwarf_level = 2;
+	      break;
+	    case 3:
+	      if (dwarf_level < 3)
+		dwarf_level = 3;
+	      break;
+	    default:
+	      if (dwarf_level < 4)
+		dwarf_level = 4;
+	      break;
+	    }
 	  break;
 
 	case 'J':
@@ -1102,16 +1164,14 @@ close_output_file (void)
 static size_t
 macro_expr (const char *emsg, size_t idx, sb *in, offsetT *val)
 {
-  char *hold;
   expressionS ex;
 
   sb_terminate (in);
 
-  hold = input_line_pointer;
-  input_line_pointer = in->ptr + idx;
+  temp_ilp (in->ptr + idx);
   expression_and_evaluate (&ex);
   idx = input_line_pointer - in->ptr;
-  input_line_pointer = hold;
+  restore_ilp ();
 
   if (ex.X_op != O_constant)
     as_bad ("%s", emsg);
@@ -1149,13 +1209,13 @@ perform_an_assembly_pass (int argc, char ** argv)
   /* @@ FIXME -- we're setting the RELOC flag so that sections are assumed
      to have relocs, otherwise we don't find out in time.  */
   applicable = bfd_applicable_section_flags (stdoutput);
-  bfd_set_section_flags (stdoutput, text_section,
+  bfd_set_section_flags (text_section,
 			 applicable & (SEC_ALLOC | SEC_LOAD | SEC_RELOC
 				       | SEC_CODE | SEC_READONLY));
-  bfd_set_section_flags (stdoutput, data_section,
+  bfd_set_section_flags (data_section,
 			 applicable & (SEC_ALLOC | SEC_LOAD | SEC_RELOC
 				       | SEC_DATA));
-  bfd_set_section_flags (stdoutput, bss_section, applicable & SEC_ALLOC);
+  bfd_set_section_flags (bss_section, applicable & SEC_ALLOC);
   seg_info (bss_section)->bss = 1;
 #endif
   subseg_new (BFD_ABS_SECTION_NAME, 0);
@@ -1273,7 +1333,13 @@ main (int argc, char ** argv)
 	      /* Different files may have the same inode number if they
 		 reside on different devices, so check the st_dev field as
 		 well.  */
-	      && sib.st_dev == sob.st_dev)
+	      && sib.st_dev == sob.st_dev
+	      /* PR 25572: Only check regular files.  Devices, sockets and so
+		 on might actually work as both input and output.  Plus there
+		 is a use case for using /dev/null as both input and output
+		 when checking for command line option support in a script:
+		   as --foo /dev/null -o /dev/null; if $? then ...  */
+	      && S_ISREG (sib.st_mode))
 	    {
 	      const char *saved_out_file_name = out_file_name;
 
@@ -1362,7 +1428,7 @@ main (int argc, char ** argv)
       segT gnustack;
 
       gnustack = subseg_new (".note.GNU-stack", 0);
-      bfd_set_section_flags (stdoutput, gnustack,
+      bfd_set_section_flags (gnustack,
 			     SEC_READONLY | (flag_execstack ? SEC_CODE : 0));
 
     }

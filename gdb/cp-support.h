@@ -1,5 +1,5 @@
 /* Helper routines for C++ support in GDB.
-   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+   Copyright (C) 2002-2020 Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
    Namespace support contributed by David Carlton.
@@ -25,10 +25,9 @@
 /* We need this for 'domain_enum', alas...  */
 
 #include "symtab.h"
-#include "common/vec.h"
-#include "common/gdb_vecs.h"
+#include "gdbsupport/gdb_vecs.h"
 #include "gdb_obstack.h"
-#include "common/array-view.h"
+#include "gdbsupport/array-view.h"
 #include <vector>
 
 /* Opaque declarations.  */
@@ -118,7 +117,7 @@ extern void add_symbol_overload_list_adl
    std::vector<symbol *> *overload_list);
 
 extern struct type *cp_lookup_rtti_type (const char *name,
-					 struct block *block);
+					 const struct block *block);
 
 /* Produce an unsigned hash value from SEARCH_NAME that is compatible
    with cp_symbol_name_matches.  Only the last component in

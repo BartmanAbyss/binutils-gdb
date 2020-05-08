@@ -1,5 +1,5 @@
 # Expect script for tests for >64k sections
-#   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+#   Copyright (C) 2002-2020 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -29,19 +29,15 @@ if ![is_elf_format] {
 
 # Targets using _bfd_generic_final_link don't sort section symbols
 # before local symbols, so don't bother testing them.
-if { [istarget "d30v-*-*"]
-     || [istarget "dlx-*-*"]
-     || [istarget "pj*-*-*"] } {
+if { [is_generic] } {
     return
 }
 
-# ft32, h8300, ip2k, m68hc11, m68hc12 and xgate run out of address space.
+# ft32, h8300, ip2k, m68hc11 and m68hc12 run out of address space.
 if {[istarget "ft32-*-*"]
     || [istarget "h8300-*-*"]
     || [istarget "ip2k-*-*"]
-    || [istarget "m68hc1*-*"]
-    || [istarget "s12z-*"]
-    || [istarget "xgate-*"] } {
+    || [istarget "m68hc1*-*"] } {
     return
 }
 
@@ -134,6 +130,10 @@ if { ![istarget "m32r-*-*"] } then {
     foreach sfile [lrange $sfiles 0 [expr [llength $sfiles] / 2]] {
 	puts $ofd "#source: $sfile"
     }
+    #force z80 target to compile for eZ80 in ADL mode
+    if { [istarget "z80-*-*"] } then {
+	puts $ofd "#as: -ez80-adl"
+    }
     puts $ofd "#ld: -r"
     puts $ofd "#readelf: -W -Ss"
     puts $ofd "There are 680.. section headers.*:"
@@ -183,6 +183,10 @@ if { ![istarget "d10v-*-*"]
 	puts $ofd "#ld: -z noseparate-code"
     } else {
 	puts $ofd "#ld:"
+    }
+    #force z80 target to compile for eZ80 in ADL mode
+    if { [istarget "z80-*-*"] } then {
+	puts $ofd "#as: -ez80-adl"
     }
     puts $ofd "#readelf: -W -Ss"
     puts $ofd "There are 660.. section headers.*:"

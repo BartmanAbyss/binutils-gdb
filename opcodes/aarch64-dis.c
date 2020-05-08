@@ -1,5 +1,5 @@
 /* aarch64-dis.c -- AArch64 disassembler.
-   Copyright (C) 2009-2019 Free Software Foundation, Inc.
+   Copyright (C) 2009-2020 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of the GNU opcodes library.
@@ -37,6 +37,7 @@ enum map_type
 
 static enum map_type last_type;
 static int last_mapping_sym = -1;
+static bfd_vma last_stop_offset = 0;
 static bfd_vma last_mapping_addr = 0;
 
 /* Other options */
@@ -177,18 +178,15 @@ extract_all_fields (const aarch64_operand *self, aarch64_insn code)
 }
 
 /* Sign-extend bit I of VALUE.  */
-static inline int32_t
+static inline uint64_t
 sign_extend (aarch64_insn value, unsigned i)
 {
-  uint32_t ret = value;
+  uint64_t ret, sign;
 
   assert (i < 32);
-  if ((value >> i) & 0x1)
-    {
-      uint32_t val = (uint32_t)(-1) << i;
-      ret = ret | val;
-    }
-  return (int32_t) ret;
+  ret = value;
+  sign = (uint64_t) 1 << i;
+  return ((ret & (sign + sign - 1)) ^ sign) - sign;
 }
 
 /* N.B. the following inline helpfer functions create a dependency on the
@@ -252,6 +250,16 @@ get_expected_qualifier (const aarch64_inst *inst, int i)
 }
 
 /* Operand extractors.  */
+
+bfd_boolean
+aarch64_ext_none (const aarch64_operand *self ATTRIBUTE_UNUSED,
+		  aarch64_opnd_info *info ATTRIBUTE_UNUSED,
+		  const aarch64_insn code ATTRIBUTE_UNUSED,
+		  const aarch64_inst *inst ATTRIBUTE_UNUSED,
+		  aarch64_operand_error *errors ATTRIBUTE_UNUSED)
+{
+  return TRUE;
+}
 
 bfd_boolean
 aarch64_ext_regno (const aarch64_operand *self, aarch64_opnd_info *info,
@@ -347,6 +355,7 @@ aarch64_ext_reglane (const aarch64_operand *self, aarch64_opnd_info *info,
       switch (info->qualifier)
 	{
 	case AARCH64_OPND_QLF_S_4B:
+	case AARCH64_OPND_QLF_S_2H:
 	  /* L:H */
 	  info->reglane.index = extract_fields (code, 0, 2, FLD_H, FLD_L);
 	  info->reglane.regno &= 0x1f;
@@ -656,7 +665,7 @@ aarch64_ext_imm (const aarch64_operand *self, aarch64_opnd_info *info,
 		 const aarch64_inst *inst ATTRIBUTE_UNUSED,
 		 aarch64_operand_error *errors ATTRIBUTE_UNUSED)
 {
-  int64_t imm;
+  uint64_t imm;
 
   imm = extract_all_fields (self, code);
 
@@ -2805,8 +2814,62 @@ aarch64_decode_variant_using_iclass (aarch64_inst *inst)
       variant = i - 1;
       break;
 
+    case sve_size_bh:
     case sve_size_sd:
       variant = extract_field (FLD_SVE_sz, inst->value, 0);
+      break;
+
+    case sve_size_sd2:
+      variant = extract_field (FLD_SVE_sz2, inst->value, 0);
+      break;
+
+    case sve_size_hsd2:
+      i = extract_field (FLD_SVE_size, inst->value, 0);
+      if (i < 1)
+	return FALSE;
+      variant = i - 1;
+      break;
+
+    case sve_size_13:
+      /* Ignore low bit of this field since that is set in the opcode for
+	 instructions of this iclass.  */
+      i = (extract_field (FLD_size, inst->value, 0) & 2);
+      variant = (i >> 1);
+      break;
+
+    case sve_shift_tsz_bhsd:
+      i = extract_fields (inst->value, 0, 2, FLD_SVE_tszh, FLD_SVE_tszl_19);
+      if (i == 0)
+	return FALSE;
+      while (i != 1)
+	{
+	  i >>= 1;
+	  variant += 1;
+	}
+      break;
+
+    case sve_size_tsz_bhs:
+      i = extract_fields (inst->value, 0, 2, FLD_SVE_sz, FLD_SVE_tszl_19);
+      if (i == 0)
+	return FALSE;
+      while (i != 1)
+	{
+	  if (i & 1)
+	    return FALSE;
+	  i >>= 1;
+	  variant += 1;
+	}
+      break;
+
+    case sve_shift_tsz_hsd:
+      i = extract_fields (inst->value, 0, 2, FLD_SVE_sz, FLD_SVE_tszl_19);
+      if (i == 0)
+	return FALSE;
+      while (i != 1)
+	{
+	  i >>= 1;
+	  variant += 1;
+	}
       break;
 
     default:
@@ -2919,7 +2982,7 @@ aarch64_opcode_decode (const aarch64_opcode *opcode, const aarch64_insn code,
       DEBUG_TRACE ("constraint matching FAIL");
     }
 
-decode_fail:
+ decode_fail:
   return FALSE;
 }
 
@@ -3317,14 +3380,26 @@ print_insn_aarch64 (bfd_vma pc,
   /* Aarch64 instructions are always little-endian */
   info->endian_code = BFD_ENDIAN_LITTLE;
 
+  /* Default to DATA.  A text section is required by the ABI to contain an
+     INSN mapping symbol at the start.  A data section has no such
+     requirement, hence if no mapping symbol is found the section must
+     contain only data.  This however isn't very useful if the user has
+     fully stripped the binaries.  If this is the case use the section
+     attributes to determine the default.  If we have no section default to
+     INSN as well, as we may be disassembling some raw bytes on a baremetal
+     HEX file or similar.  */
+  enum map_type type = MAP_DATA;
+  if ((info->section && info->section->flags & SEC_CODE) || !info->section)
+    type = MAP_INSN;
+
   /* First check the full symtab for a mapping symbol, even if there
      are no usable non-mapping symbols for this address.  */
   if (info->symtab_size != 0
       && bfd_asymbol_flavour (*info->symtab) == bfd_target_elf_flavour)
     {
-      enum map_type type = MAP_INSN;
       int last_sym = -1;
-      bfd_vma addr;
+      bfd_vma addr, section_vma = 0;
+      bfd_boolean can_use_search_opt_p;
       int n;
 
       if (pc <= last_mapping_addr)
@@ -3333,10 +3408,20 @@ print_insn_aarch64 (bfd_vma pc,
       /* Start scanning at the start of the function, or wherever
 	 we finished last time.  */
       n = info->symtab_pos + 1;
-      if (n < last_mapping_sym)
+
+      /* If the last stop offset is different from the current one it means we
+	 are disassembling a different glob of bytes.  As such the optimization
+	 would not be safe and we should start over.  */
+      can_use_search_opt_p = last_mapping_sym >= 0
+			     && info->stop_offset == last_stop_offset;
+
+      if (n >= last_mapping_sym && can_use_search_opt_p)
 	n = last_mapping_sym;
 
-      /* Scan up to the location being disassembled.  */
+      /* Look down while we haven't passed the location being disassembled.
+	 The reason for this is that there's no defined order between a symbol
+	 and an mapping symbol that may be at the same address.  We may have to
+	 look at least one position ahead.  */
       for (; n < info->symtab_size; n++)
 	{
 	  addr = bfd_asymbol_value (info->symtab[n]);
@@ -3352,13 +3437,24 @@ print_insn_aarch64 (bfd_vma pc,
       if (!found)
 	{
 	  n = info->symtab_pos;
-	  if (n < last_mapping_sym)
+	  if (n >= last_mapping_sym && can_use_search_opt_p)
 	    n = last_mapping_sym;
 
 	  /* No mapping symbol found at this address.  Look backwards
-	     for a preceeding one.  */
+	     for a preceeding one, but don't go pass the section start
+	     otherwise a data section with no mapping symbol can pick up
+	     a text mapping symbol of a preceeding section.  The documentation
+	     says section can be NULL, in which case we will seek up all the
+	     way to the top.  */
+	  if (info->section)
+	    section_vma = info->section->vma;
+
 	  for (; n >= 0; n--)
 	    {
+	      addr = bfd_asymbol_value (info->symtab[n]);
+	      if (addr < section_vma)
+		break;
+
 	      if (get_sym_code_type (info, n, &type))
 		{
 		  last_sym = n;
@@ -3370,6 +3466,7 @@ print_insn_aarch64 (bfd_vma pc,
 
       last_mapping_sym = last_sym;
       last_type = type;
+      last_stop_offset = info->stop_offset;
 
       /* Look a little bit ahead to see if we should print out
 	 less than four bytes of data.  If there's a symbol,
@@ -3395,8 +3492,11 @@ print_insn_aarch64 (bfd_vma pc,
 	    size = (pc & 1) ? 1 : 2;
 	}
     }
+  else
+    last_type = type;
 
-  if (last_type == MAP_DATA)
+  /* PR 10263: Disassemble data if requested to do so by the user.  */
+  if (last_type == MAP_DATA && ((info->flags & DISASSEMBLE_DATA) == 0))
     {
       /* size was set above.  */
       info->bytes_per_chunk = size;

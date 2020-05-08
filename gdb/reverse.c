@@ -1,6 +1,6 @@
 /* Reverse execution and reverse debugging.
 
-   Copyright (C) 2006-2019 Free Software Foundation, Inc.
+   Copyright (C) 2006-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -322,8 +322,9 @@ info_bookmarks_command (const char *args, int from_tty)
     }
 }
 
+void _initialize_reverse ();
 void
-_initialize_reverse (void)
+_initialize_reverse ()
 {
   add_com ("reverse-step", class_run, reverse_step, _("\
 Step program backward until it reaches the beginning of another source line.\n\
@@ -373,12 +374,12 @@ session."));
   add_cmd ("bookmark", class_bookmark, delete_bookmark_command, _("\
 Delete a bookmark from the bookmark list.\n\
 Argument is a bookmark number or numbers,\n\
- or no argument to delete all bookmarks.\n"),
+ or no argument to delete all bookmarks."),
 	   &deletelist);
   add_com ("goto-bookmark", class_bookmark, goto_bookmark_command, _("\
 Go to an earlier-bookmarked point in the program's execution history.\n\
 Argument is the bookmark number of a bookmark saved earlier by using \n\
 the 'bookmark' command, or the special arguments:\n\
   start (beginning of recording)\n\
-  end   (end of recording)\n"));
+  end   (end of recording)"));
 }

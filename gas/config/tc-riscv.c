@@ -1,5 +1,5 @@
 /* tc-riscv.c -- RISC-V assembler
-   Copyright (C) 2011-2019 Free Software Foundation, Inc.
+   Copyright (C) 2011-2020 Free Software Foundation, Inc.
 
    Contributed by Andrew Waterman (andrew@sifive.com).
    Based on MIPS target.
@@ -83,6 +83,7 @@ struct riscv_set_options
   int rve; /* Generate RVE code.  */
   int relax; /* Emit relocs the linker is allowed to relax.  */
   int arch_attr; /* Emit arch attribute.  */
+  int csr_check; /* Enable the CSR checking.  */
 };
 
 static struct riscv_set_options riscv_opts =
@@ -92,6 +93,7 @@ static struct riscv_set_options riscv_opts =
   0,	/* rve */
   1,	/* relax */
   DEFAULT_RISCV_ATTR, /* arch_attr */
+  0.	/* csr_check */
 };
 
 static void
@@ -121,15 +123,28 @@ riscv_subset_supports (const char *feature)
 }
 
 static bfd_boolean
-riscv_multi_subset_supports (const char *features[])
+riscv_multi_subset_supports (enum riscv_insn_class insn_class)
 {
-  unsigned i = 0;
-  bfd_boolean supported = TRUE;
+  switch (insn_class)
+    {
+    case INSN_CLASS_I: return riscv_subset_supports ("i");
+    case INSN_CLASS_C: return riscv_subset_supports ("c");
+    case INSN_CLASS_A: return riscv_subset_supports ("a");
+    case INSN_CLASS_M: return riscv_subset_supports ("m");
+    case INSN_CLASS_F: return riscv_subset_supports ("f");
+    case INSN_CLASS_D: return riscv_subset_supports ("d");
+    case INSN_CLASS_D_AND_C:
+      return riscv_subset_supports ("d") && riscv_subset_supports ("c");
 
-  for (;features[i]; ++i)
-    supported = supported && riscv_subset_supports (features[i]);
+    case INSN_CLASS_F_AND_C:
+      return riscv_subset_supports ("f") && riscv_subset_supports ("c");
 
-  return supported;
+    case INSN_CLASS_Q: return riscv_subset_supports ("q");
+
+    default:
+      as_fatal ("Unreachable");
+      return FALSE;
+    }
 }
 
 /* Set which ISA and extensions are available.  */
@@ -433,12 +448,6 @@ opcode_name_lookup (char **s)
   return o;
 }
 
-struct regname
-{
-  const char *name;
-  unsigned int num;
-};
-
 enum reg_class
 {
   RCLASS_GPR,
@@ -448,6 +457,7 @@ enum reg_class
 };
 
 static struct hash_control *reg_names_hash = NULL;
+static struct hash_control *csr_extra_hash = NULL;
 
 #define ENCODE_REG_HASH(cls, n) \
   ((void *)(uintptr_t)((n) * RCLASS_MAX + (cls) + 1))
@@ -473,15 +483,100 @@ hash_reg_names (enum reg_class class, const char * const names[], unsigned n)
     hash_reg_name (class, names[i], i);
 }
 
+/* All RISC-V CSRs belong to one of these classes.  */
+
+enum riscv_csr_class
+{
+  CSR_CLASS_NONE,
+
+  CSR_CLASS_I,
+  CSR_CLASS_I_32,	/* rv32 only */
+  CSR_CLASS_F,		/* f-ext only */
+};
+
+/* This structure holds all restricted conditions for a CSR.  */
+
+struct riscv_csr_extra
+{
+  /* Class to which this CSR belongs.  Used to decide whether or
+     not this CSR is legal in the current -march context.  */
+  enum riscv_csr_class csr_class;
+};
+
+/* Init two hashes, csr_extra_hash and reg_names_hash, for CSR.  */
+
+static void
+riscv_init_csr_hashes (const char *name,
+		       unsigned address,
+		       enum riscv_csr_class class)
+{
+  struct riscv_csr_extra *entry = XNEW (struct riscv_csr_extra);
+  entry->csr_class = class;
+
+  const char *hash_error =
+    hash_insert (csr_extra_hash, name, (void *) entry);
+  if (hash_error != NULL)
+    {
+      fprintf (stderr, _("internal error: can't hash `%s': %s\n"),
+		      name, hash_error);
+      /* Probably a memory allocation problem?  Give up now.  */
+	as_fatal (_("Broken assembler.  No assembly attempted."));
+    }
+
+  hash_reg_name (RCLASS_CSR, name, address);
+}
+
+/* Check wether the CSR is valid according to the ISA.  */
+
+static bfd_boolean
+riscv_csr_class_check (enum riscv_csr_class csr_class)
+{
+  switch (csr_class)
+    {
+    case CSR_CLASS_I: return riscv_subset_supports ("i");
+    case CSR_CLASS_F: return riscv_subset_supports ("f");
+    case CSR_CLASS_I_32:
+      return (xlen == 32 && riscv_subset_supports ("i"));
+
+    default:
+      return FALSE;
+    }
+}
+
+/* If the CSR is defined, then we call `riscv_csr_class_check` to do the
+   further checking.  Return FALSE if the CSR is not defined.  Otherwise,
+   return TRUE.  */
+
+static bfd_boolean
+reg_csr_lookup_internal (const char *s)
+{
+  struct riscv_csr_extra *r =
+    (struct riscv_csr_extra *) hash_find (csr_extra_hash, s);
+
+  if (r == NULL)
+    return FALSE;
+
+  /* We just report the warning when the CSR is invalid.  */
+  if (!riscv_csr_class_check (r->csr_class))
+    as_warn (_("Invalid CSR `%s' for the current ISA"), s);
+
+  return TRUE;
+}
+
 static unsigned int
 reg_lookup_internal (const char *s, enum reg_class class)
 {
-  struct regname *r = (struct regname *) hash_find (reg_names_hash, s);
+  void *r = hash_find (reg_names_hash, s);
 
   if (r == NULL || DECODE_REG_CLASS (r) != class)
     return -1;
 
   if (riscv_opts.rve && class == RCLASS_GPR && DECODE_REG_NUM (r) > 15)
+    return -1;
+
+  if (class == RCLASS_CSR
+      && riscv_opts.csr_check
+      && !reg_csr_lookup_internal (s))
     return -1;
 
   return DECODE_REG_NUM (r);
@@ -714,7 +809,7 @@ init_opcode_hash (const struct riscv_opcode *opcodes,
       const char *hash_error =
 	hash_insert (hash, name, (void *) &opcodes[i]);
 
-      if (hash_error)
+      if (hash_error != NULL)
 	{
 	  fprintf (stderr, _("internal error: can't hash `%s': %s\n"),
 		   opcodes[i].name, hash_error);
@@ -762,17 +857,18 @@ md_begin (void)
   hash_reg_names (RCLASS_GPR, riscv_gpr_names_abi, NGPR);
   hash_reg_names (RCLASS_FPR, riscv_fpr_names_numeric, NFPR);
   hash_reg_names (RCLASS_FPR, riscv_fpr_names_abi, NFPR);
-
   /* Add "fp" as an alias for "s0".  */
   hash_reg_name (RCLASS_GPR, "fp", 8);
 
-  opcode_names_hash = hash_new ();
-  init_opcode_names_hash ();
-
-#define DECLARE_CSR(name, num) hash_reg_name (RCLASS_CSR, #name, num);
-#define DECLARE_CSR_ALIAS(name, num) DECLARE_CSR(name, num);
+  /* Create and insert CSR hash tables.  */
+  csr_extra_hash = hash_new ();
+#define DECLARE_CSR(name, num, class) riscv_init_csr_hashes (#name, num, class);
+#define DECLARE_CSR_ALIAS(name, num, class) DECLARE_CSR(name, num, class);
 #include "opcode/riscv-opc.h"
 #undef DECLARE_CSR
+
+  opcode_names_hash = hash_new ();
+  init_opcode_names_hash ();
 
   /* Set the default alignment for the text section.  */
   record_alignment (text_section, riscv_opts.rvc ? 1 : 2);
@@ -928,6 +1024,29 @@ macro_build (expressionS *ep, const char *name, const char *fmt, ...)
   append_insn (&insn, ep, r);
 }
 
+/* Build an instruction created by a macro expansion.  Like md_assemble but
+   accept a printf-style format string and arguments.  */
+
+static void
+md_assemblef (const char *format, ...)
+{
+  char *buf = NULL;
+  va_list ap;
+  int r;
+
+  va_start (ap, format);
+
+  r = vasprintf (&buf, format, ap);
+
+  if (r < 0)
+    as_fatal (_("internal error: vasprintf failed"));
+
+  md_assemble (buf);
+  free(buf);
+
+  va_end (ap);
+}
+
 /* Sign-extend 32-bit mode constants that have bit 31 set and all higher bits
    unset.  */
 static void
@@ -1013,8 +1132,9 @@ static void
 load_const (int reg, expressionS *ep)
 {
   int shift = RISCV_IMM_BITS;
+  bfd_vma upper_imm, sign = (bfd_vma) 1 << (RISCV_IMM_BITS - 1);
   expressionS upper = *ep, lower = *ep;
-  lower.X_add_number = (int32_t) ep->X_add_number << (32-shift) >> (32-shift);
+  lower.X_add_number = ((ep->X_add_number & (sign + sign - 1)) ^ sign) - sign;
   upper.X_add_number -= lower.X_add_number;
 
   if (ep->X_op != O_constant)
@@ -1032,9 +1152,10 @@ load_const (int reg, expressionS *ep)
       upper.X_add_number = (int64_t) upper.X_add_number >> shift;
       load_const (reg, &upper);
 
-      macro_build (NULL, "slli", "d,s,>", reg, reg, shift);
+      md_assemblef ("slli x%d, x%d, 0x%x", reg, reg, shift);
       if (lower.X_add_number != 0)
-	macro_build (&lower, "addi", "d,s,j", reg, reg, BFD_RELOC_RISCV_LO12_I);
+	md_assemblef ("addi x%d, x%d, %" BFD_VMA_FMT "d", reg, reg,
+		      lower.X_add_number);
     }
   else
     {
@@ -1043,13 +1164,16 @@ load_const (int reg, expressionS *ep)
 
       if (upper.X_add_number != 0)
 	{
-	  macro_build (ep, "lui", "d,u", reg, BFD_RELOC_RISCV_HI20);
+	  /* Discard low part and zero-extend upper immediate.  */
+	  upper_imm = ((uint32_t)upper.X_add_number >> shift);
+
+	  md_assemblef ("lui x%d, 0x%" BFD_VMA_FMT "x", reg, upper_imm);
 	  hi_reg = reg;
 	}
 
       if (lower.X_add_number != 0 || hi_reg == 0)
-	macro_build (ep, ADD32_INSN, "d,s,j", reg, hi_reg,
-		     BFD_RELOC_RISCV_LO12_I);
+	md_assemblef ("%s x%d, x%d, %" BFD_VMA_FMT "d", ADD32_INSN, reg, hi_reg,
+		      lower.X_add_number);
     }
 }
 
@@ -1184,6 +1308,7 @@ static const struct percent_op_match percent_op_utype[] =
 {
   {"%tprel_hi", BFD_RELOC_RISCV_TPREL_HI20},
   {"%pcrel_hi", BFD_RELOC_RISCV_PCREL_HI20},
+  {"%got_pcrel_hi", BFD_RELOC_RISCV_GOT_HI20},
   {"%tls_ie_pcrel_hi", BFD_RELOC_RISCV_TLS_GOT_HI20},
   {"%tls_gd_pcrel_hi", BFD_RELOC_RISCV_TLS_GD_HI20},
   {"%hi", BFD_RELOC_RISCV_HI20},
@@ -1362,6 +1487,56 @@ riscv_handle_implicit_zero_offset (expressionS *ep, const char *s)
   return FALSE;
 }
 
+/* All RISC-V CSR instructions belong to one of these classes.  */
+
+enum csr_insn_type
+{
+  INSN_NOT_CSR,
+  INSN_CSRRW,
+  INSN_CSRRS,
+  INSN_CSRRC
+};
+
+/* Return which CSR instruction is checking.  */
+
+static enum csr_insn_type
+riscv_csr_insn_type (insn_t insn)
+{
+  if (((insn ^ MATCH_CSRRW) & MASK_CSRRW) == 0
+      || ((insn ^ MATCH_CSRRWI) & MASK_CSRRWI) == 0)
+    return INSN_CSRRW;
+  else if (((insn ^ MATCH_CSRRS) & MASK_CSRRS) == 0
+	   || ((insn ^ MATCH_CSRRSI) & MASK_CSRRSI) == 0)
+    return INSN_CSRRS;
+  else if (((insn ^ MATCH_CSRRC) & MASK_CSRRC) == 0
+	   || ((insn ^ MATCH_CSRRCI) & MASK_CSRRCI) == 0)
+    return INSN_CSRRC;
+  else
+    return INSN_NOT_CSR;
+}
+
+/* CSRRW and CSRRWI always write CSR.  CSRRS, CSRRC, CSRRSI and CSRRCI write
+   CSR when RS1 isn't zero.  The CSR is read only if the [11:10] bits of
+   CSR address is 0x3.  */
+
+static bfd_boolean
+riscv_csr_read_only_check (insn_t insn)
+{
+  int csr = (insn & (OP_MASK_CSR << OP_SH_CSR)) >> OP_SH_CSR;
+  int rs1 = (insn & (OP_MASK_RS1 << OP_SH_RS1)) >> OP_SH_RS1;
+  int readonly = (((csr & (0x3 << 10)) >> 10) == 0x3);
+  enum csr_insn_type csr_insn = riscv_csr_insn_type (insn);
+
+  if (readonly
+      && (((csr_insn == INSN_CSRRS
+	    || csr_insn == INSN_CSRRC)
+	   && rs1 != 0)
+	  || csr_insn == INSN_CSRRW))
+    return FALSE;
+
+  return TRUE;
+}
+
 /* This routine assembles an instruction into its binary format.  As a
    side effect, it sets the global variable imm_reloc to the type of
    relocation to do if one of the operands is an address expression.  */
@@ -1380,6 +1555,8 @@ riscv_ip (char *str, struct riscv_cl_insn *ip, expressionS *imm_expr,
   int argnum;
   const struct percent_op_match *p;
   const char *error = "unrecognized opcode";
+  /* Indicate we are assembling instruction with CSR.  */
+  bfd_boolean insn_with_csr = FALSE;
 
   /* Parse the name of the instruction.  Terminate the string if whitespace
      is found so that hash_find only sees the name part of the string.  */
@@ -1399,7 +1576,7 @@ riscv_ip (char *str, struct riscv_cl_insn *ip, expressionS *imm_expr,
       if ((insn->xlen_requirement != 0) && (xlen != insn->xlen_requirement))
 	continue;
 
-      if (!riscv_multi_subset_supports (insn->subset))
+      if (!riscv_multi_subset_supports (insn->insn_class))
 	continue;
 
       create_insn (ip, insn);
@@ -1426,11 +1603,26 @@ riscv_ip (char *str, struct riscv_cl_insn *ip, expressionS *imm_expr,
 					 : insn->match) == 2
 		      && !riscv_opts.rvc)
 		    break;
+
+		  /* Check if we write a read-only CSR by the CSR
+		     instruction.  */
+		  if (insn_with_csr
+		      && riscv_opts.csr_check
+		      && !riscv_csr_read_only_check (ip->insn_opcode))
+		    {
+		      /* Restore the character in advance, since we want to
+			 report the detailed warning message here.  */
+		      if (save_c)
+			*(argsStart - 1) = save_c;
+		      as_warn (_("Read-only CSR is written `%s'"), str);
+		      insn_with_csr = FALSE;
+		    }
 		}
 	      if (*s != '\0')
 		break;
 	      /* Successful assembly.  */
 	      error = NULL;
+	      insn_with_csr = FALSE;
 	      goto out;
 
 	    case 'C': /* RVC */
@@ -1485,7 +1677,7 @@ riscv_ip (char *str, struct riscv_cl_insn *ip, expressionS *imm_expr,
 		      || imm_expr->X_add_number >= 64)
 		    break;
 		  ip->insn_opcode |= ENCODE_RVC_IMM (imm_expr->X_add_number);
-rvc_imm_done:
+		rvc_imm_done:
 		  s = expr_end;
 		  imm_expr->X_op = O_absent;
 		  continue;
@@ -1613,7 +1805,7 @@ rvc_imm_done:
 		  p = percent_op_utype;
 		  if (my_getSmallExpression (imm_expr, imm_reloc, s, p))
 		    break;
-rvc_lui:
+		rvc_lui:
 		  if (imm_expr->X_op != O_constant
 		      || imm_expr->X_add_number <= 0
 		      || imm_expr->X_add_number >= RISCV_BIGIMM_REACH
@@ -1775,6 +1967,7 @@ rvc_lui:
 	      continue;
 
 	    case 'E':		/* Control register.  */
+	      insn_with_csr = TRUE;
 	      if (reg_lookup (&s, RCLASS_CSR, &regno))
 		INSERT_OPERAND (CSR, *ip, regno);
 	      else
@@ -1922,10 +2115,10 @@ rvc_lui:
 	      goto alu_op;
 	    case '0': /* AMO "displacement," which must be zero.  */
 	      p = percent_op_null;
-load_store:
+	    load_store:
 	      if (riscv_handle_implicit_zero_offset (imm_expr, s))
 		continue;
-alu_op:
+	    alu_op:
 	      /* If this value won't fit into a 16 bit offset, then go
 		 find a macro that will generate the 32 bit offset
 		 code pattern.  */
@@ -1944,7 +2137,7 @@ alu_op:
 	      continue;
 
 	    case 'p':		/* PC-relative offset.  */
-branch:
+	    branch:
 	      *imm_reloc = BFD_RELOC_12_PCREL;
 	      my_getExpression (imm_expr, s);
 	      s = expr_end;
@@ -1952,9 +2145,11 @@ branch:
 
 	    case 'u':		/* Upper 20 bits.  */
 	      p = percent_op_utype;
-	      if (!my_getSmallExpression (imm_expr, imm_reloc, s, p)
-		  && imm_expr->X_op == O_constant)
+	      if (!my_getSmallExpression (imm_expr, imm_reloc, s, p))
 		{
+		  if (imm_expr->X_op != O_constant)
+		    break;
+
 		  if (imm_expr->X_add_number < 0
 		      || imm_expr->X_add_number >= (signed)RISCV_BIGIMM_REACH)
 		    as_bad (_("lui expression not in range 0..1048575"));
@@ -1962,14 +2157,11 @@ branch:
 		  *imm_reloc = BFD_RELOC_RISCV_HI20;
 		  imm_expr->X_add_number <<= RISCV_IMM_BITS;
 		}
-	      /* The 'u' format specifier must be a symbol or a constant.  */
-	      if (imm_expr->X_op != O_symbol && imm_expr->X_op != O_constant)
-	        break;
 	      s = expr_end;
 	      continue;
 
 	    case 'a':		/* 20-bit PC-relative offset.  */
-jump:
+	    jump:
 	      my_getExpression (imm_expr, s);
 	      s = expr_end;
 	      *imm_reloc = BFD_RELOC_RISCV_JMP;
@@ -2096,9 +2288,10 @@ jump:
 	}
       s = argsStart;
       error = _("illegal operands");
+      insn_with_csr = FALSE;
     }
 
-out:
+ out:
   /* Restore the character we might have clobbered above.  */
   if (save_c)
     *(argsStart - 1) = save_c;
@@ -2153,6 +2346,8 @@ enum options
   OPTION_NO_RELAX,
   OPTION_ARCH_ATTR,
   OPTION_NO_ARCH_ATTR,
+  OPTION_CSR_CHECK,
+  OPTION_NO_CSR_CHECK,
   OPTION_END_OF_ENUM
 };
 
@@ -2167,6 +2362,8 @@ struct option md_longopts[] =
   {"mno-relax", no_argument, NULL, OPTION_NO_RELAX},
   {"march-attr", no_argument, NULL, OPTION_ARCH_ATTR},
   {"mno-arch-attr", no_argument, NULL, OPTION_NO_ARCH_ATTR},
+  {"mcsr-check", no_argument, NULL, OPTION_CSR_CHECK},
+  {"mno-csr-check", no_argument, NULL, OPTION_NO_CSR_CHECK},
 
   {NULL, no_argument, NULL, 0}
 };
@@ -2245,6 +2442,14 @@ md_parse_option (int c, const char *arg)
       riscv_opts.arch_attr = FALSE;
       break;
 
+    case OPTION_CSR_CHECK:
+      riscv_opts.csr_check = TRUE;
+      break;
+
+    case OPTION_NO_CSR_CHECK:
+      riscv_opts.csr_check = FALSE;
+      break;
+
     default:
       return 0;
     }
@@ -2307,6 +2512,12 @@ riscv_after_parse_args (void)
 
   /* Insert float_abi into the EF_RISCV_FLOAT_ABI field of elf_flags.  */
   elf_flags |= float_abi * (EF_RISCV_FLOAT_ABI & ~(EF_RISCV_FLOAT_ABI << 1));
+
+  /* If the CIE to be produced has not been overridden on the command line,
+     then produce version 3 by default.  This allows us to use the full
+     range of registers in a .cfi_return_column directive.  */
+  if (flag_dwarf_cie_version == -1)
+    flag_dwarf_cie_version = 3;
 }
 
 long
@@ -2631,6 +2842,10 @@ s_riscv_option (int x ATTRIBUTE_UNUSED)
     riscv_opts.relax = TRUE;
   else if (strcmp (name, "norelax") == 0)
     riscv_opts.relax = FALSE;
+  else if (strcmp (name, "csr-check") == 0)
+    riscv_opts.csr_check = TRUE;
+  else if (strcmp (name, "no-csr-check") == 0)
+    riscv_opts.csr_check = FALSE;
   else if (strcmp (name, "push") == 0)
     {
       struct riscv_option_stack *s;
@@ -2928,7 +3143,7 @@ md_convert_frag_branch (fragS *fragp)
       md_number_to_chars ((char *) buf, insn, 4);
       buf += 4;
 
-jump:
+    jump:
       /* Jump to the target.  */
       fixp = fix_new_exp (fragp, buf - (bfd_byte *)fragp->fr_literal,
 			  4, &exp, FALSE, BFD_RELOC_RISCV_JMP);
@@ -2948,7 +3163,7 @@ jump:
       abort ();
     }
 
-done:
+ done:
   fixp->fx_file = fragp->fr_file;
   fixp->fx_line = fragp->fr_line;
 
@@ -3002,6 +3217,10 @@ tc_riscv_regname_to_dw2regnum (char *regname)
 
   if ((reg = reg_lookup_internal (regname, RCLASS_FPR)) >= 0)
     return reg + 32;
+
+  /* CSRs are numbered 4096 -> 8191.  */
+  if ((reg = reg_lookup_internal (regname, RCLASS_CSR)) >= 0)
+    return reg + 4096;
 
   as_bad (_("unknown register `%s'"), regname);
   return -1;

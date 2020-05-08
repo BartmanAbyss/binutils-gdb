@@ -1,5 +1,5 @@
 /* C preprocessor macro expansion commands for GDB.
-   Copyright (C) 2002-2019 Free Software Foundation, Inc.
+   Copyright (C) 2002-2020 Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of GDB.
@@ -32,15 +32,6 @@
 /* The `macro' prefix command.  */
 
 static struct cmd_list_element *macrolist;
-
-static void
-macro_command (const char *arg, int from_tty)
-{
-  printf_unfiltered
-    ("\"macro\" must be followed by the name of a macro command.\n");
-  help_list (macrolist, "macro ", all_commands, gdb_stdout);
-}
-
 
 
 /* Macro expansion commands.  */
@@ -120,8 +111,10 @@ show_pp_source_pos (struct ui_file *stream,
                     int line)
 {
   std::string fullname = macro_source_fullname (file);
-  fputs_styled (fullname.c_str (), file_name_style.style (), stream);
-  fprintf_filtered (stream, ":%d\n", line);
+  fprintf_filtered (stream, "%ps:%d\n",
+		    styled_string (file_name_style.style (),
+				   fullname.c_str ()),
+		    line);
 
   while (file->included_by)
     {
@@ -456,14 +449,15 @@ macro_list_command (const char *exp, int from_tty)
 
 /* Initializing the `macrocmd' module.  */
 
+void _initialize_macrocmd ();
 void
-_initialize_macrocmd (void)
+_initialize_macrocmd ()
 {
   /* We introduce a new command prefix, `macro', under which we'll put
      the various commands for working with preprocessor macros.  */
-  add_prefix_cmd ("macro", class_info, macro_command,
-		  _("Prefix for commands dealing with C preprocessor macros."),
-		  &macrolist, "macro ", 0, &cmdlist);
+  add_basic_prefix_cmd ("macro", class_info,
+			_("Prefix for commands dealing with C preprocessor macros."),
+			&macrolist, "macro ", 0, &cmdlist);
 
   add_cmd ("expand", no_class, macro_expand_command, _("\
 Fully expand any C/C++ preprocessor macro invocations in EXPRESSION.\n\

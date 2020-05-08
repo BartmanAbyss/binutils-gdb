@@ -1,6 +1,6 @@
 /* Target-dependent code for Renesas Super-H, for GDB.
 
-   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+   Copyright (C) 1993-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,7 +24,7 @@
 #include "frame.h"
 #include "frame-base.h"
 #include "frame-unwind.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "gdbcmd.h"
@@ -912,7 +912,7 @@ sh_frame_align (struct gdbarch *ignore, CORE_ADDR sp)
    not displace any of the other arguments passed in via registers R4
    to R7.  */
 
-/* Helper function to justify value in register according to endianess.  */
+/* Helper function to justify value in register according to endianness.  */
 static const gdb_byte *
 sh_justify_value_in_reg (struct gdbarch *gdbarch, struct value *val, int len)
 {
@@ -942,7 +942,7 @@ sh_stack_allocsize (int nargs, struct value **args)
 }
 
 /* Helper functions for getting the float arguments right.  Registers usage
-   depends on the ABI and the endianess.  The comments should enlighten how
+   depends on the ABI and the endianness.  The comments should enlighten how
    it's intended to work.  */
 
 /* This array stores which of the float arg registers are already in use.  */
@@ -1045,7 +1045,7 @@ sh_treat_as_flt_p (struct type *type)
   /* Otherwise non-struct types are not treated as float.  */
   if (TYPE_CODE (type) != TYPE_CODE_STRUCT)
     return 0;
-  /* Otherwise structs with more than one memeber are not treated as float.  */
+  /* Otherwise structs with more than one member are not treated as float.  */
   if (TYPE_NFIELDS (type) != 1)
     return 0;
   /* Otherwise if the type of that member is float, the whole type is
@@ -1669,7 +1669,7 @@ sh_pseudo_register_read (struct gdbarch *gdbarch, readable_regcache *regcache,
 					      2, base_regnum, temp_buffer);
       if (status == REG_VALID)
 	{
-	  /* We must pay attention to the endiannes. */
+	  /* We must pay attention to the endianness. */
 	  sh_register_convert_to_virtual (gdbarch, reg_nr,
 					  register_type (gdbarch, reg_nr),
 					  temp_buffer, buffer);
@@ -1712,7 +1712,7 @@ sh_pseudo_register_write (struct gdbarch *gdbarch, struct regcache *regcache,
       gdb_byte temp_buffer[4 * 2];
       base_regnum = dr_reg_base_num (gdbarch, reg_nr);
 
-      /* We must pay attention to the endiannes.  */
+      /* We must pay attention to the endianness.  */
       sh_register_convert_to_raw (gdbarch, register_type (gdbarch, reg_nr),
 				  reg_nr, buffer, temp_buffer);
 
@@ -1975,28 +1975,6 @@ static const struct frame_unwind sh_frame_unwind = {
   NULL,
   default_frame_sniffer
 };
-
-static CORE_ADDR
-sh_unwind_sp (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame,
-					 gdbarch_sp_regnum (gdbarch));
-}
-
-static CORE_ADDR
-sh_unwind_pc (struct gdbarch *gdbarch, struct frame_info *next_frame)
-{
-  return frame_unwind_register_unsigned (next_frame,
-					 gdbarch_pc_regnum (gdbarch));
-}
-
-static struct frame_id
-sh_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  CORE_ADDR sp = get_frame_register_unsigned (this_frame,
-					      gdbarch_sp_regnum (gdbarch));
-  return frame_id_build (sp, get_frame_pc (this_frame));
-}
 
 static CORE_ADDR
 sh_frame_base_address (struct frame_info *this_frame, void **this_cache)
@@ -2308,9 +2286,6 @@ sh_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_believe_pcc_promotion (gdbarch, 1);
 
   set_gdbarch_frame_align (gdbarch, sh_frame_align);
-  set_gdbarch_unwind_sp (gdbarch, sh_unwind_sp);
-  set_gdbarch_unwind_pc (gdbarch, sh_unwind_pc);
-  set_gdbarch_dummy_id (gdbarch, sh_dummy_id);
   frame_base_set_default (gdbarch, &sh_frame_base);
 
   set_gdbarch_stack_frame_destroyed_p (gdbarch, sh_stack_frame_destroyed_p);
@@ -2433,29 +2408,16 @@ sh_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   return gdbarch;
 }
 
-static void
-show_sh_command (const char *args, int from_tty)
-{
-  help_list (showshcmdlist, "show sh ", all_commands, gdb_stdout);
-}
-
-static void
-set_sh_command (const char *args, int from_tty)
-{
-  printf_unfiltered
-    ("\"set sh\" must be followed by an appropriate subcommand.\n");
-  help_list (setshcmdlist, "set sh ", all_commands, gdb_stdout);
-}
-
+void _initialize_sh_tdep ();
 void
-_initialize_sh_tdep (void)
+_initialize_sh_tdep ()
 {
   gdbarch_register (bfd_arch_sh, sh_gdbarch_init, NULL);
 
-  add_prefix_cmd ("sh", no_class, set_sh_command, "SH specific commands.",
-                  &setshcmdlist, "set sh ", 0, &setlist);
-  add_prefix_cmd ("sh", no_class, show_sh_command, "SH specific commands.",
-                  &showshcmdlist, "show sh ", 0, &showlist);
+  add_basic_prefix_cmd ("sh", no_class, "SH specific commands.",
+			&setshcmdlist, "set sh ", 0, &setlist);
+  add_show_prefix_cmd ("sh", no_class, "SH specific commands.",
+		       &showshcmdlist, "show sh ", 0, &showlist);
   
   add_setshow_enum_cmd ("calling-convention", class_vars, sh_cc_enum,
 			&sh_active_calling_convention,

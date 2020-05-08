@@ -1,5 +1,5 @@
 /* BFD back-end for TMS320C30 a.out binaries.
-   Copyright (C) 1998-2019 Free Software Foundation, Inc.
+   Copyright (C) 1998-2020 Free Software Foundation, Inc.
    Contributed by Steven Haworth (steve@pm.cse.rmit.edu.au)
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -331,7 +331,7 @@ tic30_aout_reloc_howto (bfd *abfd,
 /* Set parameters about this a.out file that are machine-dependent.
    This routine is called from some_aout_object_p just before it returns.  */
 
-static const bfd_target *
+static bfd_cleanup
 tic30_aout_callback (bfd *abfd)
 {
   struct internal_exec *execp = exec_hdr (abfd);
@@ -388,7 +388,7 @@ tic30_aout_callback (bfd *abfd)
       obj_datasec (abfd)->alignment_power = arch_align_power;
       obj_bsssec (abfd)->alignment_power = arch_align_power;
     }
-  return abfd->xvec;
+  return _bfd_no_cleanup;
 }
 
 static bfd_reloc_status_type
@@ -547,13 +547,13 @@ tic30_aout_final_link_relocate (reloc_howto_type *howto,
 
 /* Finish up the reading of an a.out file header.  */
 
-static const bfd_target *
+static bfd_cleanup
 tic30_aout_object_p (bfd *abfd)
 {
   struct external_exec exec_bytes;	/* Raw exec header from file.  */
   struct internal_exec exec;		/* Cleaned-up exec header.  */
-  const bfd_target *target;
-  bfd_size_type amt = EXEC_BYTES_SIZE;
+  bfd_cleanup cleanup;
+  size_t amt = EXEC_BYTES_SIZE;
 
   if (bfd_bread (& exec_bytes, amt, abfd) != amt)
     {
@@ -582,7 +582,7 @@ tic30_aout_object_p (bfd *abfd)
   exec.a_info = SWAP_MAGIC (exec_bytes.e_info);
 #endif
 
-  target = NAME (aout, some_aout_object_p) (abfd, &exec, tic30_aout_callback);
+  cleanup = NAME (aout, some_aout_object_p) (abfd, &exec, tic30_aout_callback);
 
 #ifdef ENTRY_CAN_BE_ZERO
   /* The NEWSOS3 entry-point is/was 0, which (amongst other lossage)
@@ -603,7 +603,7 @@ tic30_aout_object_p (bfd *abfd)
     }
 #endif
 
-  return target;
+  return cleanup;
 }
 
 /* Copy private section data.  This actually does nothing with the
@@ -710,53 +710,87 @@ static bfd_boolean
 MY_bfd_final_link (bfd *abfd, struct bfd_link_info *info)
 {
   struct internal_exec *execp = exec_hdr (abfd);
+  asection *objsym_section;
   file_ptr pos;
   bfd_vma vma = 0;
-  int pad;
 
   /* Set the executable header size to 0, as we don't want one for an
-     output.  */
+     output.  FIXME: Really?  tic30_aout_object_p doesn't accept such
+     an executable!  */
   adata (abfd).exec_bytes_size = 0;
+
   pos = adata (abfd).exec_bytes_size;
+  /* ??? Why are we looking at create_object_symbols_section?  */
+  objsym_section = info->create_object_symbols_section;
+  if (objsym_section != NULL)
+    vma = objsym_section->vma;
+
   /* Text.  */
-  vma = info->create_object_symbols_section->vma;
-  pos += vma;
-  obj_textsec (abfd)->filepos = pos;
-  obj_textsec (abfd)->vma = vma;
-  obj_textsec (abfd)->user_set_vma = 1;
-  pos += obj_textsec (abfd)->size;
-  vma += obj_textsec (abfd)->size;
+  if (obj_textsec (abfd) != NULL)
+    {
+      pos += vma;
+      obj_textsec (abfd)->filepos = pos;
+      obj_textsec (abfd)->vma = vma;
+      obj_textsec (abfd)->user_set_vma = 1;
+      execp->a_text = obj_textsec (abfd)->size;
+      pos += obj_textsec (abfd)->size;
+      vma += obj_textsec (abfd)->size;
+    }
 
   /* Data.  */
-  if (abfd->flags & D_PAGED)
+  if (obj_datasec (abfd) != NULL)
     {
-      if (info->create_object_symbols_section->next->vma > 0)
-	obj_datasec (abfd)->vma = info->create_object_symbols_section->next->vma;
+      if (abfd->flags & D_PAGED)
+	{
+	  if (objsym_section != NULL
+	      && objsym_section->next != NULL
+	      && objsym_section->next->vma != 0)
+	    obj_datasec (abfd)->vma = objsym_section->next->vma;
+	  else
+	    obj_datasec (abfd)->vma = BFD_ALIGN (vma, adata (abfd).segment_size);
+	}
       else
-	obj_datasec (abfd)->vma = BFD_ALIGN (vma, adata (abfd).segment_size);
+	obj_datasec (abfd)->vma = BFD_ALIGN (vma, 4);
+
+      if (obj_datasec (abfd)->vma < vma)
+	obj_datasec (abfd)->vma = BFD_ALIGN (vma, 4);
+
+      pos += obj_datasec (abfd)->vma - vma;
+      obj_datasec (abfd)->filepos = pos;
+      obj_datasec (abfd)->user_set_vma = 1;
+
+      vma = obj_datasec (abfd)->vma;
+      if (obj_textsec (abfd) != NULL)
+	{
+	  execp->a_text = vma - obj_textsec (abfd)->vma;
+	  obj_textsec (abfd)->size = execp->a_text;
+	}
+      execp->a_data = obj_datasec (abfd)->size;
+      vma += obj_datasec (abfd)->size;
     }
-  else
-    obj_datasec (abfd)->vma = BFD_ALIGN (vma, 4);
-
-  if (obj_datasec (abfd)->vma < vma)
-    obj_datasec (abfd)->vma = BFD_ALIGN (vma, 4);
-
-  obj_datasec (abfd)->user_set_vma = 1;
-  vma = obj_datasec (abfd)->vma;
-  obj_datasec (abfd)->filepos = vma + adata (abfd).exec_bytes_size;
-  execp->a_text = vma - obj_textsec (abfd)->vma;
-  obj_textsec (abfd)->size = execp->a_text;
 
   /* Since BSS follows data immediately, see if it needs alignment.  */
-  vma += obj_datasec (abfd)->size;
-  pad = align_power (vma, obj_bsssec (abfd)->alignment_power) - vma;
-  obj_datasec (abfd)->size += pad;
-  pos += obj_datasec (abfd)->size;
-  execp->a_data = obj_datasec (abfd)->size;
+  if (obj_bsssec (abfd) != NULL)
+    {
+      int pad;
 
-  /* BSS.  */
-  obj_bsssec (abfd)->vma = vma;
-  obj_bsssec (abfd)->user_set_vma = 1;
+      pad = align_power (vma, obj_bsssec (abfd)->alignment_power) - vma;
+      if (obj_datasec (abfd) != NULL)
+	{
+	  obj_datasec (abfd)->size += pad;
+	  execp->a_data += pad;
+	}
+      else if (obj_textsec (abfd) != NULL)
+	{
+	  obj_textsec (abfd)->size += pad;
+	  execp->a_text += pad;
+	}
+
+      /* BSS.  */
+      vma += pad;
+      obj_bsssec (abfd)->vma = vma;
+      obj_bsssec (abfd)->user_set_vma = 1;
+    }
 
   /* We are fully resized, so don't readjust in final_link.  */
   adata (abfd).magic = z_magic;
@@ -956,6 +990,9 @@ tic30_aout_set_arch_mach (bfd *abfd,
 #endif
 #ifndef MY_bfd_is_group_section
 #define MY_bfd_is_group_section bfd_generic_is_group_section
+#endif
+#ifndef MY_bfd_group_name
+#define MY_bfd_group_name bfd_generic_group_name
 #endif
 #ifndef MY_bfd_discard_group
 #define MY_bfd_discard_group bfd_generic_discard_group

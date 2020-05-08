@@ -1,5 +1,5 @@
 /* OpenCL language support for GDB, the GNU debugger.
-   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+   Copyright (C) 2010-2020 Free Software Foundation, Inc.
 
    Contributed by Ken Werner <ken.werner@de.ibm.com>.
 
@@ -26,6 +26,7 @@
 #include "language.h"
 #include "varobj.h"
 #include "c-lang.h"
+#include "gdbarch.h"
 
 /* This macro generates enum values from a given type.  */
 
@@ -819,7 +820,7 @@ evaluate_subexp_opencl (struct type *expect_type, struct expression *exp,
       else
 	{
 	  /* For scalar operations we need to avoid evaluating operands
-	     unecessarily.  However, for vector operations we always need to
+	     unnecessarily.  However, for vector operations we always need to
 	     evaluate both operands.  Unfortunately we only know which of the
 	     two cases apply after we know the type of the second operand.
 	     Therefore we evaluate it once using EVAL_AVOID_SIDE_EFFECTS.  */
@@ -1059,7 +1060,7 @@ extern const struct language_defn opencl_language_defn =
   c_emit_char,			/* Print a single char */
   opencl_print_type,		/* Print a type using appropriate syntax */
   c_print_typedef,		/* Print a typedef using appropriate syntax */
-  c_val_print,			/* Print a value using appropriate syntax */
+  c_value_print_inner,		/* la_value_print_inner */
   c_value_print,		/* Print a top-level value */
   default_read_var_value,	/* la_read_var_value */
   NULL,				/* Language specific skip_trampoline */
@@ -1079,7 +1080,6 @@ extern const struct language_defn opencl_language_defn =
   opencl_language_arch_info,
   default_print_array_index,
   default_pass_by_reference,
-  c_get_string,
   c_watch_location_expression,
   NULL,				/* la_get_symbol_name_matcher */
   iterate_over_symbols,
@@ -1087,7 +1087,8 @@ extern const struct language_defn opencl_language_defn =
   &default_varobj_ops,
   NULL,
   NULL,
-  LANG_MAGIC
+  c_is_string_type_p,
+  "{...}"			/* la_struct_too_deep_ellipsis */
 };
 
 static void *
@@ -1177,8 +1178,9 @@ build_opencl_types (struct gdbarch *gdbarch)
   return types;
 }
 
+void _initialize_opencl_language ();
 void
-_initialize_opencl_language (void)
+_initialize_opencl_language ()
 {
   opencl_type_data = gdbarch_data_register_post_init (build_opencl_types);
 }

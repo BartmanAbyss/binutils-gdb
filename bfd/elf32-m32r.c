@@ -1,5 +1,5 @@
 /* M32R-specific support for 32-bit ELF.
-   Copyright (C) 1996-2019 Free Software Foundation, Inc.
+   Copyright (C) 1996-2020 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -1310,7 +1310,7 @@ m32r_info_to_howto (bfd *abfd ATTRIBUTE_UNUSED,
   /* xgettext:c-format */
   _bfd_error_handler (_("%pB: unsupported relocation type %#x"), abfd, r_type);
   bfd_set_error (bfd_error_bad_value);
-  return FALSE;  
+  return FALSE;
 }
 
 
@@ -1322,7 +1322,7 @@ _bfd_m32r_elf_section_from_bfd_section (bfd *abfd ATTRIBUTE_UNUSED,
 					asection *sec,
 					int *retval)
 {
-  if (strcmp (bfd_get_section_name (abfd, sec), ".scommon") == 0)
+  if (strcmp (bfd_section_name (sec), ".scommon") == 0)
     {
       *retval = SHN_M32R_SCOMMON;
       return TRUE;
@@ -1407,7 +1407,7 @@ m32r_elf_add_symbol_hook (bfd *abfd,
 						  flags);
 	  if (s == NULL)
 	    return FALSE;
-	  if (! bfd_set_section_alignment (abfd, s, 2))
+	  if (!bfd_set_section_alignment (s, 2))
 	    return FALSE;
 	}
 
@@ -1575,7 +1575,7 @@ static struct bfd_link_hash_table *
 m32r_elf_link_hash_table_create (bfd *abfd)
 {
   struct elf_m32r_link_hash_table *ret;
-  bfd_size_type amt = sizeof (struct elf_m32r_link_hash_table);
+  size_t amt = sizeof (struct elf_m32r_link_hash_table);
 
   ret = bfd_zmalloc (amt);
   if (ret == NULL)
@@ -1623,7 +1623,7 @@ m32r_elf_create_dynamic_sections (bfd *abfd, struct bfd_link_info *info)
   s = bfd_make_section_anyway_with_flags (abfd, ".plt", pltflags);
   htab->root.splt = s;
   if (s == NULL
-      || ! bfd_set_section_alignment (abfd, s, bed->plt_alignment))
+      || !bfd_set_section_alignment (s, bed->plt_alignment))
     return FALSE;
 
   if (bed->want_plt_sym)
@@ -1654,7 +1654,7 @@ m32r_elf_create_dynamic_sections (bfd *abfd, struct bfd_link_info *info)
 					  flags | SEC_READONLY);
   htab->root.srelplt = s;
   if (s == NULL
-      || ! bfd_set_section_alignment (abfd, s, ptralign))
+      || !bfd_set_section_alignment (s, ptralign))
     return FALSE;
 
   if (htab->root.sgot == NULL
@@ -1693,7 +1693,7 @@ m32r_elf_create_dynamic_sections (bfd *abfd, struct bfd_link_info *info)
 						  flags | SEC_READONLY);
 	  htab->srelbss = s;
 	  if (s == NULL
-	      || ! bfd_set_section_alignment (abfd, s, ptralign))
+	      || !bfd_set_section_alignment (s, ptralign))
 	    return FALSE;
 	}
     }
@@ -2234,7 +2234,7 @@ m32r_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	  /* Strip this section if we don't need it; see the
 	     comment below.  */
 	}
-      else if (CONST_STRNEQ (bfd_get_section_name (dynobj, s), ".rela"))
+      else if (CONST_STRNEQ (bfd_section_name (s), ".rela"))
 	{
 	  if (s->size != 0 && s != htab->root.srelplt)
 	    relocs = TRUE;
@@ -2551,12 +2551,12 @@ m32r_elf_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 		   && ELF_ST_VISIBILITY (h->other) == STV_DEFAULT)
 	    ;
 	  else if (!bfd_link_relocatable (info))
-	    (*info->callbacks->undefined_symbol)
-	      (info, h->root.root.string, input_bfd,
-	       input_section, offset,
-	       (info->unresolved_syms_in_objects == RM_GENERATE_ERROR
-		|| ELF_ST_VISIBILITY (h->other)));
-	}
+            info->callbacks->undefined_symbol
+	      (info, h->root.root.string, input_bfd, input_section, offset,
+	       (info->unresolved_syms_in_objects == RM_DIAGNOSE
+		&& !info->warn_unresolved_syms)
+	       || ELF_ST_VISIBILITY (h->other));
+        }
 
       if (sec != NULL && discarded_section (sec))
 	RELOC_AGAINST_DISCARDED_SECTION (info, input_bfd, input_section,
@@ -2954,7 +2954,7 @@ m32r_elf_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 		const char *name;
 
 		BFD_ASSERT (sec != NULL);
-		name = bfd_get_section_name (sec->owner, sec);
+		name = bfd_section_name (sec);
 
 		if (   strcmp (name, ".sdata") == 0
 		    || strcmp (name, ".sbss") == 0
@@ -3022,7 +3022,7 @@ m32r_elf_relocate_section (bfd *output_bfd ATTRIBUTE_UNUSED,
 	      name = (bfd_elf_string_from_elf_section
 		      (input_bfd, symtab_hdr->sh_link, sym->st_name));
 	      if (name == NULL || *name == '\0')
-		name = bfd_section_name (input_bfd, sec);
+		name = bfd_section_name (sec);
 	    }
 
 	  if (errmsg != NULL)
@@ -3403,9 +3403,8 @@ m32r_elf_object_p (bfd *abfd)
 
 /* Store the machine number in the flags field.  */
 
-static void
-m32r_elf_final_write_processing (bfd *abfd,
-				 bfd_boolean linker ATTRIBUTE_UNUSED)
+static bfd_boolean
+m32r_elf_final_write_processing (bfd *abfd)
 {
   unsigned long val;
 
@@ -3419,6 +3418,7 @@ m32r_elf_final_write_processing (bfd *abfd,
 
   elf_elfheader (abfd)->e_flags &=~ EF_M32R_ARCH;
   elf_elfheader (abfd)->e_flags |= val;
+  return _bfd_elf_final_write_processing (abfd);
 }
 
 /* Function to keep M32R specific file flags.  */
@@ -3775,7 +3775,7 @@ m32r_elf_check_relocs (bfd *abfd,
 	      p = *head;
 	      if (p == NULL || p->sec != sec)
 		{
-		  bfd_size_type amt = sizeof (*p);
+		  size_t amt = sizeof (*p);
 
 		  p = bfd_alloc (dynobj, amt);
 		  if (p == NULL)
@@ -3807,15 +3807,11 @@ m32r_elf_check_relocs (bfd *abfd,
 	/* This relocation describes which C++ vtable entries are actually
 	   used.  Record for later use during GC.  */
 	case R_M32R_GNU_VTENTRY:
-	  BFD_ASSERT (h != NULL);
-	  if (h != NULL
-	      && !bfd_elf_gc_record_vtentry (abfd, sec, h, rel->r_offset))
+	  if (!bfd_elf_gc_record_vtentry (abfd, sec, h, rel->r_offset))
 	    return FALSE;
 	  break;
 	case R_M32R_RELA_GNU_VTENTRY:
-	  BFD_ASSERT (h != NULL);
-	  if (h != NULL
-	      && !bfd_elf_gc_record_vtentry (abfd, sec, h, rel->r_addend))
+	  if (!bfd_elf_gc_record_vtentry (abfd, sec, h, rel->r_addend))
 	    return FALSE;
 	  break;
 	}
@@ -3830,6 +3826,18 @@ static const struct bfd_elf_special_section m32r_elf_special_sections[] =
   { STRING_COMMA_LEN (".sdata"), -2, SHT_PROGBITS, SHF_ALLOC + SHF_WRITE },
   { NULL,		      0,  0, 0,		   0 }
 };
+
+static bfd_boolean
+m32r_elf_section_flags (const Elf_Internal_Shdr *hdr)
+{
+  const char *name = hdr->bfd_section->name;
+
+  if (strncmp (name, ".sbss", 5) == 0
+      || strncmp (name, ".sdata", 6) == 0)
+    hdr->bfd_section->flags |= SEC_SMALL_DATA;
+
+  return TRUE;
+}
 
 static enum elf_reloc_type_class
 m32r_elf_reloc_type_class (const struct bfd_link_info *info ATTRIBUTE_UNUSED,
@@ -3901,6 +3909,7 @@ m32r_elf_reloc_type_class (const struct bfd_link_info *info ATTRIBUTE_UNUSED,
 #define bfd_elf32_bfd_set_private_flags		m32r_elf_set_private_flags
 #define bfd_elf32_bfd_print_private_bfd_data	m32r_elf_print_private_bfd_data
 #define elf_backend_special_sections		m32r_elf_special_sections
+#define elf_backend_section_flags		m32r_elf_section_flags
 
 #define elf_backend_linux_prpsinfo32_ugid16	TRUE
 

@@ -1,6 +1,6 @@
 /* Target dependent code for GDB on TI C6x systems.
 
-   Copyright (C) 2010-2019 Free Software Foundation, Inc.
+   Copyright (C) 2010-2020 Free Software Foundation, Inc.
    Contributed by Andrew Jenner <andrew@codesourcery.com>
    Contributed by Yao Qi <yao@codesourcery.com>
 
@@ -24,7 +24,7 @@
 #include "frame-unwind.h"
 #include "frame-base.h"
 #include "trad-frame.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "symtab.h"
 #include "inferior.h"
 #include "gdbtypes.h"
@@ -375,15 +375,6 @@ tic6x_unwind_pc (struct gdbarch *gdbarch, struct frame_info *next_frame)
   frame_unwind_register (next_frame,  TIC6X_PC_REGNUM, buf);
   return extract_typed_address (buf, builtin_type (gdbarch)->builtin_func_ptr);
 }
-
-/* This is the implementation of gdbarch method unwind_sp.  */
-
-static CORE_ADDR
-tic6x_unwind_sp (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  return frame_unwind_register_unsigned (this_frame, TIC6X_SP_REGNUM);
-}
-
 
 /* Frame base handling.  */
 
@@ -793,7 +784,7 @@ tic6x_return_value (struct gdbarch *gdbarch, struct value *function,
       if (type != NULL)
 	{
 	  type = check_typedef (type);
-	  if (language_pass_by_reference (type))
+	  if (!(language_pass_by_reference (type).trivially_copyable))
 	    return RETURN_VALUE_STRUCT_CONVENTION;
 	}
     }
@@ -809,16 +800,6 @@ tic6x_return_value (struct gdbarch *gdbarch, struct value *function,
 			      gdbarch_byte_order (gdbarch), writebuf);
 
   return RETURN_VALUE_REGISTER_CONVENTION;
-}
-
-/* This is the implementation of gdbarch method dummy_id.  */
-
-static struct frame_id
-tic6x_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  return frame_id_build
-    (get_frame_register_unsigned (this_frame, TIC6X_SP_REGNUM),
-     get_frame_pc (this_frame));
 }
 
 /* Get the alignment requirement of TYPE.  */
@@ -1283,7 +1264,6 @@ tic6x_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 				       tic6x_sw_breakpoint_from_kind);
 
   set_gdbarch_unwind_pc (gdbarch, tic6x_unwind_pc);
-  set_gdbarch_unwind_sp (gdbarch, tic6x_unwind_sp);
 
   /* Unwinding.  */
   dwarf2_append_unwinders (gdbarch);
@@ -1301,8 +1281,6 @@ tic6x_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_frame_align (gdbarch, tic6x_frame_align);
 
   set_gdbarch_return_value (gdbarch, tic6x_return_value);
-
-  set_gdbarch_dummy_id (gdbarch, tic6x_dummy_id);
 
   /* Enable inferior call support.  */
   set_gdbarch_push_dummy_call (gdbarch, tic6x_push_dummy_call);
@@ -1323,8 +1301,9 @@ tic6x_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   return gdbarch;
 }
 
+void _initialize_tic6x_tdep ();
 void
-_initialize_tic6x_tdep (void)
+_initialize_tic6x_tdep ()
 {
   register_gdbarch_init (bfd_arch_tic6x, tic6x_gdbarch_init);
 }

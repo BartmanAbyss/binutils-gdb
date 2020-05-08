@@ -1,5 +1,5 @@
 /* Darwin support for GDB, the GNU debugger.
-   Copyright (C) 1997-2019 Free Software Foundation, Inc.
+   Copyright (C) 1997-2020 Free Software Foundation, Inc.
 
    Contributed by Apple Computer, Inc.
 
@@ -34,7 +34,7 @@
 #include "i386-darwin-tdep.h"
 #include "solib.h"
 #include "solib-darwin.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include <algorithm>
 
 /* Offsets into the struct i386_thread_state where we'll find the saved regs.
@@ -104,7 +104,7 @@ darwin_dwarf_signal_frame_p (struct gdbarch *gdbarch,
   return i386_sigtramp_p (this_frame);
 }
 
-/* Check wether TYPE is a 128-bit vector (__m128, __m128d or __m128i).  */
+/* Check whether TYPE is a 128-bit vector (__m128, __m128d or __m128i).  */
 
 static int
 i386_m128_p (struct type *type)
@@ -286,8 +286,9 @@ i386_mach_o_osabi_sniffer (bfd *abfd)
   return GDB_OSABI_UNKNOWN;
 }
 
+void _initialize_i386_darwin_tdep ();
 void
-_initialize_i386_darwin_tdep (void)
+_initialize_i386_darwin_tdep ()
 {
   gdbarch_register_osabi_sniffer (bfd_arch_unknown, bfd_target_mach_o_flavour,
                                   i386_mach_o_osabi_sniffer);

@@ -1,5 +1,5 @@
 /* Support for the generic parts of PE/PEI, for BFD.
-   Copyright (C) 1995-2019 Free Software Foundation, Inc.
+   Copyright (C) 1995-2020 Free Software Foundation, Inc.
    Written by Cygnus Solutions.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -122,7 +122,7 @@ typedef struct
 pe_ILF_vars;
 #endif /* COFF_IMAGE_WITH_PE */
 
-const bfd_target *coff_real_object_p
+bfd_cleanup coff_real_object_p
   (bfd *, unsigned, struct internal_filehdr *, struct internal_aouthdr *);
 
 #ifndef NO_COFF_RELOCS
@@ -257,7 +257,7 @@ static bfd_boolean
 pe_mkobject (bfd * abfd)
 {
   pe_data_type *pe;
-  bfd_size_type amt = sizeof (pe_data_type);
+  size_t amt = sizeof (pe_data_type);
 
   abfd->tdata.pe_obj_data = (struct pe_tdata *) bfd_zalloc (abfd, amt);
 
@@ -270,6 +270,24 @@ pe_mkobject (bfd * abfd)
 
   /* in_reloc_p is architecture dependent.  */
   pe->in_reloc_p = in_reloc_p;
+
+  /* Default DOS message string.  */
+  pe->dos_message[0]  = 0x0eba1f0e;
+  pe->dos_message[1]  = 0xcd09b400;
+  pe->dos_message[2]  = 0x4c01b821;
+  pe->dos_message[3]  = 0x685421cd;
+  pe->dos_message[4]  = 0x70207369;
+  pe->dos_message[5]  = 0x72676f72;
+  pe->dos_message[6]  = 0x63206d61;
+  pe->dos_message[7]  = 0x6f6e6e61;
+  pe->dos_message[8]  = 0x65622074;
+  pe->dos_message[9]  = 0x6e757220;
+  pe->dos_message[10] = 0x206e6920;
+  pe->dos_message[11] = 0x20534f44;
+  pe->dos_message[12] = 0x65646f6d;
+  pe->dos_message[13] = 0x0a0d0d2e;
+  pe->dos_message[14] = 0x24;
+  pe->dos_message[15] = 0x0;
 
   memset (& pe->pe_opthdr, 0, sizeof pe->pe_opthdr);
   return TRUE;
@@ -324,6 +342,9 @@ pe_mkobject_hook (bfd * abfd,
   if (! _bfd_coff_arm_set_private_flags (abfd, internal_f->f_flags))
     coff_data (abfd) ->flags = 0;
 #endif
+
+  memcpy (pe->dos_message, internal_f->pe.dos_message,
+	  sizeof (pe->dos_message));
 
   return (void *) pe;
 }
@@ -608,16 +629,16 @@ pe_ILF_make_a_section (pe_ILF_vars * vars,
 
   flags = SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_KEEP | SEC_IN_MEMORY;
 
-  bfd_set_section_flags (vars->abfd, sec, flags | extra_flags);
+  bfd_set_section_flags (sec, flags | extra_flags);
 
-  (void) bfd_set_section_alignment (vars->abfd, sec, 2);
+  bfd_set_section_alignment (sec, 2);
 
   /* Check that we will not run out of space.  */
   BFD_ASSERT (vars->data + size < vars->bim->buffer + vars->bim->size);
 
   /* Set the section size and contents.  The actual
      contents are filled in by our parent.  */
-  bfd_set_section_size (vars->abfd, sec, (bfd_size_type) size);
+  bfd_set_section_size (sec, (bfd_size_type) size);
   sec->contents = vars->data;
   sec->target_index = vars->sec_index ++;
 
@@ -1093,7 +1114,7 @@ pe_ILF_build_a_bfd (bfd *	    abfd,
 
   /* Point the bfd at the symbol table.  */
   obj_symbols (abfd) = vars.sym_cache;
-  bfd_get_symcount (abfd) = vars.sym_index;
+  abfd->symcount = vars.sym_index;
 
   obj_raw_syments (abfd) = vars.native_syms;
   obj_raw_syment_count (abfd) = vars.sym_index;
@@ -1121,7 +1142,7 @@ pe_ILF_build_a_bfd (bfd *	    abfd,
 /* We have detected a Image Library Format archive element.
    Decode the element and return the appropriate target.  */
 
-static const bfd_target *
+static bfd_cleanup
 pe_ILF_object_p (bfd * abfd)
 {
   bfd_byte	  buffer[14];
@@ -1252,15 +1273,9 @@ pe_ILF_object_p (bfd * abfd)
   /* ptr += 2; */
 
   /* Now read in the two strings that follow.  */
-  ptr = (bfd_byte *) bfd_alloc (abfd, size);
+  ptr = (bfd_byte *) _bfd_alloc_and_read (abfd, size, size);
   if (ptr == NULL)
     return NULL;
-
-  if (bfd_bread (ptr, size, abfd) != size)
-    {
-      bfd_release (abfd, ptr);
-      return NULL;
-    }
 
   symbol_name = (char *) ptr;
   /* See PR 20905 for an example of where the strnlen is necessary.  */
@@ -1285,7 +1300,7 @@ pe_ILF_object_p (bfd * abfd)
       return NULL;
     }
 
-  return abfd->xvec;
+  return _bfd_no_cleanup;
 }
 
 static void
@@ -1375,9 +1390,11 @@ pe_bfd_read_buildid (bfd *abfd)
 	  break;
 	}
     }
+
+  free (data);
 }
 
-static const bfd_target *
+static bfd_cleanup
 pe_bfd_object_p (bfd * abfd)
 {
   bfd_byte buffer[6];
@@ -1385,9 +1402,9 @@ pe_bfd_object_p (bfd * abfd)
   struct external_PEI_IMAGE_hdr image_hdr;
   struct internal_filehdr internal_f;
   struct internal_aouthdr internal_a;
-  file_ptr opt_hdr_size;
+  bfd_size_type opt_hdr_size;
   file_ptr offset;
-  const bfd_target *result;
+  bfd_cleanup result;
 
   /* Detect if this a Microsoft Import Library Format element.  */
   /* First read the beginning of the header.  */
@@ -1456,6 +1473,9 @@ pe_bfd_object_p (bfd * abfd)
       return NULL;
     }
 
+  memcpy (internal_f.pe.dos_message, dos_hdr.dos_message,
+	  sizeof (internal_f.pe.dos_message));
+
   /* Read the optional header, which has variable size.  */
   opt_hdr_size = internal_f.f_opthdr;
 
@@ -1468,12 +1488,11 @@ pe_bfd_object_p (bfd * abfd)
       if (amt < sizeof (PEAOUTHDR))
 	amt = sizeof (PEAOUTHDR);
 
-      opthdr = bfd_zalloc (abfd, amt);
+      opthdr = _bfd_alloc_and_read (abfd, amt, opt_hdr_size);
       if (opthdr == NULL)
 	return NULL;
-      if (bfd_bread (opthdr, opt_hdr_size, abfd)
-	  != (bfd_size_type) opt_hdr_size)
-	return NULL;
+      if (amt > opt_hdr_size)
+	memset (opthdr + opt_hdr_size, 0, amt - opt_hdr_size);
 
       bfd_set_error (bfd_error_no_error);
       bfd_coff_swap_aouthdr_in (abfd, opthdr, & internal_a);

@@ -1,6 +1,6 @@
 /* Target-dependent code for the ALPHA architecture, for GDB, the GNU Debugger.
 
-   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+   Copyright (C) 1993-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,7 +21,7 @@
 #include "frame.h"
 #include "frame-unwind.h"
 #include "frame-base.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "inferior.h"
 #include "symtab.h"
 #include "value.h"
@@ -994,11 +994,11 @@ alpha_sigtramp_frame_sniffer (const struct frame_unwind *self,
   const char *name;
 
   /* NOTE: cagney/2004-04-30: Do not copy/clone this code.  Instead
-     look at tramp-frame.h and other simplier per-architecture
+     look at tramp-frame.h and other simpler per-architecture
      sigtramp unwinders.  */
 
   /* We shouldn't even bother to try if the OSABI didn't register a
-     sigcontext_addr handler or pc_in_sigtramp hander.  */
+     sigcontext_addr handler or pc_in_sigtramp handler.  */
   if (gdbarch_tdep (gdbarch)->sigcontext_addr == NULL)
     return 0;
   if (gdbarch_tdep (gdbarch)->pc_in_sigtramp == NULL)
@@ -1821,8 +1821,9 @@ alpha_dwarf2_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   frame_base_append_sniffer (gdbarch, dwarf2_frame_base_sniffer);
 }
 
+void _initialize_alpha_tdep ();
 void
-_initialize_alpha_tdep (void)
+_initialize_alpha_tdep ()
 {
 
   gdbarch_register (bfd_arch_alpha, alpha_gdbarch_init, NULL);

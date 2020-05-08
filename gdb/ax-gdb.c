@@ -1,6 +1,6 @@
 /* GDB-specific functions for operating on agent expressions.
 
-   Copyright (C) 1998-2019 Free Software Foundation, Inc.
+   Copyright (C) 1998-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -46,7 +46,7 @@
 #include "valprint.h"
 #include "c-lang.h"
 
-#include "common/format.h"
+#include "gdbsupport/format.h"
 
 /* To make sense of this file, you should read doc/agentexpr.texi.
    Then look at the types and enums in ax-gdb.h.  For the code itself,
@@ -675,7 +675,7 @@ gen_var_ref (struct agent_expr *ax, struct axs_value *value, struct symbol *var)
 
     case LOC_TYPEDEF:
       error (_("Cannot compute value of typedef `%s'."),
-	     SYMBOL_PRINT_NAME (var));
+	     var->print_name ());
       break;
 
     case LOC_BLOCK:
@@ -705,10 +705,10 @@ gen_var_ref (struct agent_expr *ax, struct axs_value *value, struct symbol *var)
     case LOC_UNRESOLVED:
       {
 	struct bound_minimal_symbol msym
-	  = lookup_minimal_symbol (SYMBOL_LINKAGE_NAME (var), NULL, NULL);
+	  = lookup_minimal_symbol (var->linkage_name (), NULL, NULL);
 
 	if (!msym.minsym)
-	  error (_("Couldn't resolve symbol `%s'."), SYMBOL_PRINT_NAME (var));
+	  error (_("Couldn't resolve symbol `%s'."), var->print_name ());
 
 	/* Push the address of the variable.  */
 	ax_const_l (ax, BMSYMBOL_VALUE_ADDRESS (msym));
@@ -727,7 +727,7 @@ gen_var_ref (struct agent_expr *ax, struct axs_value *value, struct symbol *var)
 
     default:
       error (_("Cannot find value of botched symbol `%s'."),
-	     SYMBOL_PRINT_NAME (var));
+	     var->print_name ());
       break;
     }
 }
@@ -1658,7 +1658,7 @@ gen_maybe_namespace_elt (struct agent_expr *ax, struct axs_value *value,
 
   if (value->optimized_out)
     error (_("`%s' has been optimized out, cannot use"),
-	   SYMBOL_PRINT_NAME (sym.symbol));
+	   sym.symbol->print_name ());
 
   return 1;
 }
@@ -1784,7 +1784,7 @@ gen_expr_for_cast (struct expression *exp, union exp_element **pc,
 
 	  if (value->optimized_out)
 	    error (_("`%s' has been optimized out, cannot use"),
-		   SYMBOL_PRINT_NAME ((*pc)[2].symbol));
+		   (*pc)[2].symbol->print_name ());
 	}
       else
 	gen_msym_var_ref (ax, value, (*pc)[2].msymbol, (*pc)[1].objfile);
@@ -1911,7 +1911,7 @@ gen_expr (struct expression *exp, union exp_element **pc,
       gen_expr (exp, pc, ax, &value3);
       gen_usual_unary (ax, &value3);
       ax_label (ax, end, ax->len);
-      /* This is arbitary - what if B and C are incompatible types? */
+      /* This is arbitrary - what if B and C are incompatible types? */
       value->type = value2.type;
       value->kind = value2.kind;
       break;
@@ -2008,10 +2008,10 @@ gen_expr (struct expression *exp, union exp_element **pc,
 
       if (value->optimized_out)
 	error (_("`%s' has been optimized out, cannot use"),
-	       SYMBOL_PRINT_NAME ((*pc)[2].symbol));
+	       (*pc)[2].symbol->print_name ());
 
       if (TYPE_CODE (value->type) == TYPE_CODE_ERROR)
-	error_unknown_type (SYMBOL_PRINT_NAME ((*pc)[2].symbol));
+	error_unknown_type ((*pc)[2].symbol->print_name ());
 
       (*pc) += 4;
       break;
@@ -2020,7 +2020,7 @@ gen_expr (struct expression *exp, union exp_element **pc,
       gen_msym_var_ref (ax, value, (*pc)[2].msymbol, (*pc)[1].objfile);
 
       if (TYPE_CODE (value->type) == TYPE_CODE_ERROR)
-	error_unknown_type (MSYMBOL_PRINT_NAME ((*pc)[2].msymbol));
+	error_unknown_type ((*pc)[2].msymbol->linkage_name ());
 
       (*pc) += 4;
       break;
@@ -2230,7 +2230,7 @@ gen_expr (struct expression *exp, union exp_element **pc,
 
 	b = block_for_pc (ax->scope);
 	func = block_linkage_function (b);
-	lang = language_def (SYMBOL_LANGUAGE (func));
+	lang = language_def (func->language ());
 
 	sym = lookup_language_this (lang, b).symbol;
 	if (!sym)
@@ -2240,7 +2240,7 @@ gen_expr (struct expression *exp, union exp_element **pc,
 
 	if (value->optimized_out)
 	  error (_("`%s' has been optimized out, cannot use"),
-		 SYMBOL_PRINT_NAME (sym));
+		 sym->print_name ());
 
 	(*pc) += 2;
       }
@@ -2634,12 +2634,10 @@ agent_command_1 (const char *exp, int eval)
     {
       struct linespec_result canonical;
 
-      exp = skip_spaces (exp);
-
       event_location_up location
 	= new_linespec_location (&exp, symbol_name_match_type::WILD);
       decode_line_full (location.get (), DECODE_LINE_FUNFIRSTLINE, NULL,
-			(struct symtab *) NULL, 0, &canonical,
+			NULL, 0, &canonical,
 			NULL, NULL);
       exp = skip_spaces (exp);
       if (exp[0] == ',')
@@ -2745,8 +2743,9 @@ maint_agent_printf_command (const char *cmdrest, int from_tty)
 
 /* Initialization code.  */
 
+void _initialize_ax_gdb ();
 void
-_initialize_ax_gdb (void)
+_initialize_ax_gdb ()
 {
   add_cmd ("agent", class_maintenance, agent_command,
 	   _("\

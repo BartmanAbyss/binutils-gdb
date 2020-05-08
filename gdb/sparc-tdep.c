@@ -1,6 +1,6 @@
 /* Target-dependent code for SPARC.
 
-   Copyright (C) 2003-2019 Free Software Foundation, Inc.
+   Copyright (C) 2003-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,7 +21,7 @@
 #include "arch-utils.h"
 #include "dis-asm.h"
 #include "dwarf2.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "frame.h"
 #include "frame-base.h"
 #include "frame-unwind.h"
@@ -1114,13 +1114,6 @@ sparc_analyze_prologue (struct gdbarch *gdbarch, CORE_ADDR pc,
   return pc;
 }
 
-static CORE_ADDR
-sparc_unwind_pc (struct gdbarch *gdbarch, struct frame_info *this_frame)
-{
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
-  return frame_unwind_register_unsigned (this_frame, tdep->pc_regnum);
-}
-
 /* Return PC of first real instruction of the function starting at
    START_PC.  */
 
@@ -1694,7 +1687,7 @@ sparc_analyze_control_transfer (struct regcache *regcache,
       if (fused_p)
 	{
 	  /* Fused compare-and-branch instructions are non-delayed,
-	     and do not have an annuling capability.  So we need to
+	     and do not have an annulling capability.  So we need to
 	     always set a breakpoint on both the NPC and the branch
 	     target address.  */
 	  gdb_assert (offset != 0);
@@ -1881,8 +1874,6 @@ sparc32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_write_pc (gdbarch, sparc_write_pc);
 
   set_gdbarch_dummy_id (gdbarch, sparc_dummy_id);
-
-  set_gdbarch_unwind_pc (gdbarch, sparc_unwind_pc);
 
   frame_base_set_default (gdbarch, &sparc32_frame_base);
 
@@ -2267,8 +2258,9 @@ const struct sparc_fpregmap sparc32_bsd_fpregmap =
   32 * 4,			/* %fsr */
 };
 
+void _initialize_sparc_tdep ();
 void
-_initialize_sparc_tdep (void)
+_initialize_sparc_tdep ()
 {
   register_gdbarch_init (bfd_arch_sparc, sparc32_gdbarch_init);
 }

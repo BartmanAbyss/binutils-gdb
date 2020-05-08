@@ -1,6 +1,6 @@
 /* Definition of symfile add flags.
 
-   Copyright (C) 1990-2019 Free Software Foundation, Inc.
+   Copyright (C) 1990-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,7 +20,7 @@
 #if !defined (SYMFILE_ADD_FLAGS_H)
 #define SYMFILE_ADD_FLAGS_H
 
-#include "common/enum-flags.h"
+#include "gdbsupport/enum-flags.h"
 
 /* This enum encodes bit-flags passed as ADD_FLAGS parameter to
    symbol_file_add, etc.  Defined in a separate file to break circular

@@ -1,4 +1,4 @@
-#   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+#   Copyright (C) 1993-2020 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -39,7 +39,7 @@ lappend cpus_expected d10v d30v fr30 fr500 fr550 h8 hppa i386 iamcu ip2022
 lappend cpus_expected m16c m32c m32r m68hc11 m68hc12 m68k MCore mep c5 h1 MicroBlaze
 lappend cpus_expected mips mn10200 mn10300 ms1 msp MSP430 nds32 n1h_v3 ns32k
 lappend cpus_expected or1k or1knd pj powerpc pyramid riscv romp rs6000 s390 sh sparc
-lappend cpus_expected tic54x tic80 tilegx tms320c30 tms320c4x tms320c54x
+lappend cpus_expected tic54x tilegx tms320c30 tms320c4x tms320c54x
 lappend cpus_expected v850 vax x86-64 xscale xtensa z8k z8001 z8002
 
 # Make sure the target CPU shows up in the list.
@@ -526,7 +526,7 @@ proc test_build_id_debuglink {} {
     }
     set CFLAGS_FOR_TARGET "-g -Wl,--build-id=0x12345678abcdef01"
 
-    if { [target_compile $srcdir/$subdir/testprog.c tmpdir/testprog exectuable debug] != "" } {
+    if { [target_compile $srcdir/$subdir/testprog.c tmpdir/testprog executable debug] != "" } {
 	unsupported "$test (build)"
 	return
     }
@@ -671,6 +671,177 @@ if {[is_elf_format]} then {
     test_follow_debuglink "--dwarf=follow-links --dwarf=info --dwarf=str" objdump.WK2
     test_follow_debuglink "--dwarf=follow-links --headers --wide" objdump.WK3
 }
+
+# Test objdump output with start and stop address limits for the specified
+# dump option
+
+proc test_objdump_limited { testfile dopt want start stop } {
+    global OBJDUMP
+    global OBJDUMPFLAGS
+
+    set got [binutils_run $OBJDUMP "$OBJDUMPFLAGS $dopt --start-address 0x$start --stop-address 0x$stop $testfile"]
+
+    if [regexp $want $got] then {
+	pass "objdump $dopt --start-address 0x$start --stop-address 0x$stop ($testfile)"
+    } else {
+	fail "objdump $dopt --start-address 0x$start --stop-address 0x$stop ($testfile)"
+    }
+}
+
+# Test objdump -d --start-address M --stop-address N
+
+proc test_objdump_disas_limited { testfile text start stop } {
+    set want "$testfile:\[ 	\]*file format.*Disassembly of section $text:\n.*\[ \]*$start:.*"
+    test_objdump_limited $testfile -d $want $start $stop
+}
+
+# Test objdump -s --start-address M --stop-address N
+
+proc test_objdump_content_limited { testfile text start stop } {
+    set want "$testfile:\[ 	\]*file format.*Contents of section $text:\n\[ \]*$start .*"
+    test_objdump_limited $testfile -s $want $start $stop
+}
+
+# Test objdump with --start-address and --stop-address options for higher
+# address ranges which may be sign-extended on targets that treat addresses
+# as signed.  We only check that objdump produces some dump output at the
+# specified start address as a proxy for correct enforcement of the
+# start/stop limits.
+
+if {[is_elf_format]} then {
+    set sect_names [get_standard_section_names]
+    if { $sect_names != "" } {
+	set text [lindex $sect_names 0]
+    } else {
+	set text ".text"
+    }
+    # generate a copy of the test object with .text repositioned
+    if { [binutils_run $OBJCOPY "--change-section-address $text=0x80000000 tmpdir/bintest.o tmpdir/bintest_signed.o"] != "" } {
+	fail "Failed to reposition $text to 0x80000000 (tmpdir/bintest.o -> tmpdir/bintest_signed.o)"
+	return
+    }
+
+    if [is_remote host] {
+	set testfile3 [remote_download host tmpdir/bintest_signed.o]
+    } else {
+	set testfile3 tmpdir/bintest_signed.o
+    }
+
+    test_objdump_content_limited $testfile3 $text "80000004" "80000008"
+    test_objdump_disas_limited $testfile3 $text "80000004" "80000008"
+    remote_file host delete $testfile3
+}
+
+# Test objdump on .NET assemblies (PE files)
+
+proc test_objdump_dotnet_assemblies {} {
+    global OBJDUMP
+    global base_dir
+
+    set test "dotnet-assemblies"
+
+    set got [binutils_run "$base_dir/testsuite/gentestdlls" "tmpdir pei-i386 pei-x86-64"]
+    set want "wrote linux-pei-x86-64.dll"
+    # The test program is hardcoded to generate valid dlls on any target
+    if ![regexp $want $got] then {
+        fail "$test"
+    }
+
+    # First test an ordinary x86 PE format DLL.
+    set test "dotnet-assemblies (ordinary x86 DLL)"
+    set want "file format pei-i386"
+    set got [binutils_run $OBJDUMP "-x tmpdir/simple-pei-i386.dll"]
+    if ![regexp $want $got] then {
+	if [regexp "file format not recognized" $got] then {
+	    # If the target does not recognize vanilla x86 PE format files
+	    # then it cannot be expected to recognize .NET assemblies.  But
+	    # this means that these tests are unsupported, rather than failures.
+	    unsupported $test
+	} else {
+	    fail "$test"
+	}
+	# In either case, if cannot pass this test, then
+	# there is no point in running any further tests.
+	return
+    }
+    pass $test
+
+    # Next check a 32-bit .NET DLL.
+    set test "dotnet-assemblies (32-bit .NET)"
+    set got [binutils_run $OBJDUMP "-x tmpdir/linux-pei-i386.dll"]
+    if ![regexp $want $got] then {
+	fail "$test"
+    } else {
+	pass $test
+    }
+
+    # Next check an ordrinary x86_64 PE format DLL.
+    set test "dotnet-assemblies (ordinary x86_64 DLL)"
+    set want "file format pei-x86-64"
+    set got [binutils_run $OBJDUMP "-x tmpdir/simple-pei-x86-64.dll"]
+    if ![regexp $want $got] then {
+	if [regexp "file format not recognized" $got] then {
+	    # If the target does not support 64-bit PE format
+	    # files, then the following tests are unsupported.
+	    unsupported $test
+	} else {
+	    fail "$test"
+	}
+	return
+    }
+    pass $test
+
+    # Finally check a 64-bit .NET DLL.
+    set test "dotnet-assemblies (64-bit)"
+    set got [binutils_run $OBJDUMP "-x tmpdir/linux-pei-x86-64.dll"]
+    if ![regexp $want $got] then {
+	fail "$test"
+    } else {
+	pass $test
+    }
+}
+
+test_objdump_dotnet_assemblies
+
+# Test objdump -S
+
+proc test_objdump_S { } {
+    global srcdir
+    global subdir
+    global OBJDUMP
+    global OBJDUMPFLAGS
+    
+    set test "objdump -S"
+
+    if { [target_compile $srcdir/$subdir/testprog.c tmpdir/testprog executable debug] != "" } {
+	unsupported "$test (build)"
+	return
+    }
+
+    set got [binutils_run $OBJDUMP "$OBJDUMPFLAGS -D -S tmpdir/testprog"]
+
+    set want "static int local = 2"
+
+    if [regexp $want $got] then {
+	pass $test
+    } else {
+	fail $test
+    }
+
+    set test "objdump --source-comment"
+
+    set got [binutils_run $OBJDUMP "$OBJDUMPFLAGS --disassemble-all --source-comment=// tmpdir/testprog"]
+
+    set want "//static int local = 2"
+
+    if [regexp $want $got] then {
+	pass $test
+    } else {
+	fail $test
+    }
+}
+
+test_objdump_S
 
 # Options which are not tested: -a -D -R -T -x -l --stabs
 # I don't see any generic way to test any of these other than -a.

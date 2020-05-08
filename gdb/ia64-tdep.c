@@ -1,6 +1,6 @@
 /* Target-dependent code for the IA-64 for GDB, the GNU debugger.
 
-   Copyright (C) 1999-2019 Free Software Foundation, Inc.
+   Copyright (C) 1999-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -707,7 +707,7 @@ ia64_memory_insert_breakpoint (struct gdbarch *gdbarch,
   if (val != 0)
     return val;
 
-  /* Breakpoints already present in the code will get deteacted and not get
+  /* Breakpoints already present in the code will get detected and not get
      reinserted by bp_loc_is_permanent.  Multiple breakpoints at the same
      location cannot induce the internal error as they are optimized into
      a single instance by update_global_location_list.  */
@@ -2713,7 +2713,7 @@ ia64_find_unwind_table (struct objfile *objfile, unw_word_t ip,
   ehdr = elf_tdata (bfd)->elf_header;
   phdr = elf_tdata (bfd)->phdr;
 
-  load_base = ANOFFSET (objfile->section_offsets, SECT_OFF_TEXT (objfile));
+  load_base = objfile->text_section_offset ();
 
   for (i = 0; i < ehdr->e_phnum; ++i)
     {
@@ -2764,7 +2764,7 @@ ia64_find_unwind_table (struct objfile *objfile, unw_word_t ip,
 
   dip->start_ip = p_text->p_vaddr + load_base;
   dip->end_ip = dip->start_ip + p_text->p_memsz;
-  dip->gp = ia64_find_global_pointer (get_objfile_arch (objfile), ip);
+  dip->gp = ia64_find_global_pointer (objfile->arch (), ip);
   dip->format = UNW_INFO_FORMAT_REMOTE_TABLE;
   dip->u.rti.name_ptr = (unw_word_t) bfd_get_filename (bfd);
   dip->u.rti.segbase = segbase;
@@ -2845,7 +2845,6 @@ ia64_get_dyn_info_list (unw_addr_space_t as,
 			unw_word_t *dilap, void *arg)
 {
   struct obj_section *text_sec;
-  struct objfile *objfile;
   unw_word_t ip, addr;
   unw_dyn_info_t di;
   int ret;
@@ -2853,7 +2852,7 @@ ia64_get_dyn_info_list (unw_addr_space_t as,
   if (!libunwind_is_initialized ())
     return -UNW_ENOINFO;
 
-  for (objfile = object_files; objfile; objfile = objfile->next)
+  for (objfile *objfile : current_program_space->objfiles ())
     {
       void *buf = NULL;
 
@@ -3616,7 +3615,7 @@ ia64_convert_from_func_ptr_addr (struct gdbarch *gdbarch, CORE_ADDR addr,
       minsym = lookup_minimal_symbol_by_pc (addr);
 
       if (minsym.minsym
-	  && is_vtable_name (MSYMBOL_LINKAGE_NAME (minsym.minsym)))
+	  && is_vtable_name (minsym.minsym->linkage_name ()))
 	return read_memory_unsigned_integer (addr, 8, byte_order);
     }
 
@@ -4013,8 +4012,9 @@ ia64_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   return gdbarch;
 }
 
+void _initialize_ia64_tdep ();
 void
-_initialize_ia64_tdep (void)
+_initialize_ia64_tdep ()
 {
   gdbarch_register (bfd_arch_ia64, ia64_gdbarch_init, NULL);
 }

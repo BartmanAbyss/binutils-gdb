@@ -1,5 +1,5 @@
 /* SPARC-specific support for 32-bit ELF
-   Copyright (C) 1993-2019 Free Software Foundation, Inc.
+   Copyright (C) 1993-2020 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -117,44 +117,54 @@ elf32_sparc_merge_private_bfd_data (bfd *ibfd, struct bfd_link_info *info)
    We need to set the e_machine field appropriately.  */
 
 static void
-elf32_sparc_final_write_processing (bfd *abfd,
-				    bfd_boolean linker ATTRIBUTE_UNUSED)
+sparc_final_write_processing (bfd *abfd)
 {
   switch (bfd_get_mach (abfd))
     {
-    case bfd_mach_sparc :
-    case bfd_mach_sparc_sparclet :
-    case bfd_mach_sparc_sparclite :
+    case bfd_mach_sparc:
+    case bfd_mach_sparc_sparclet:
+    case bfd_mach_sparc_sparclite:
       break; /* nothing to do */
-    case bfd_mach_sparc_v8plus :
+    case bfd_mach_sparc_v8plus:
       elf_elfheader (abfd)->e_machine = EM_SPARC32PLUS;
       elf_elfheader (abfd)->e_flags &=~ EF_SPARC_32PLUS_MASK;
       elf_elfheader (abfd)->e_flags |= EF_SPARC_32PLUS;
       break;
-    case bfd_mach_sparc_v8plusa :
+    case bfd_mach_sparc_v8plusa:
       elf_elfheader (abfd)->e_machine = EM_SPARC32PLUS;
       elf_elfheader (abfd)->e_flags &=~ EF_SPARC_32PLUS_MASK;
       elf_elfheader (abfd)->e_flags |= EF_SPARC_32PLUS | EF_SPARC_SUN_US1;
       break;
-    case bfd_mach_sparc_v8plusb :
-    case bfd_mach_sparc_v8plusc :
-    case bfd_mach_sparc_v8plusd :
-    case bfd_mach_sparc_v8pluse :
-    case bfd_mach_sparc_v8plusv :
-    case bfd_mach_sparc_v8plusm :
-    case bfd_mach_sparc_v8plusm8 :
+    case bfd_mach_sparc_v8plusb:
+    case bfd_mach_sparc_v8plusc:
+    case bfd_mach_sparc_v8plusd:
+    case bfd_mach_sparc_v8pluse:
+    case bfd_mach_sparc_v8plusv:
+    case bfd_mach_sparc_v8plusm:
+    case bfd_mach_sparc_v8plusm8:
       elf_elfheader (abfd)->e_machine = EM_SPARC32PLUS;
       elf_elfheader (abfd)->e_flags &=~ EF_SPARC_32PLUS_MASK;
       elf_elfheader (abfd)->e_flags |= EF_SPARC_32PLUS | EF_SPARC_SUN_US1
 				       | EF_SPARC_SUN_US3;
       break;
-    case bfd_mach_sparc_sparclite_le :
+    case bfd_mach_sparc_sparclite_le:
       elf_elfheader (abfd)->e_flags |= EF_SPARC_LEDATA;
       break;
-    default :
-      abort ();
+    case 0: /* A non-sparc architecture - ignore.  */
+      break;
+    default:
+      _bfd_error_handler
+	(_("%pB: unhandled sparc machine value '%lu' detected during write processing"),
+	 abfd, (long) bfd_get_mach (abfd));
       break;
     }
+}
+
+static bfd_boolean
+elf32_sparc_final_write_processing (bfd *abfd)
+{
+  sparc_final_write_processing (abfd);
+  return _bfd_elf_final_write_processing (abfd);
 }
 
 /* Used to decide how to sort relocs in an optimal manner for the
@@ -321,11 +331,11 @@ elf32_sparc_vxworks_link_hash_table_create (bfd *abfd)
 /* A final_write_processing hook that does both the SPARC- and VxWorks-
    specific handling.  */
 
-static void
-elf32_sparc_vxworks_final_write_processing (bfd *abfd, bfd_boolean linker)
+static bfd_boolean
+elf32_sparc_vxworks_final_write_processing (bfd *abfd)
 {
-  elf32_sparc_final_write_processing (abfd, linker);
-  elf_vxworks_final_write_processing (abfd, linker);
+  sparc_final_write_processing (abfd);
+  return elf_vxworks_final_write_processing (abfd);
 }
 
 #undef  TARGET_BIG_SYM

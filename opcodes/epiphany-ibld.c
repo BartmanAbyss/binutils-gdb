@@ -4,7 +4,7 @@
    THIS FILE IS MACHINE GENERATED WITH CGEN: Cpu tools GENerator.
    - the resultant file is machine generated, cgen-ibld.in isn't
 
-   Copyright (C) 1996-2019 Free Software Foundation, Inc.
+   Copyright (C) 1996-2020 Free Software Foundation, Inc.
 
    This file is part of libopcodes.
 
@@ -480,7 +480,10 @@ extract_normal (CGEN_CPU_DESC cd,
 	abort ();
 
       if (fill_cache (cd, ex_info, word_offset / 8, word_length / 8, pc) == 0)
-	return 0;
+	{
+	  *valuep = 0;
+	  return 0;
+	}
 
       value = extract_1 (cd, ex_info, start, length, word_length, bufp, pc);
     }
@@ -1092,7 +1095,7 @@ epiphany_cgen_extract_operand (CGEN_CPU_DESC cd,
         length = extract_normal (cd, ex_info, insn_value, 0, 0, 23, 8, 32, total_length, pc, & fields->f_disp8);
         if (length <= 0) break;
 {
-  FLD (f_sdisp11) = ((SI) (((((((FLD (f_disp8)) << (3))) | (FLD (f_disp3)))) << (21))) >> (21));
+  FLD (f_sdisp11) = ((((((((((FLD (f_disp8)) << (3))) | (FLD (f_disp3)))) & (2047))) ^ (1024))) - (1024));
 }
       }
       break;
@@ -1100,7 +1103,7 @@ epiphany_cgen_extract_operand (CGEN_CPU_DESC cd,
       {
         long value;
         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_RELOC)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 31, 24, 32, total_length, pc, & value);
-        value = ((((value) << (1))) + (pc));
+        value = ((((value) * (2))) + (pc));
         fields->f_simm24 = value;
       }
       break;
@@ -1111,7 +1114,7 @@ epiphany_cgen_extract_operand (CGEN_CPU_DESC cd,
       {
         long value;
         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_RELOC)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 15, 8, 32, total_length, pc, & value);
-        value = ((((value) << (1))) + (pc));
+        value = ((((value) * (2))) + (pc));
         fields->f_simm8 = value;
       }
       break;

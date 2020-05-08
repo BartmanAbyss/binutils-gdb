@@ -1,5 +1,5 @@
 /* Handle FR-V (FDPIC) shared libraries for GDB, the GNU Debugger.
-   Copyright (C) 2004-2019 Free Software Foundation, Inc.
+   Copyright (C) 2004-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -546,7 +546,7 @@ enable_break2 (void)
 
       /* Read the contents of the .interp section into a local buffer;
          the contents specify the dynamic linker this program uses.  */
-      interp_sect_size = bfd_section_size (exec_bfd, interp_sect);
+      interp_sect_size = bfd_section_size (interp_sect);
       buf = (char *) alloca (interp_sect_size);
       bfd_get_section_contents (exec_bfd, interp_sect,
 				buf, 0, interp_sect_size);
@@ -561,14 +561,13 @@ enable_break2 (void)
          mechanism to find the dynamic linker's base address.  */
 
       gdb_bfd_ref_ptr tmp_bfd;
-      TRY
+      try
         {
           tmp_bfd = solib_bfd_open (buf);
         }
-      CATCH (ex, RETURN_MASK_ALL)
+      catch (const gdb_exception &ex)
 	{
 	}
-      END_CATCH
 
       if (tmp_bfd == NULL)
 	{
@@ -604,24 +603,20 @@ enable_break2 (void)
       interp_sect = bfd_get_section_by_name (tmp_bfd.get (), ".text");
       if (interp_sect)
 	{
-	  interp_text_sect_low
-	    = bfd_section_vma (tmp_bfd.get (), interp_sect);
+	  interp_text_sect_low = bfd_section_vma (interp_sect);
 	  interp_text_sect_low
 	    += displacement_from_map (ldm, interp_text_sect_low);
 	  interp_text_sect_high
-	    = interp_text_sect_low + bfd_section_size (tmp_bfd.get (),
-						       interp_sect);
+	    = interp_text_sect_low + bfd_section_size (interp_sect);
 	}
       interp_sect = bfd_get_section_by_name (tmp_bfd.get (), ".plt");
       if (interp_sect)
 	{
-	  interp_plt_sect_low =
-	    bfd_section_vma (tmp_bfd.get (), interp_sect);
+	  interp_plt_sect_low = bfd_section_vma (interp_sect);
 	  interp_plt_sect_low
 	    += displacement_from_map (ldm, interp_plt_sect_low);
 	  interp_plt_sect_high =
-	    interp_plt_sect_low + bfd_section_size (tmp_bfd.get (),
-						    interp_sect);
+	    interp_plt_sect_low + bfd_section_size (interp_sect);
 	}
 
       addr = gdb_bfd_lookup_symbol (tmp_bfd.get (), cmp_name, "_dl_debug_addr");
@@ -790,8 +785,7 @@ frv_relocate_main_executable (void)
   main_executable_lm_info = new lm_info_frv;
   main_executable_lm_info->map = ldm;
 
-  gdb::unique_xmalloc_ptr<struct section_offsets> new_offsets
-    (XCNEWVEC (struct section_offsets, symfile_objfile->num_sections));
+  section_offsets new_offsets (symfile_objfile->section_offsets.size ());
   changed = 0;
 
   ALL_OBJFILE_OSECTIONS (symfile_objfile, osect)
@@ -805,7 +799,7 @@ frv_relocate_main_executable (void)
       /* Current address of section.  */
       addr = obj_section_addr (osect);
       /* Offset from where this section started.  */
-      offset = ANOFFSET (symfile_objfile->section_offsets, osect_idx);
+      offset = symfile_objfile->section_offsets[osect_idx];
       /* Original address prior to any past relocations.  */
       orig_addr = addr - offset;
 
@@ -814,10 +808,10 @@ frv_relocate_main_executable (void)
 	  if (ldm->segs[seg].p_vaddr <= orig_addr
 	      && orig_addr < ldm->segs[seg].p_vaddr + ldm->segs[seg].p_memsz)
 	    {
-	      new_offsets->offsets[osect_idx]
+	      new_offsets[osect_idx]
 		= ldm->segs[seg].addr - ldm->segs[seg].p_vaddr;
 
-	      if (new_offsets->offsets[osect_idx] != offset)
+	      if (new_offsets[osect_idx] != offset)
 		changed = 1;
 	      break;
 	    }
@@ -825,7 +819,7 @@ frv_relocate_main_executable (void)
     }
 
   if (changed)
-    objfile_relocate (symfile_objfile, new_offsets.get ());
+    objfile_relocate (symfile_objfile, new_offsets);
 
   /* Now that symfile_objfile has been relocated, we can compute the
      GOT value and stash it away.  */
@@ -964,7 +958,7 @@ frv_fdpic_find_canonical_descriptor (CORE_ADDR entry_point)
   if (sym == 0)
     name = 0;
   else
-    name = SYMBOL_LINKAGE_NAME (sym);
+    name = sym->linkage_name ();
 
   /* Check the main executable.  */
   addr = find_canonical_descriptor_in_load_object
@@ -1148,8 +1142,9 @@ frv_fetch_objfile_link_map (struct objfile *objfile)
 
 struct target_so_ops frv_so_ops;
 
+void _initialize_frv_solib ();
 void
-_initialize_frv_solib (void)
+_initialize_frv_solib ()
 {
   frv_so_ops.relocate_section_addresses = frv_relocate_section_addresses;
   frv_so_ops.free_so = frv_free_so;

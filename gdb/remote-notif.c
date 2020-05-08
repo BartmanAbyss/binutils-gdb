@@ -1,6 +1,6 @@
 /* Remote notification in GDB protocol
 
-   Copyright (C) 1988-2019 Free Software Foundation, Inc.
+   Copyright (C) 1988-2020 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,13 +35,14 @@
 #include "remote.h"
 #include "remote-notif.h"
 #include "observable.h"
-#include "event-loop.h"
+#include "gdbsupport/event-loop.h"
 #include "target.h"
 #include "inferior.h"
 #include "infrun.h"
 #include "gdbcmd.h"
+#include "async-event.h"
 
-int notif_debug = 0;
+bool notif_debug = false;
 
 /* Supported clients of notifications.  */
 
@@ -85,8 +86,6 @@ remote_notif_parse (remote_target *remote,
   return event.release ();
 }
 
-DEFINE_QUEUE_P (notif_client_p);
-
 /* Process notifications in STATE's notification queue one by one.
    EXCEPT is not expected in the queue.  */
 
@@ -94,10 +93,10 @@ void
 remote_notif_process (struct remote_notif_state *state,
 		      struct notif_client *except)
 {
-  while (!QUEUE_is_empty (notif_client_p, state->notif_queue))
+  while (!state->notif_queue.empty ())
     {
-      struct notif_client *nc = QUEUE_deque (notif_client_p,
-					     state->notif_queue);
+      struct notif_client *nc = state->notif_queue.front ();
+      state->notif_queue.pop_front ();
 
       gdb_assert (nc != except);
 
@@ -158,7 +157,7 @@ handle_notification (struct remote_notif_state *state, const char *buf)
 
       /* Notify the event loop there's a stop reply to acknowledge
 	 and that there may be more events to fetch.  */
-      QUEUE_enque (notif_client_p, state->notif_queue, nc);
+      state->notif_queue.push_back (nc);
       if (target_is_non_stop_p ())
 	{
 	  /* In non-stop, We mark REMOTE_ASYNC_GET_PENDING_EVENTS_TOKEN
@@ -212,11 +211,9 @@ handle_notification (struct remote_notif_state *state, const char *buf)
 struct remote_notif_state *
 remote_notif_state_allocate (remote_target *remote)
 {
-  struct remote_notif_state *notif_state = XCNEW (struct remote_notif_state);
+  struct remote_notif_state *notif_state = new struct remote_notif_state;
 
   notif_state->remote = remote;
-
-  notif_state->notif_queue = QUEUE_alloc (notif_client_p, NULL);
 
   /* Register async_event_handler for notification.  */
 
@@ -229,25 +226,21 @@ remote_notif_state_allocate (remote_target *remote)
 
 /* Free STATE and its fields.  */
 
-void
-remote_notif_state_xfree (struct remote_notif_state *state)
+remote_notif_state::~remote_notif_state ()
 {
   int i;
 
-  QUEUE_free (notif_client_p, state->notif_queue);
-
   /* Unregister async_event_handler for notification.  */
-  if (state->get_pending_events_token != NULL)
-    delete_async_event_handler (&state->get_pending_events_token);
+  if (get_pending_events_token != NULL)
+    delete_async_event_handler (&get_pending_events_token);
 
   for (i = 0; i < REMOTE_NOTIF_LAST; i++)
-    delete state->pending_event[i];
-
-  xfree (state);
+    delete pending_event[i];
 }
 
+void _initialize_notif ();
 void
-_initialize_notif (void)
+_initialize_notif ()
 {
   add_setshow_boolean_cmd ("notification", no_class, &notif_debug,
 			   _("\
