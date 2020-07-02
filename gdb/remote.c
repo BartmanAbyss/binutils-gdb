@@ -4111,6 +4111,7 @@ remote_target::get_offsets ()
   ptr = buf;
   lose = 0;
 
+ #if 0 // BARTO
   if (startswith (ptr, "Text="))
     {
       ptr += 5;
@@ -4163,11 +4164,26 @@ remote_target::get_offsets ()
     error (_("Malformed response to offset query, %s"), buf);
   else if (*ptr != '\0')
     warning (_("Target reported unsupported offsets: %s"), buf);
+ #endif //BARTO
 
+  // BARTO START
   section_offsets offs = symfile_objfile->section_offsets;
+  for(const auto* section = symfile_objfile->obfd->sections; section; section = section->next) {
+      if((section->flags & SEC_ALLOC) && section->size > 0) {
+          CORE_ADDR addr = 0;
+		  while(*ptr && *ptr != ';')
+			  addr = (addr << 4) + fromhex(*ptr++);
+          //warning("id: %d, section_id: %d, index: %d, name: %s => addr %x\n", section->id, section->section_id, section->index, section->name, addr);
+		  //offsets returned by gdbserver are absolute addresses of sections!
+          offs[section->index] = addr - symfile_objfile->sections[section->index].the_bfd_section->vma;
+          if(*ptr == ';')
+              ptr++;
+      }
+  }
+  // BARTO END
 
-  //data = get_symfile_segment_data (symfile_objfile->obfd);
-  data = NULL; //BARTO
+#if 0 //BARTO
+  data = get_symfile_segment_data (symfile_objfile->obfd);
   do_segments = (data != NULL);
   do_sections = num_segments == 0;
 
@@ -4219,10 +4235,6 @@ remote_target::get_offsets ()
   if (do_sections)
     {
       offs[SECT_OFF_TEXT (symfile_objfile)] = text_addr;
-	  //BARTO: offsets returned by gdbserver are absolute addresses of sections!
-	  offs[SECT_OFF_TEXT(symfile_objfile)] = text_addr - symfile_objfile->sections[SECT_OFF_TEXT(symfile_objfile)].the_bfd_section->vma; //BARTO
-	  offs[SECT_OFF_RODATA(symfile_objfile)] = text_addr - symfile_objfile->sections[SECT_OFF_TEXT(symfile_objfile)].the_bfd_section->vma; //BARTO
-
 
       /* This is a temporary kludge to force data and bss to use the
 	 same offsets because that's what nlmconv does now.  The real
@@ -4231,9 +4243,8 @@ remote_target::get_offsets ()
 
       offs[SECT_OFF_DATA (symfile_objfile)] = data_addr;
       offs[SECT_OFF_BSS (symfile_objfile)] = data_addr;
-      offs[SECT_OFF_DATA (symfile_objfile)] = data_addr - symfile_objfile->sections[SECT_OFF_DATA(symfile_objfile)].the_bfd_section->vma; //BARTO
-      offs[SECT_OFF_BSS (symfile_objfile)] = bss_addr - symfile_objfile->sections[SECT_OFF_BSS(symfile_objfile)].the_bfd_section->vma; //BARTO
     }
+#endif //BARTO
 
   objfile_relocate (symfile_objfile, offs);
 }
