@@ -803,6 +803,7 @@ print_insn_arg (const char *d,
     case '_':		/* 32-bit absolute address for move16.  */
       {
         NEXTULONG (p, uval);
+        info->target = uval;
 	(*info->print_address_func) (uval, info);
         break;
       }
@@ -1131,6 +1132,7 @@ print_insn_arg (const char *d,
       else
 	return PRINT_INSN_ARG_INVALID_OP_TABLE;
 
+      info->target = addr + disp;
       (*info->print_address_func) (addr + disp, info);
       break;
 
@@ -1288,16 +1290,19 @@ print_insn_arg (const char *d,
 	    {
 	    case 0:
 	      NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
+        info->target = val;
 	      (*info->print_address_func) (val, info);
 	      break;
 
 	    case 1:
 	      NEXTULONG (p, uval);
+        info->target = uval;
 	      (*info->print_address_func) (uval, info);
 	      break;
 
 	    case 2:
 	      NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
+        info->target = addr + val;
 #ifdef MOTOROLA
 	      (*info->print_address_func) (addr + val, info);
 	      (*info->fprintf_func) (info->stream, "(pc)");
@@ -1770,7 +1775,6 @@ match_insn_m68k (bfd_vma memaddr,
 	info->fprintf_func (info->stream, ",");
     }
 
-  info->insn_info_valid = 1;
   info->insn_type = best->type;
 
   return p - buffer;
@@ -1921,6 +1925,12 @@ print_insn_m68k (bfd_vma memaddr, disassemble_info *info)
   info->display_endian = BFD_ENDIAN_BIG;
   priv.max_fetched = priv.the_buffer;
   priv.insn_start = memaddr;
+
+  info->insn_info_valid = 1;
+  info->branch_delay_insns = 0;
+  info->data_size = 0;
+  info->target = -1; /* 0 is bad then visualize_jumps would think it's a jump to 0x00000000 */
+  info->target2 = -1;
 
   if (info->disassembler_options)
     {
