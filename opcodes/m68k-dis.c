@@ -1770,6 +1770,9 @@ match_insn_m68k (bfd_vma memaddr,
 	info->fprintf_func (info->stream, ",");
     }
 
+  info->insn_info_valid = 1;
+  info->insn_type = best->type;
+
   return p - buffer;
 }
 

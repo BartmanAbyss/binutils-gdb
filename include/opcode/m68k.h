@@ -18,6 +18,8 @@
    Software Foundation, 51 Franklin Street - Fifth Floor, Boston, MA
    02110-1301, USA.  */
 
+#include "dis-asm.h"
+
 /* These are used as bit flags for the arch field in the m68k_opcode
    structure.  */
 #define	_m68k_undef  0
@@ -72,6 +74,8 @@ struct m68k_opcode
   const char *args;
   /* The architectures which support this opcode.  */
   unsigned int arch;
+  /* instruction type */
+  enum dis_insn_type type;
 };
 
 /* The structure used to hold information for an opcode alias.  */
