@@ -41,7 +41,7 @@ struct objdump_disasm_info
 {
   bfd *abfd;
   asection *sec;
-  bfd_boolean require_sec;
+  bool require_sec;
 };
 
 /* Support display of symbols in baserel offsets. */

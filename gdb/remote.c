@@ -4284,17 +4284,20 @@ remote_target::get_offsets ()
 
   // BARTO START
   objfile *objf = current_program_space->symfile_object_file;
-  section_offsets offs = objf->section_offsets;  for(const auto* section = symfile_objfile->obfd->sections; section; section = section->next) {
-      if((section->flags & SEC_ALLOC) && section->size > 0) {
-          CORE_ADDR addr = 0;
-		  while(*ptr && *ptr != ';')
-			  addr = (addr << 4) + fromhex(*ptr++);
-          //warning("id: %d, section_id: %d, index: %d, name: %s => addr %x\n", section->id, section->section_id, section->index, section->name, addr);
-		  //offsets returned by gdbserver are absolute addresses of sections!
-          offs[section->index] = addr - symfile_objfile->sections[section->index].the_bfd_section->vma;
-          if(*ptr == ';')
-              ptr++;
-      }
+  section_offsets offs = objf->section_offsets;
+  for (const auto *section = objf->obfd->sections; section; section = section->next)
+  {
+    if ((section->flags & SEC_ALLOC) && section->size > 0)
+    {
+      CORE_ADDR addr = 0;
+      while (*ptr && *ptr != ';')
+        addr = (addr << 4) + fromhex(*ptr++);
+      //warning("id: %d, section_id: %d, index: %d, name: %s => addr %x\n", section->id, section->section_id, section->index, section->name, addr);
+      //offsets returned by gdbserver are absolute addresses of sections!
+      offs[section->index] = addr - objf->sections[section->index].the_bfd_section->vma;
+      if (*ptr == ';')
+        ptr++;
+    }
   }
   // BARTO END
 
