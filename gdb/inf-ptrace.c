@@ -1,6 +1,6 @@
 /* Low-level child interface to ptrace.
 
-   Copyright (C) 1988-2020 Free Software Foundation, Inc.
+   Copyright (C) 1988-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,7 +20,6 @@
 #include "defs.h"
 #include "command.h"
 #include "inferior.h"
-#include "inflow.h"
 #include "terminal.h"
 #include "gdbcore.h"
 #include "regcache.h"
@@ -49,22 +48,6 @@ gdb_ptrace (PTRACE_TYPE_ARG1 request, ptid_t ptid, PTRACE_TYPE_ARG3 addr,
 #endif
 }
 
-/* A unique_ptr helper to unpush a target.  */
-
-struct target_unpusher
-{
-  void operator() (struct target_ops *ops) const
-  {
-    unpush_target (ops);
-  }
-};
-
-/* A unique_ptr that unpushes a target on destruction.  */
-
-typedef std::unique_ptr<struct target_ops, target_unpusher> target_unpush_up;
-
-
-
 inf_ptrace_target::~inf_ptrace_target ()
 {}
 
@@ -90,29 +73,29 @@ inf_ptrace_target::create_inferior (const char *exec_file,
 				    const std::string &allargs,
 				    char **env, int from_tty)
 {
-  pid_t pid;
-  ptid_t ptid;
+  inferior *inf = current_inferior ();
 
   /* Do not change either targets above or the same target if already present.
      The reason is the target stack is shared across multiple inferiors.  */
-  int ops_already_pushed = target_is_pushed (this);
+  int ops_already_pushed = inf->target_is_pushed (this);
 
   target_unpush_up unpusher;
   if (! ops_already_pushed)
     {
       /* Clear possible core file with its process_stratum.  */
-      push_target (this);
+      inf->push_target (this);
       unpusher.reset (this);
     }
 
-  pid = fork_inferior (exec_file, allargs, env, inf_ptrace_me, NULL,
-		       NULL, NULL, NULL);
+  pid_t pid = fork_inferior (exec_file, allargs, env, inf_ptrace_me, NULL,
+			     NULL, NULL, NULL);
 
-  ptid = ptid_t (pid);
+  ptid_t ptid (pid);
   /* We have something that executes now.  We'll be running through
      the shell at this point (if startup-with-shell is true), but the
      pid shouldn't change.  */
-  add_thread_silent (this, ptid);
+  thread_info *thr = add_thread_silent (this, ptid);
+  switch_to_thread (thr);
 
   unpusher.release ();
 
@@ -145,14 +128,13 @@ inf_ptrace_target::mourn_inferior ()
 void
 inf_ptrace_target::attach (const char *args, int from_tty)
 {
-  pid_t pid;
-  struct inferior *inf;
+  inferior *inf = current_inferior ();
 
   /* Do not change either targets above or the same target if already present.
      The reason is the target stack is shared across multiple inferiors.  */
-  int ops_already_pushed = target_is_pushed (this);
+  int ops_already_pushed = inf->target_is_pushed (this);
 
-  pid = parse_pid_to_attach (args);
+  pid_t pid = parse_pid_to_attach (args);
 
   if (pid == getpid ())		/* Trying to masturbate?  */
     error (_("I refuse to debug myself!"));
@@ -162,7 +144,7 @@ inf_ptrace_target::attach (const char *args, int from_tty)
     {
       /* target_pid_to_str already uses the target.  Also clear possible core
 	 file with its process_stratum.  */
-      push_target (this);
+      inf->push_target (this);
       unpusher.reset (this);
     }
 
@@ -187,14 +169,14 @@ inf_ptrace_target::attach (const char *args, int from_tty)
   error (_("This system does not support attaching to a process"));
 #endif
 
-  inf = current_inferior ();
   inferior_appeared (inf, pid);
   inf->attach_flag = 1;
-  inferior_ptid = ptid_t (pid);
 
   /* Always add a main thread.  If some target extends the ptrace
      target, it should decorate the ptid later with more info.  */
-  thread_info *thr = add_thread_silent (this, inferior_ptid);
+  thread_info *thr = add_thread_silent (this, ptid_t (pid));
+  switch_to_thread (thr);
+
   /* Don't consider the thread stopped until we've processed its
      initial SIGSTOP stop.  */
   set_executing (this, thr->ptid, true);
@@ -232,7 +214,7 @@ inf_ptrace_target::detach (inferior *inf, int from_tty)
 void
 inf_ptrace_target::detach_success (inferior *inf)
 {
-  inferior_ptid = null_ptid;
+  switch_to_no_thread ();
   detach_inferior (inf);
 
   maybe_unpush_target ();
@@ -317,7 +299,7 @@ inf_ptrace_target::resume (ptid_t ptid, int step, enum gdb_signal signal)
 
 ptid_t
 inf_ptrace_target::wait (ptid_t ptid, struct target_waitstatus *ourstatus,
-			 int options)
+			 target_wait_flags options)
 {
   pid_t pid;
   int status, save_errno;
@@ -348,7 +330,7 @@ inf_ptrace_target::wait (ptid_t ptid, struct target_waitstatus *ourstatus,
 	}
 
       /* Ignore terminated detached child processes.  */
-      if (!WIFSTOPPED (status) && pid != inferior_ptid.pid ())
+      if (!WIFSTOPPED (status) && find_inferior_pid (this, pid) == nullptr)
 	pid = -1;
     }
   while (pid == -1);

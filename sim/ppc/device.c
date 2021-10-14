@@ -21,6 +21,9 @@
 #ifndef _DEVICE_C_
 #define _DEVICE_C_
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <stdio.h>
 
 #include "device_table.h"
@@ -29,18 +32,8 @@
 #include "events.h"
 #include "psim.h"
 
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
-
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
-
 #include <ctype.h>
 
 STATIC_INLINE_DEVICE (void) clean_device_properties(device *);
@@ -190,10 +183,9 @@ device_full_name(device *leaf,
                  unsigned sizeof_buf)
 {
   /* get a buffer */
-  char full_name[1024];
-  if (buf == (char*)0) {
-    buf = full_name;
-    sizeof_buf = sizeof(full_name);
+  if (buf == NULL) {
+    sizeof_buf = 1024;
+    buf = malloc(sizeof_buf);
   }
 
   /* construct a name */
@@ -221,9 +213,6 @@ device_full_name(device *leaf,
     strcat (buf, unit);
   }
   
-  /* return it usefully */
-  if (buf == full_name)
-    buf = (char *) strdup(full_name);
   return buf;
 }
 
@@ -1925,8 +1914,6 @@ INLINE_DEVICE\
 device_clean(device *me,
 	     void *data)
 {
-  psim *system;
-  system = (psim*)data;
   TRACE(trace_device_init, ("device_clean - initializing %s", me->path));
   clean_device_interrupt_edges(&me->interrupt_destinations);
   clean_device_instances(me);

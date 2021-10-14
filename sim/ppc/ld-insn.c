@@ -28,6 +28,24 @@
 
 #include "igen.h"
 
+static model *last_model;
+
+static insn *last_model_macro;
+static insn *last_model_function;
+static insn *last_model_internal;
+static insn *last_model_static;
+static insn *last_model_data;
+
+model *models;
+
+insn *model_macros;
+insn *model_functions;
+insn *model_internal;
+insn *model_static;
+insn *model_data;
+
+int max_model_fields_len;
+
 static void
 update_depth(insn_table *entry,
 	     lf *file,
@@ -810,7 +828,7 @@ dump_insn_field(insn_field *field,
 		int indent)
 {
 
-  printf("(insn_field*)0x%x\n", (unsigned)field);
+  printf("(insn_field*)0x%lx\n", (unsigned long)field);
 
   dumpf(indent, "(first %d)\n", field->first);
 

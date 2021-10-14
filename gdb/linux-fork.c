@@ -1,6 +1,6 @@
 /* GNU/Linux native-dependent code for debugging multiple forks.
 
-   Copyright (C) 2005-2020 Free Software Foundation, Inc.
+   Copyright (C) 2005-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -41,7 +41,7 @@
 struct fork_info
 {
   explicit fork_info (pid_t pid)
-    : ptid (pid, pid, 0)
+    : ptid (pid, pid)
   {
   }
 
@@ -61,8 +61,8 @@ struct fork_info
 
     if (savedregs)
       delete savedregs;
-    if (filepos)
-      xfree (filepos);
+
+    xfree (filepos);
   }
 
   ptid_t ptid = null_ptid;
@@ -224,8 +224,7 @@ fork_load_infrun_state (struct fork_info *fp)
   registers_changed ();
   reinit_frame_cache ();
 
-  inferior_thread ()->suspend.stop_pc
-    = regcache_read_pc (get_current_regcache ());
+  inferior_thread ()->set_stop_pc (regcache_read_pc (get_current_regcache ()));
   nullify_last_target_wait_ptid ();
 
   /* Now restore the file positions of open file descriptors.  */
@@ -523,7 +522,7 @@ Please switch to another checkpoint before deleting the current one"));
       || (parent != NULL && parent->state == THREAD_STOPPED))
     {
       if (inferior_call_waitpid (pptid, ptid.pid ()))
-        warning (_("Unable to wait pid %s"),
+	warning (_("Unable to wait pid %s"),
 		 target_pid_to_str (ptid).c_str ());
     }
 }
@@ -645,7 +644,7 @@ checkpoint_command (const char *args, int from_tty)
   struct fork_info *fp;
   pid_t retpid;
 
-  if (!target_has_execution) 
+  if (!target_has_execution ()) 
     error (_("The program is not being run."));
 
   /* Ensure that the inferior is not multithreaded.  */

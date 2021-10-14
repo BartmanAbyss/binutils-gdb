@@ -1,6 +1,6 @@
 /* BSD Kernel Data Access Library (libkvm) interface.
 
-   Copyright (C) 2004-2020 Free Software Foundation, Inc.
+   Copyright (C) 2004-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -132,12 +132,12 @@ bsd_kvm_target_open (const char *arg, int from_tty)
     error (("%s"), errbuf);
 
   bsd_kvm_corefile = filename;
-  unpush_target (&bsd_kvm_ops);
+  current_inferior ()->unpush_target (&bsd_kvm_ops);
   core_kd = temp_kd;
-  push_target (&bsd_kvm_ops);
+  current_inferior ()->push_target (&bsd_kvm_ops);
 
-  add_thread_silent (&bsd_kvm_ops, bsd_kvm_ptid);
-  inferior_ptid = bsd_kvm_ptid;
+  thread_info *thr = add_thread_silent (&bsd_kvm_ops, bsd_kvm_ptid);
+  switch_to_thread (thr);
 
   target_fetch_registers (get_current_regcache (), -1);
 
@@ -155,7 +155,7 @@ bsd_kvm_target::close ()
       core_kd = NULL;
     }
 
-  inferior_ptid = null_ptid;
+  switch_to_no_thread ();
   exit_inferior_silent (current_inferior ());
 }
 
@@ -238,7 +238,7 @@ bsd_kvm_target::fetch_registers (struct regcache *regcache, int regnum)
   /* On dumping core, BSD kernels store the faulting context (PCB)
      in the variable "dumppcb".  */
   memset (nl, 0, sizeof nl);
-  nl[0].n_name = "_dumppcb";
+  nl[0].n_name = (char *) "_dumppcb";
 
   if (kvm_nlist (core_kd, nl) == -1)
     error (("%s"), kvm_geterr (core_kd));
@@ -256,7 +256,7 @@ bsd_kvm_target::fetch_registers (struct regcache *regcache, int regnum)
      "proc0paddr".  */
 
   memset (nl, 0, sizeof nl);
-  nl[0].n_name = "_proc0paddr";
+  nl[0].n_name = (char *) "_proc0paddr";
 
   if (kvm_nlist (core_kd, nl) == -1)
     error (("%s"), kvm_geterr (core_kd));
@@ -280,7 +280,7 @@ bsd_kvm_target::fetch_registers (struct regcache *regcache, int regnum)
      variable "thread0".  */
 
   memset (nl, 0, sizeof nl);
-  nl[0].n_name = "_thread0";
+  nl[0].n_name = (char *) "_thread0";
 
   if (kvm_nlist (core_kd, nl) == -1)
     error (("%s"), kvm_geterr (core_kd));
@@ -388,7 +388,7 @@ bsd_kvm_add_target (int (*supply_pcb)(struct regcache *, struct pcb *))
   
   add_prefix_cmd ("kvm", class_obscure, bsd_kvm_cmd, _("\
 Generic command for manipulating the kernel memory interface."),
-		  &bsd_kvm_cmdlist, "kvm ", 0, &cmdlist);
+		  &bsd_kvm_cmdlist, 0, &cmdlist);
 
 #ifndef HAVE_STRUCT_THREAD_TD_PCB
   add_cmd ("proc", class_obscure, bsd_kvm_proc_cmd,

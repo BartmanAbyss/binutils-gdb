@@ -1,6 +1,6 @@
 /* varobj support for C and C++.
 
-   Copyright (C) 1999-2020 Free Software Foundation, Inc.
+   Copyright (C) 1999-2021 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -83,11 +83,11 @@ adjust_value_for_child_access (struct value **value,
   /* Pointers to structures are treated just like
      structures when accessing children.  Don't
      dereference pointers to other types.  */
-  if (TYPE_CODE (*type) == TYPE_CODE_PTR)
+  if ((*type)->code () == TYPE_CODE_PTR)
     {
       struct type *target_type = get_target_type (*type);
-      if (TYPE_CODE (target_type) == TYPE_CODE_STRUCT
-	  || TYPE_CODE (target_type) == TYPE_CODE_UNION)
+      if (target_type->code () == TYPE_CODE_STRUCT
+	  || target_type->code () == TYPE_CODE_UNION)
 	{
 	  if (value && *value)
 	    {
@@ -120,10 +120,10 @@ adjust_value_for_child_access (struct value **value,
 
       enclosing_type = value_actual_type (*value, 1, &real_type_found);
       if (real_type_found)
-        {
-          *type = enclosing_type;
-          *value = value_cast (enclosing_type, *value);
-        }
+	{
+	  *type = enclosing_type;
+	  *value = value_cast (enclosing_type, *value);
+	}
     }
 }
 
@@ -142,9 +142,9 @@ c_is_path_expr_parent (const struct varobj *var)
   type = varobj_get_gdb_type (var);
 
   /* Anonymous unions and structs are also not path_expr parents.  */
-  if ((TYPE_CODE (type) == TYPE_CODE_STRUCT
-       || TYPE_CODE (type) == TYPE_CODE_UNION)
-      && TYPE_NAME (type) == NULL)
+  if ((type->code () == TYPE_CODE_STRUCT
+       || type->code () == TYPE_CODE_UNION)
+      && type->name () == NULL)
     {
       const struct varobj *parent = var->parent;
 
@@ -159,13 +159,13 @@ c_is_path_expr_parent (const struct varobj *var)
 	  parent_type = varobj_get_value_type (parent);
 	  adjust_value_for_child_access (NULL, &parent_type, &was_ptr, 0);
 
-	  if (TYPE_CODE (parent_type) == TYPE_CODE_STRUCT
-	      || TYPE_CODE (parent_type) == TYPE_CODE_UNION)
+	  if (parent_type->code () == TYPE_CODE_STRUCT
+	      || parent_type->code () == TYPE_CODE_UNION)
 	    {
 	      const char *field_name;
 
-	      gdb_assert (var->index < TYPE_NFIELDS (parent_type));
-	      field_name = TYPE_FIELD_NAME (parent_type, var->index);
+	      gdb_assert (var->index < parent_type->num_fields ());
+	      field_name = parent_type->field (var->index).name ();
 	      return !(field_name == NULL || *field_name == '\0');
 	    }
 	}
@@ -188,11 +188,11 @@ c_number_of_children (const struct varobj *var)
   adjust_value_for_child_access (NULL, &type, NULL, 0);
   target = get_target_type (type);
 
-  switch (TYPE_CODE (type))
+  switch (type->code ())
     {
     case TYPE_CODE_ARRAY:
       if (TYPE_LENGTH (type) > 0 && TYPE_LENGTH (target) > 0
-	  && !TYPE_ARRAY_UPPER_BOUND_IS_UNDEFINED (type))
+	  && (type->bounds ()->high.kind () != PROP_UNDEFINED))
 	children = TYPE_LENGTH (type) / TYPE_LENGTH (target);
       else
 	/* If we don't know how many elements there are, don't display
@@ -202,7 +202,7 @@ c_number_of_children (const struct varobj *var)
 
     case TYPE_CODE_STRUCT:
     case TYPE_CODE_UNION:
-      children = TYPE_NFIELDS (type);
+      children = type->num_fields ();
       break;
 
     case TYPE_CODE_PTR:
@@ -210,12 +210,12 @@ c_number_of_children (const struct varobj *var)
 	 have one child, except for function ptrs, which have no children,
 	 and except for void*, as we don't know what to show.
 
-         We can show char* so we allow it to be dereferenced.  If you decide
-         to test for it, please mind that a little magic is necessary to
-         properly identify it: char* has TYPE_CODE == TYPE_CODE_INT and 
-         TYPE_NAME == "char".  */
-      if (TYPE_CODE (target) == TYPE_CODE_FUNC
-	  || TYPE_CODE (target) == TYPE_CODE_VOID)
+	 We can show char* so we allow it to be dereferenced.  If you decide
+	 to test for it, please mind that a little magic is necessary to
+	 properly identify it: char* has TYPE_CODE == TYPE_CODE_INT and 
+	 TYPE_NAME == "char".  */
+      if (target->code () == TYPE_CODE_FUNC
+	  || target->code () == TYPE_CODE_VOID)
 	children = 0;
       else
 	children = 1;
@@ -249,12 +249,12 @@ value_struct_element_index (struct value *value, int type_index)
 
   type = check_typedef (type);
 
-  gdb_assert (TYPE_CODE (type) == TYPE_CODE_STRUCT
-	      || TYPE_CODE (type) == TYPE_CODE_UNION);
+  gdb_assert (type->code () == TYPE_CODE_STRUCT
+	      || type->code () == TYPE_CODE_UNION);
 
   try
     {
-      if (field_is_static (&TYPE_FIELD (type, type_index)))
+      if (field_is_static (&type->field (type_index)))
 	result = value_static_field (type, type_index);
       else
 	result = value_primitive_field (value, 0, type_index, type);
@@ -302,17 +302,17 @@ c_describe_child (const struct varobj *parent, int index,
     }
   adjust_value_for_child_access (&value, &type, &was_ptr, 0);
 
-  switch (TYPE_CODE (type))
+  switch (type->code ())
     {
     case TYPE_CODE_ARRAY:
       if (cname)
-	*cname = int_string (index
-			     + TYPE_LOW_BOUND (TYPE_INDEX_TYPE (type)),
+	*cname = int_string (index + type->bounds ()->low.const_val (),
 			     10, 1, 0, 0);
 
       if (cvalue && value)
 	{
-	  int real_index = index + TYPE_LOW_BOUND (TYPE_INDEX_TYPE (type));
+	  int real_index
+	    = index + type->bounds ()->low.const_val ();
 
 	  try
 	    {
@@ -327,12 +327,10 @@ c_describe_child (const struct varobj *parent, int index,
 	*ctype = get_target_type (type);
 
       if (cfull_expression)
-	*cfull_expression = 
-	  string_printf ("(%s)[%s]", parent_expression.c_str (),
-			 int_string (index
-				     + TYPE_LOW_BOUND (TYPE_INDEX_TYPE (type)),
-				     10, 1, 0, 0));
-
+	*cfull_expression = string_printf
+	  ("(%s)[%s]", parent_expression.c_str (),
+	   int_string (index + type->bounds ()->low.const_val (),
+		       10, 1, 0, 0));
 
       break;
 
@@ -343,12 +341,12 @@ c_describe_child (const struct varobj *parent, int index,
 
 	/* If the type is anonymous and the field has no name,
 	   set an appropriate name.  */
-	field_name = TYPE_FIELD_NAME (type, index);
+	field_name = type->field (index).name ();
 	if (field_name == NULL || *field_name == '\0')
 	  {
 	    if (cname)
 	      {
-		if (TYPE_CODE (TYPE_FIELD_TYPE (type, index))
+		if (type->field (index).type ()->code ()
 		    == TYPE_CODE_STRUCT)
 		  *cname = ANONYMOUS_STRUCT_NAME;
 		else
@@ -380,7 +378,7 @@ c_describe_child (const struct varobj *parent, int index,
 	  }
 
 	if (ctype)
-	  *ctype = TYPE_FIELD_TYPE (type, index);
+	  *ctype = type->field (index).type ();
       }
       break;
 
@@ -486,7 +484,7 @@ c_value_of_variable (const struct varobj *var,
   while (TYPE_IS_REFERENCE (type))
     type = check_typedef (TYPE_TARGET_TYPE (type));
 
-  switch (TYPE_CODE (type))
+  switch (type->code ())
     {
     case TYPE_CODE_STRUCT:
     case TYPE_CODE_UNION:
@@ -574,15 +572,14 @@ cplus_number_of_children (const struct varobj *var)
 
       /* It is necessary to access a real type (via RTTI).  */
       if (opts.objectprint)
-        {
-          value = var->value.get ();
-          lookup_actual_type = (TYPE_IS_REFERENCE (var->type)
-				|| TYPE_CODE (var->type) == TYPE_CODE_PTR);
-        }
+	{
+	  value = var->value.get ();
+	  lookup_actual_type = var->type->is_pointer_or_reference ();
+	}
       adjust_value_for_child_access (&value, &type, NULL, lookup_actual_type);
 
-      if (((TYPE_CODE (type)) == TYPE_CODE_STRUCT)
-	  || ((TYPE_CODE (type)) == TYPE_CODE_UNION))
+      if (((type->code ()) == TYPE_CODE_STRUCT)
+	  || ((type->code ()) == TYPE_CODE_UNION))
 	{
 	  int kids[3];
 
@@ -609,13 +606,12 @@ cplus_number_of_children (const struct varobj *var)
 
       /* It is necessary to access a real type (via RTTI).  */
       if (opts.objectprint)
-        {
+	{
 	  const struct varobj *parent = var->parent;
 
 	  value = parent->value.get ();
-	  lookup_actual_type = (TYPE_IS_REFERENCE (parent->type)
-				|| TYPE_CODE (parent->type) == TYPE_CODE_PTR);
-        }
+	  lookup_actual_type = parent->type->is_pointer_or_reference ();
+	}
       adjust_value_for_child_access (&value, &type, NULL, lookup_actual_type);
 
       cplus_class_num_children (type, kids);
@@ -649,7 +645,7 @@ cplus_class_num_children (struct type *type, int children[3])
   children[v_protected] = 0;
 
   vptr_fieldno = get_vptr_fieldno (type, &basetype);
-  for (i = TYPE_N_BASECLASSES (type); i < TYPE_NFIELDS (type); i++)
+  for (i = TYPE_N_BASECLASSES (type); i < type->num_fields (); i++)
     {
       /* If we have a virtual table pointer, omit it.  Even if virtual
 	 table pointers are not specifically marked in the debug info,
@@ -718,8 +714,7 @@ cplus_describe_child (const struct varobj *parent, int index,
 
   var = (CPLUS_FAKE_CHILD (parent)) ? parent->parent : parent;
   if (opts.objectprint)
-    lookup_actual_type = (TYPE_IS_REFERENCE (var->type)
-			  || TYPE_CODE (var->type) == TYPE_CODE_PTR);
+    lookup_actual_type = var->type->is_pointer_or_reference ();
   value = var->value.get ();
   type = varobj_get_value_type (var);
   if (cfull_expression)
@@ -728,8 +723,8 @@ cplus_describe_child (const struct varobj *parent, int index,
 
   adjust_value_for_child_access (&value, &type, &was_ptr, lookup_actual_type);
 
-  if (TYPE_CODE (type) == TYPE_CODE_STRUCT
-      || TYPE_CODE (type) == TYPE_CODE_UNION)
+  if (type->code () == TYPE_CODE_STRUCT
+      || type->code () == TYPE_CODE_UNION)
     {
       const char *join = was_ptr ? "->" : ".";
 
@@ -766,15 +761,15 @@ cplus_describe_child (const struct varobj *parent, int index,
 
 	  /* If the type is anonymous and the field has no name,
 	     set an appropriate name.  */
-	  field_name = TYPE_FIELD_NAME (type, type_index);
+	  field_name = type->field (type_index).name ();
 	  if (field_name == NULL || *field_name == '\0')
 	    {
 	      if (cname)
 		{
-		  if (TYPE_CODE (TYPE_FIELD_TYPE (type, type_index))
+		  if (type->field (type_index).type ()->code ()
 		      == TYPE_CODE_STRUCT)
 		    *cname = ANONYMOUS_STRUCT_NAME;
-		  else if (TYPE_CODE (TYPE_FIELD_TYPE (type, type_index))
+		  else if (type->field (type_index).type ()->code ()
 			   == TYPE_CODE_UNION)
 		    *cname = ANONYMOUS_UNION_NAME;
 		}
@@ -785,7 +780,7 @@ cplus_describe_child (const struct varobj *parent, int index,
 	  else
 	    {
 	      if (cname)
-		*cname = TYPE_FIELD_NAME (type, type_index);
+		*cname = type->field (type_index).name ();
 
 	      if (cfull_expression)
 		*cfull_expression
@@ -797,20 +792,20 @@ cplus_describe_child (const struct varobj *parent, int index,
 	    *cvalue = value_struct_element_index (value, type_index);
 
 	  if (ctype)
-	    *ctype = TYPE_FIELD_TYPE (type, type_index);
+	    *ctype = type->field (type_index).type ();
 	}
       else if (index < TYPE_N_BASECLASSES (type))
 	{
 	  /* This is a baseclass.  */
 	  if (cname)
-	    *cname = TYPE_FIELD_NAME (type, index);
+	    *cname = type->field (index).name ();
 
 	  if (cvalue && value)
-	    *cvalue = value_cast (TYPE_FIELD_TYPE (type, index), value);
+	    *cvalue = value_cast (type->field (index).type (), value);
 
 	  if (ctype)
 	    {
-	      *ctype = TYPE_FIELD_TYPE (type, index);
+	      *ctype = type->field (index).type ();
 	    }
 
 	  if (cfull_expression)
@@ -819,10 +814,10 @@ cplus_describe_child (const struct varobj *parent, int index,
 
 	      /* Cast the parent to the base' type.  Note that in gdb,
 		 expression like 
-		         (Base1)d
+			 (Base1)d
 		 will create an lvalue, for all appearences, so we don't
 		 need to use more fancy:
-		         *(Base1*)(&d)
+			 *(Base1*)(&d)
 		 construct.
 
 		 When we are in the scope of the base class or of one
@@ -832,7 +827,7 @@ cplus_describe_child (const struct varobj *parent, int index,
 		 'class' keyword.  See PR mi/11912  */
 	      *cfull_expression = string_printf ("(%s(class %s%s) %s)",
 						 ptr,
-						 TYPE_FIELD_NAME (type, index),
+						 type->field (index).name (),
 						 ptr,
 						 parent_expression);
 	    }

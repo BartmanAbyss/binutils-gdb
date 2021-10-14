@@ -1,5 +1,5 @@
 /* x86 specific support for ELF
-   Copyright (C) 2017-2020 Free Software Foundation, Inc.
+   Copyright (C) 2017-2021 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -17,6 +17,9 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
    MA 02110-1301, USA.  */
+
+/* Don't generate unused section symbols.  */
+#define TARGET_KEEP_UNUSED_SECTION_SYMBOLS false
 
 #include "sysdep.h"
 #include "bfd.h"
@@ -133,9 +136,9 @@
 	|| ((ELF_ST_VISIBILITY ((EH)->elf.other) == STV_DEFAULT \
 	     && (!(RESOLVED_TO_ZERO) || PC32_RELOC)) \
 	    || (EH)->elf.root.type != bfd_link_hash_undefweak)) \
-    && ((!X86_PCREL_TYPE_P (R_TYPE) \
-	 && !X86_SIZE_TYPE_P (R_TYPE)) \
-	 || ! SYMBOL_CALLS_LOCAL ((INFO), &(EH)->elf))) \
+    && ((!X86_PCREL_TYPE_P (R_TYPE) && !X86_SIZE_TYPE_P (R_TYPE)) \
+	|| ! SYMBOL_CALLS_LOCAL ((INFO), \
+				 (struct elf_link_hash_entry *) (EH)))) \
    || (ELIMINATE_COPY_RELOCS \
        && !bfd_link_pic (INFO) \
        && (EH) != NULL \
@@ -250,9 +253,6 @@ struct elf_x86_link_hash_entry
 {
   struct elf_link_hash_entry elf;
 
-  /* Track dynamic relocs copied for this symbol.  */
-  struct elf_dyn_relocs *dyn_relocs;
-
   unsigned char tls_type;
 
   /* Bit 0: Symbol has no GOT nor PLT relocations.
@@ -278,6 +278,10 @@ struct elf_x86_link_hash_entry
 
   /* TRUE if symbol is defined by linker.  */
   unsigned int linker_def : 1;
+
+  /* TRUE if symbol is referenced by a non-GOT/non-PLT relocation in a
+     relocatable object file without indirect external access marker.  */
+  unsigned int non_got_ref_without_indirect_extern_access : 1;
 
   /* TRUE if symbol is referenced by R_386_GOTOFF relocation.  This is
      only used by i386.  */
@@ -439,14 +443,6 @@ struct elf_x86_plt_layout
 #define elf_x86_hash_entry(ent) \
   ((struct elf_x86_link_hash_entry *)(ent))
 
-enum elf_x86_target_os
-{
-  is_normal,
-  is_solaris,
-  is_vxworks,
-  is_nacl
-};
-
 /* x86 ELF linker hash table.  */
 
 struct elf_x86_link_hash_table
@@ -479,9 +475,6 @@ struct elf_x86_link_hash_table
   /* The amount of space used by the jump slots in the GOT.  */
   bfd_vma sgotplt_jump_table_size;
 
-  /* Small local sym cache.  */
-  struct sym_cache sym_cache;
-
   /* _TLS_MODULE_BASE_ symbol.  */
   struct bfd_link_hash_entry *tls_module_base;
 
@@ -489,18 +482,10 @@ struct elf_x86_link_hash_table
   htab_t loc_hash_table;
   void * loc_hash_memory;
 
-  /* The offset into sgot of the GOT entry used by the PLT entry
-     above.  */
-  bfd_vma tlsdesc_got;
-
   /* The index of the next R_X86_64_JUMP_SLOT entry in .rela.plt.  */
   bfd_vma next_jump_slot_index;
   /* The index of the next R_X86_64_IRELATIVE entry in .rela.plt.  */
   bfd_vma next_irelative_index;
-
-  /* TRUE if there are dynamic relocs against IFUNC symbols that apply
-     to read-only sections.  */
-  bfd_boolean readonly_dynrelocs_against_ifunc;
 
   /* The (unloaded but important) .rel.plt.unloaded section on VxWorks.
      This is used for i386 only.  */
@@ -509,12 +494,6 @@ struct elf_x86_link_hash_table
   /* The index of the next unused R_386_TLS_DESC slot in .rel.plt.  This
      is only used for i386.  */
   bfd_vma next_tls_desc_index;
-
-  /* The offset into splt of the PLT entry for the TLS descriptor
-     resolver.  Special values are 0, if not necessary (or not found
-     to be necessary yet), and -1 if needed but not determined
-     yet.  This is only used for x86-64.  */
-  bfd_vma tlsdesc_plt;
 
    /* Value used to fill the unused bytes of the first PLT entry.  This
       is only used for i386.  */
@@ -533,13 +512,8 @@ struct elf_x86_link_hash_table
 
   bfd_vma (*r_info) (bfd_vma, bfd_vma);
   bfd_vma (*r_sym) (bfd_vma);
-  bfd_boolean (*is_reloc_section) (const char *);
-  enum elf_target_id target_id;
-  enum elf_x86_target_os target_os;
+  bool (*is_reloc_section) (const char *);
   unsigned int sizeof_reloc;
-  unsigned int dt_reloc;
-  unsigned int dt_reloc_sz;
-  unsigned int dt_reloc_ent;
   unsigned int got_entry_size;
   unsigned int pointer_r_type;
   int dynamic_interpreter_size;
@@ -549,18 +523,6 @@ struct elf_x86_link_hash_table
   /* Options passed from the linker.  */
   struct elf_linker_x86_params *params;
 };
-
-/* Architecture-specific backend data for x86.  */
-
-struct elf_x86_backend_data
-{
-  /* Target system.  */
-  enum elf_x86_target_os target_os;
-};
-
-#define get_elf_x86_backend_data(abfd) \
-  ((const struct elf_x86_backend_data *) \
-   get_elf_backend_data (abfd)->arch_data)
 
 struct elf_x86_init_table
 {
@@ -632,9 +594,9 @@ struct elf_x86_plt
 #define is_x86_elf(bfd, htab)				\
   (bfd_get_flavour (bfd) == bfd_target_elf_flavour	\
    && elf_tdata (bfd) != NULL				\
-   && elf_object_id (bfd) == (htab)->target_id)
+   && elf_object_id (bfd) == (htab)->elf.hash_table_id)
 
-extern bfd_boolean _bfd_x86_elf_mkobject
+extern bool _bfd_x86_elf_mkobject
   (bfd *);
 
 extern void _bfd_x86_elf_set_tls_module_base
@@ -643,12 +605,12 @@ extern void _bfd_x86_elf_set_tls_module_base
 extern bfd_vma _bfd_x86_elf_dtpoff_base
   (struct bfd_link_info *);
 
-extern bfd_boolean _bfd_x86_elf_readonly_dynrelocs
+extern bool _bfd_x86_elf_readonly_dynrelocs
   (struct elf_link_hash_entry *, void *);
 
 extern struct elf_link_hash_entry * _bfd_elf_x86_get_local_sym_hash
   (struct elf_x86_link_hash_table *, bfd *, const Elf_Internal_Rela *,
-   bfd_boolean);
+   bool);
 
 extern hashval_t _bfd_x86_elf_local_htab_hash
   (const void *);
@@ -665,44 +627,43 @@ extern struct bfd_link_hash_table * _bfd_x86_elf_link_hash_table_create
 extern int _bfd_x86_elf_compare_relocs
   (const void *, const void *);
 
-extern bfd_boolean _bfd_x86_elf_link_check_relocs
+extern bool _bfd_x86_elf_link_check_relocs
   (bfd *, struct bfd_link_info *);
 
-extern bfd_boolean _bfd_elf_x86_valid_reloc_p
+extern bool _bfd_elf_x86_valid_reloc_p
   (asection *, struct bfd_link_info *, struct elf_x86_link_hash_table *,
    const Elf_Internal_Rela *, struct elf_link_hash_entry *,
-   Elf_Internal_Sym *, Elf_Internal_Shdr *, bfd_boolean *);
+   Elf_Internal_Sym *, Elf_Internal_Shdr *, bool *);
 
-extern bfd_boolean _bfd_x86_elf_size_dynamic_sections
+extern bool _bfd_x86_elf_size_dynamic_sections
   (bfd *, struct bfd_link_info *);
 
 extern struct elf_x86_link_hash_table *_bfd_x86_elf_finish_dynamic_sections
   (bfd *, struct bfd_link_info *);
 
-extern bfd_boolean _bfd_x86_elf_always_size_sections
+extern bool _bfd_x86_elf_always_size_sections
   (bfd *, struct bfd_link_info *);
 
 extern void _bfd_x86_elf_merge_symbol_attribute
-  (struct elf_link_hash_entry *, const Elf_Internal_Sym *,
-   bfd_boolean, bfd_boolean);
+  (struct elf_link_hash_entry *, unsigned int, bool, bool);
 
 extern void _bfd_x86_elf_copy_indirect_symbol
   (struct bfd_link_info *, struct elf_link_hash_entry *,
    struct elf_link_hash_entry *);
 
-extern bfd_boolean _bfd_x86_elf_fixup_symbol
+extern bool _bfd_x86_elf_fixup_symbol
   (struct bfd_link_info *, struct elf_link_hash_entry *);
 
-extern bfd_boolean _bfd_x86_elf_hash_symbol
+extern bool _bfd_x86_elf_hash_symbol
   (struct elf_link_hash_entry *);
 
-extern bfd_boolean _bfd_x86_elf_adjust_dynamic_symbol
+extern bool _bfd_x86_elf_adjust_dynamic_symbol
   (struct bfd_link_info *, struct elf_link_hash_entry *);
 
 extern void _bfd_x86_elf_hide_symbol
-  (struct bfd_link_info *, struct elf_link_hash_entry *, bfd_boolean);
+  (struct bfd_link_info *, struct elf_link_hash_entry *, bool);
 
-extern bfd_boolean _bfd_x86_elf_link_symbol_references_local
+extern bool _bfd_x86_elf_link_symbol_references_local
   (struct bfd_link_info *, struct elf_link_hash_entry *);
 
 extern asection * _bfd_x86_elf_gc_mark_hook
@@ -716,7 +677,7 @@ extern long _bfd_x86_elf_get_synthetic_symtab
 extern enum elf_property_kind _bfd_x86_elf_parse_gnu_properties
   (bfd *, unsigned int, bfd_byte *, unsigned int);
 
-extern bfd_boolean _bfd_x86_elf_merge_gnu_properties
+extern bool _bfd_x86_elf_merge_gnu_properties
   (struct bfd_link_info *, bfd *, bfd *, elf_property *, elf_property *);
 
 extern void _bfd_x86_elf_link_fixup_gnu_properties
@@ -728,6 +689,10 @@ extern bfd * _bfd_x86_elf_link_setup_gnu_properties
 extern void _bfd_x86_elf_link_fixup_ifunc_symbol
   (struct bfd_link_info *, struct elf_x86_link_hash_table *,
    struct elf_link_hash_entry *, Elf_Internal_Sym *sym);
+
+extern void _bfd_x86_elf_link_report_relative_reloc
+  (struct bfd_link_info *, asection *, struct elf_link_hash_entry *,
+   Elf_Internal_Sym *, const char *, const void *);
 
 #define bfd_elf64_mkobject \
   _bfd_x86_elf_mkobject

@@ -1,6 +1,6 @@
 /* Caching of GDB/DWARF index files.
 
-   Copyright (C) 1994-2020 Free Software Foundation, Inc.
+   Copyright (C) 1994-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -37,7 +37,7 @@
 static bool debug_index_cache = false;
 
 /* The index cache directory, used for "set/show index-cache directory".  */
-static char *index_cache_directory = NULL;
+static std::string index_cache_directory;
 
 /* See dwarf-index.cache.h.  */
 index_cache global_index_cache;
@@ -87,9 +87,9 @@ index_cache::disable ()
 /* See dwarf-index-cache.h.  */
 
 void
-index_cache::store (struct dwarf2_per_objfile *dwarf2_per_objfile)
+index_cache::store (dwarf2_per_objfile *per_objfile)
 {
-  objfile *obj = dwarf2_per_objfile->objfile;
+  objfile *obj = per_objfile->objfile;
 
   if (!enabled ())
     return;
@@ -108,7 +108,7 @@ index_cache::store (struct dwarf2_per_objfile *dwarf2_per_objfile)
 
   /* Get build id of dwz file, if present.  */
   gdb::optional<std::string> dwz_build_id_str;
-  const dwz_file *dwz = dwarf2_get_dwz_file (dwarf2_per_objfile);
+  const dwz_file *dwz = dwarf2_get_dwz_file (per_objfile->per_bfd);
   const char *dwz_build_id_ptr = NULL;
 
   if (dwz != nullptr)
@@ -144,12 +144,12 @@ index_cache::store (struct dwarf2_per_objfile *dwarf2_per_objfile)
 	}
 
       if (debug_index_cache)
-        printf_unfiltered ("index cache: writing index cache for objfile %s\n",
+	printf_unfiltered ("index cache: writing index cache for objfile %s\n",
 			   objfile_name (obj));
 
       /* Write the index itself to the directory, using the build id as the
-         filename.  */
-      write_psymtabs_to_index (dwarf2_per_objfile, m_dir.c_str (),
+	 filename.  */
+      write_psymtabs_to_index (per_objfile, m_dir.c_str (),
 			       build_id_str.c_str (), dwz_build_id_ptr,
 			       dw_index_kind::GDB_INDEX);
     }
@@ -198,7 +198,7 @@ index_cache::lookup_gdb_index (const bfd_build_id *build_id,
   try
     {
       if (debug_index_cache)
-        printf_unfiltered ("index cache: trying to read %s\n",
+	printf_unfiltered ("index cache: trying to read %s\n",
 			   filename.c_str ());
 
       /* Try to map that file.  */
@@ -259,7 +259,7 @@ show_index_cache_command (const char *arg, int from_tty)
   auto restore_flag = make_scoped_restore (&in_show_index_cache_command, true);
 
   /* Call all "show index-cache" subcommands.  */
-  cmd_show_list (show_index_cache_prefix_list, from_tty, "");
+  cmd_show_list (show_index_cache_prefix_list, from_tty);
 
   printf_unfiltered ("\n");
   printf_unfiltered
@@ -290,9 +290,9 @@ set_index_cache_directory_command (const char *arg, int from_tty,
 				   cmd_list_element *element)
 {
   /* Make sure the index cache directory is absolute and tilde-expanded.  */
-  gdb::unique_xmalloc_ptr<char> abs (gdb_abspath (index_cache_directory));
-  xfree (index_cache_directory);
-  index_cache_directory = abs.release ();
+  gdb::unique_xmalloc_ptr<char> abs
+    = gdb_abspath (index_cache_directory.c_str ());
+  index_cache_directory = abs.get ();
   global_index_cache.set_directory (index_cache_directory);
 }
 
@@ -325,7 +325,7 @@ _initialize_index_cache ()
   std::string cache_dir = get_standard_cache_dir ();
   if (!cache_dir.empty ())
     {
-      index_cache_directory = xstrdup (cache_dir.c_str ());
+      index_cache_directory = cache_dir;
       global_index_cache.set_directory (std::move (cache_dir));
     }
   else
@@ -335,12 +335,12 @@ _initialize_index_cache ()
   add_basic_prefix_cmd ("index-cache", class_files,
 			_("Set index-cache options."),
 			&set_index_cache_prefix_list,
-			"set index-cache ", false, &setlist);
+			false, &setlist);
 
   /* show index-cache */
   add_prefix_cmd ("index-cache", class_files, show_index_cache_command,
 		  _("Show index-cache options."), &show_index_cache_prefix_list,
-		  "show index-cache ", false, &showlist);
+		  false, &showlist);
 
   /* set index-cache on */
   add_cmd ("on", class_files, set_index_cache_on_command,

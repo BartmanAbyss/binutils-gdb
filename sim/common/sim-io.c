@@ -1,6 +1,6 @@
 /* The common simulator framework for GDB, the GNU Debugger.
 
-   Copyright 2002-2020 Free Software Foundation, Inc.
+   Copyright 2002-2021 Free Software Foundation, Inc.
 
    Contributed by Andrew Cagney and Red Hat.
 
@@ -19,9 +19,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
+/* This must come before any other includes.  */
+#include "defs.h"
 
 #include "sim-main.h"
 #include "sim-io.h"
+#include "sim/callback.h"
 #include "targ-vals.h"
 
 #include <errno.h>
@@ -34,6 +37,8 @@
 #endif
 
 #include <stdlib.h>
+
+#undef open
 
 /* Define the rate at which the simulator should poll the host
    for a quit. */
@@ -68,11 +73,10 @@ sim_io_unlink (SIM_DESC sd,
 }
 
 
-long
-sim_io_time (SIM_DESC sd,
-	     long *t)
+int64_t
+sim_io_time (SIM_DESC sd)
 {
-  return STATE_CALLBACK (sd)->time (STATE_CALLBACK (sd), t);
+  return STATE_CALLBACK (sd)->time (STATE_CALLBACK (sd));
 }
 
 
@@ -212,10 +216,10 @@ sim_io_open (SIM_DESC sd,
 }
 
 
-int
+int64_t
 sim_io_lseek (SIM_DESC sd,
 	      int fd,
-	      long off,
+	      int64_t off,
 	      int way)
 {
   return STATE_CALLBACK (sd)->lseek (STATE_CALLBACK (sd), fd, off, way);
@@ -305,7 +309,9 @@ sim_io_error (SIM_DESC sd,
     va_start (ap, fmt);
     STATE_CALLBACK (sd)->evprintf_filtered (STATE_CALLBACK (sd), fmt, ap);
     va_end (ap);
-    STATE_CALLBACK (sd)->error (STATE_CALLBACK (sd), "");
+    /* Printing a space here avoids empty printf compiler warnings.  Not ideal,
+       but we want error's side-effect where it halts processing.  */
+    STATE_CALLBACK (sd)->error (STATE_CALLBACK (sd), " ");
   }
 }
 
@@ -344,7 +350,7 @@ sim_io_poll_read (SIM_DESC sd,
 		  char *buf,
 		  int sizeof_buf)
 {
-#if defined(O_NDELAY) && defined(F_GETFL) && defined(F_SETFL)
+#if defined(O_NONBLOCK) && defined(F_GETFL) && defined(F_SETFL)
   int fd = STATE_CALLBACK (sd)->fdmap[sim_io_fd];
   int flags;
   int status;
@@ -359,7 +365,7 @@ sim_io_poll_read (SIM_DESC sd,
       return 0;
     }
   /* temp, disable blocking IO */
-  status = fcntl (fd, F_SETFL, flags | O_NDELAY);
+  status = fcntl (fd, F_SETFL, flags | O_NONBLOCK);
   if (status == -1)
     {
       perror ("sim_io_read_stdin");

@@ -36,9 +36,15 @@
 /* Define to BFD's default target vector. */
 #undef DEFAULT_BFD_VEC
 
+/* Handle .ctf type-info sections */
+#undef ENABLE_LIBCTF
+
 /* Define to 1 if translation of program messages to the user's native
    language is requested. */
 #undef ENABLE_NLS
+
+/* The .gdbearlyinit filename. */
+#undef GDBEARLYINIT
 
 /* The .gdbinit filename. */
 #undef GDBINIT
@@ -89,10 +95,6 @@
 
 /* define if the compiler supports basic C++11 syntax */
 #undef HAVE_CXX11
-
-/* Define to 1 if you have the declaration of `ADDR_NO_RANDOMIZE', and to 0 if
-   you don't. */
-#undef HAVE_DECL_ADDR_NO_RANDOMIZE
 
 /* Define to 1 if you have the declaration of `asprintf', and to 0 if you
    don't. */
@@ -160,6 +162,12 @@
 /* Define to 1 if your system has the etext variable. */
 #undef HAVE_ETEXT
 
+/* Define to 1 if execinfo.h backtrace functions are available. */
+#undef HAVE_EXECINFO_BACKTRACE
+
+/* Define to 1 if you have the <execinfo.h> header file. */
+#undef HAVE_EXECINFO_H
+
 /* Define to 1 if you have the `fdwalk' function. */
 #undef HAVE_FDWALK
 
@@ -208,11 +216,8 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* Define to 1 if your system has the kinfo_getfile function. */
+/* Define to 1 if you have the `kinfo_getfile' function. */
 #undef HAVE_KINFO_GETFILE
-
-/* Define to 1 if your system has the kinfo_getvmmap function. */
-#undef HAVE_KINFO_GETVMMAP
 
 /* Define if you have <langinfo.h> and nl_langinfo(CODESET). */
 #undef HAVE_LANGINFO_CODESET
@@ -223,11 +228,17 @@
 /* Define if you have the babeltrace library. */
 #undef HAVE_LIBBABELTRACE
 
+/* Define if libbacktrace is being used. */
+#undef HAVE_LIBBACKTRACE
+
 /* Define to 1 if debuginfod is enabled. */
 #undef HAVE_LIBDEBUGINFOD
 
 /* Define if you have the expat library. */
 #undef HAVE_LIBEXPAT
+
+/* Define if you have the gmp library. */
+#undef HAVE_LIBGMP
 
 /* Define to 1 if you have the `libiconvlist' function. */
 #undef HAVE_LIBICONVLIST
@@ -294,9 +305,6 @@
 
 /* Define to 1 if you have the <nlist.h> header file. */
 #undef HAVE_NLIST_H
-
-/* Define if you support the personality syscall. */
-#undef HAVE_PERSONALITY
 
 /* Define to 1 if you have the `pipe' function. */
 #undef HAVE_PIPE
@@ -415,6 +423,9 @@
 /* Define to 1 if you have the `sigsetmask' function. */
 #undef HAVE_SIGSETMASK
 
+/* Define to 1 if you have the `sigtimedwait' function. */
+#undef HAVE_SIGTIMEDWAIT
+
 /* Define to 1 if you have the `socketpair' function. */
 #undef HAVE_SOCKETPAIR
 
@@ -486,6 +497,9 @@
 
 /* Define to 1 if you have the <sys/poll.h> header file. */
 #undef HAVE_SYS_POLL_H
+
+/* Define to 1 if you have the <sys/procctl.h> header file. */
+#undef HAVE_SYS_PROCCTL_H
 
 /* Define to 1 if you have the <sys/procfs.h> header file. */
 #undef HAVE_SYS_PROCFS_H
@@ -564,6 +578,9 @@
 
 /* Define to 1 if you have the `wresize' function. */
 #undef HAVE_WRESIZE
+
+/* Define to 1 if you have the <ws2tcpip.h> header file. */
+#undef HAVE_WS2TCPIP_H
 
 /* Define to 1 if you have the `XML_StopParser' function. */
 #undef HAVE_XML_STOPPARSER
@@ -716,9 +733,6 @@
 /* Define if <thread_db.h> has the TD_VERSION error code. */
 #undef THREAD_DB_HAS_TD_VERSION
 
-/* Define to 1 if the regex included in libiberty should be used. */
-#undef USE_INCLUDED_REGEX
-
 /* Enable extensions on AIX 3, Interix.  */
 #ifndef _ALL_SOURCE
 # undef _ALL_SOURCE
@@ -792,6 +806,9 @@
 
 /* Define to 1 if you need to in order for `stat' and other things to work. */
 #undef _POSIX_SOURCE
+
+/* Use structured /proc on Solaris. */
+#undef _STRUCTURED_PROC
 
 /* Define to empty if `const' does not conform to ANSI C. */
 #undef const

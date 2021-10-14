@@ -1,6 +1,6 @@
 /* DWARF 2 debugging format support for GDB.
 
-   Copyright (C) 1994-2020 Free Software Foundation, Inc.
+   Copyright (C) 1994-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -162,13 +162,6 @@ struct line_header
      header.  These point into dwarf2_per_objfile->line_buffer.  */
   const gdb_byte *statement_program_start {}, *statement_program_end {};
 
-  /* Return the full name of file number I in this object's file name
-     table.  Use COMP_DIR as the name of the current directory of the
-     compilation.  The result is allocated using xmalloc; the caller
-     is responsible for freeing it.  */
-  gdb::unique_xmalloc_ptr<char> file_full_name (int file,
-						const char *comp_dir) const;
-
   /* Return file name relative to the compilation directory of file
      number I in this object's file name table.  The result is
      allocated using xmalloc; the caller is responsible for freeing
@@ -204,9 +197,7 @@ file_entry::include_dir (const line_header *lh) const
    and must not be freed.  */
 
 extern line_header_up dwarf_decode_line_header
-  (sect_offset sect_off, bool is_dwz,
-   struct dwarf2_per_objfile *dwarf2_per_objfile,
-   struct dwarf2_section_info *section,
-   const struct comp_unit_head *cu_header);
+  (sect_offset sect_off, bool is_dwz, dwarf2_per_objfile *per_objfile,
+   struct dwarf2_section_info *section, const struct comp_unit_head *cu_header);
 
 #endif /* DWARF2_LINE_HEADER_H */

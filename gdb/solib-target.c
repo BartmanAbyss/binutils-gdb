@@ -1,6 +1,6 @@
 /* Definitions for targets which report shared library events.
 
-   Copyright (C) 2007-2020 Free Software Foundation, Inc.
+   Copyright (C) 2007-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -25,6 +25,7 @@
 #include "target.h"
 #include "solib-target.h"
 #include <vector>
+#include "inferior.h"
 
 /* Private data for each loaded library.  */
 struct lm_info_target : public lm_info_base
@@ -233,8 +234,8 @@ solib_target_current_sos (void)
 
   /* Fetch the list of shared libraries.  */
   gdb::optional<gdb::char_vector> library_document
-    = target_read_stralloc (current_top_target (), TARGET_OBJECT_LIBRARIES,
-			    NULL);
+    = target_read_stralloc (current_inferior ()->top_target (),
+			    TARGET_OBJECT_LIBRARIES, NULL);
   if (!library_document)
     return NULL;
 
@@ -364,9 +365,9 @@ Could not relocate shared library \"%s\": wrong number of ALLOC sections"),
 	}
       else if (!li->segment_bases.empty ())
 	{
-	  struct symfile_segment_data *data;
+	  symfile_segment_data_up data
+	    = get_symfile_segment_data (so->abfd);
 
-	  data = get_symfile_segment_data (so->abfd);
 	  if (data == NULL)
 	    warning (_("\
 Could not relocate shared library \"%s\": no segments"), so->so_name);
@@ -375,7 +376,7 @@ Could not relocate shared library \"%s\": no segments"), so->so_name);
 	      ULONGEST orig_delta;
 	      int i;
 
-	      if (!symfile_map_offsets_to_segments (so->abfd, data,
+	      if (!symfile_map_offsets_to_segments (so->abfd, data.get (),
 						    li->offsets,
 						    li->segment_bases.size (),
 						    li->segment_bases.data ()))
@@ -386,9 +387,9 @@ Could not relocate shared library \"%s\": bad offsets"), so->so_name);
 		 "info sharedlibrary".  Report any consecutive segments
 		 which were relocated as a single unit.  */
 	      gdb_assert (li->segment_bases.size () > 0);
-	      orig_delta = li->segment_bases[0] - data->segment_bases[0];
+	      orig_delta = li->segment_bases[0] - data->segments[0].base;
 
-	      for (i = 1; i < data->num_segments; i++)
+	      for (i = 1; i < data->segments.size (); i++)
 		{
 		  /* If we have run out of offsets, assume all
 		     remaining segments have the same offset.  */
@@ -397,18 +398,16 @@ Could not relocate shared library \"%s\": bad offsets"), so->so_name);
 
 		  /* If this segment does not have the same offset, do
 		     not include it in the library's range.  */
-		  if (li->segment_bases[i] - data->segment_bases[i]
+		  if (li->segment_bases[i] - data->segments[i].base
 		      != orig_delta)
 		    break;
 		}
 
 	      so->addr_low = li->segment_bases[0];
-	      so->addr_high = (data->segment_bases[i - 1]
-			       + data->segment_sizes[i - 1]
+	      so->addr_high = (data->segments[i - 1].base
+			       + data->segments[i - 1].size
 			       + orig_delta);
 	      gdb_assert (so->addr_low <= so->addr_high);
-
-	      free_symfile_segment_data (data);
 	    }
 	}
     }

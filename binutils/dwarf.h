@@ -1,5 +1,5 @@
 /* dwarf.h - DWARF support header file
-   Copyright (C) 2005-2020 Free Software Foundation, Inc.
+   Copyright (C) 2005-2021 Free Software Foundation, Inc.
 
    This file is part of GNU Binutils.
 
@@ -120,6 +120,7 @@ enum dwarf_section_display_enum
   dwp_tu_index,
   gnu_debuglink,
   gnu_debugaltlink,
+  debug_sup,
   separate_debug_str,
   max
 };
@@ -127,11 +128,13 @@ enum dwarf_section_display_enum
 struct dwarf_section
 {
   /* A debug section has a different name when it's stored compressed
-     or not.  COMPRESSED_NAME and UNCOMPRESSED_NAME are the two
+     or not.  XCOFF DWARF section also have a special name.
+     COMPRESSED_NAME, UNCOMPRESSED_NAME and XCOFF_NAME are the three
      possibilities.  NAME is set to whichever one is used for this
      input file, as determined by load_debug_section().  */
   const char *                     uncompressed_name;
   const char *                     compressed_name;
+  const char *                     xcoff_name;
   const char *                     name;
   /* If non-NULL then FILENAME is the name of the separate debug info
      file containing the section.  */
@@ -143,18 +146,16 @@ struct dwarf_section
   /* Used by clients to help them implement the reloc_at callback.  */
   void *                           reloc_info;
   unsigned long                    num_relocs;
-  /* A spare field for random use.  */
-  void *                           user_data;
 };
 
 /* A structure containing the name of a debug section
    and a pointer to a function that can decode it.  */
 struct dwarf_section_display
 {
-  struct dwarf_section  section;
-  int (*                display) (struct dwarf_section *, void *);
-  int *                 enabled;
-  bfd_boolean           relocate;
+  struct dwarf_section section;
+  int (*display) (struct dwarf_section *, void *);
+  int *enabled;
+  bool relocate;
 };
 
 extern struct dwarf_section_display debug_displays [];
@@ -169,7 +170,7 @@ typedef struct
   dwarf_vma	 cu_offset;
   dwarf_vma	 base_address;
   /* This field is filled in when reading the attribute DW_AT_GNU_addr_base and
-     is used with the form DW_AT_GNU_FORM_addr_index.  */
+     is used with the form DW_FORM_GNU_addr_index.  */
   dwarf_vma	 addr_base;
   /* This field is filled in when reading the attribute DW_AT_GNU_ranges_base and
      is used when calculating ranges.  */
@@ -211,6 +212,7 @@ extern int do_debug_frames;
 extern int do_debug_frames_interp;
 extern int do_debug_macinfo;
 extern int do_debug_str;
+extern int do_debug_str_offsets;
 extern int do_debug_loc;
 extern int do_gdb_index;
 extern int do_trace_info;
@@ -221,7 +223,7 @@ extern int do_debug_cu_index;
 extern int do_wide;
 extern int do_debug_links;
 extern int do_follow_links;
-extern bfd_boolean do_checks;
+extern bool do_checks;
 
 extern int dwarf_cutoff_level;
 extern unsigned long dwarf_start_die;
@@ -232,11 +234,11 @@ extern void init_dwarf_regnames_by_elf_machine_code (unsigned int);
 extern void init_dwarf_regnames_by_bfd_arch_and_mach (enum bfd_architecture arch,
 						      unsigned long mach);
 
-extern bfd_boolean  load_debug_section (enum dwarf_section_display_enum, void *);
-extern void         free_debug_section (enum dwarf_section_display_enum);
-extern bfd_boolean  load_separate_debug_files (void *, const char *);
-extern void         close_debug_file (void *);
-extern void *       open_debug_file (const char *);
+extern bool load_debug_section (enum dwarf_section_display_enum, void *);
+extern void free_debug_section (enum dwarf_section_display_enum);
+extern bool load_separate_debug_files (void *, const char *);
+extern void close_debug_file (void *);
+extern void *open_debug_file (const char *);
 
 extern void free_debug_memory (void);
 
@@ -254,29 +256,29 @@ extern void * xcrealloc (void *, size_t, size_t);
 /* A callback into the client.  Returns TRUE if there is a
    relocation against the given debug section at the given
    offset.  */
-extern bfd_boolean reloc_at (struct dwarf_section *, dwarf_vma);
+extern bool reloc_at (struct dwarf_section *, dwarf_vma);
 
 extern dwarf_vma read_leb128 (unsigned char *, const unsigned char *const,
-			      bfd_boolean, unsigned int *, int *);
+			      bool, unsigned int *, int *);
 
 #if HAVE_LIBDEBUGINFOD
 extern unsigned char * get_build_id (void *);
 #endif
 
 static inline void
-report_leb_status (int status, const char *file, unsigned long lnum)
+report_leb_status (int status)
 {
   if ((status & 1) != 0)
-    error (_("%s:%lu: end of data encountered whilst reading LEB\n"), file, lnum);
+    error (_("end of data encountered whilst reading LEB\n"));
   else if ((status & 2) != 0)
-    error (_("%s:%lu: read LEB value is too large to store in destination variable\n"), file, lnum);
+    error (_("read LEB value is too large to store in destination variable\n"));
 }
 
 #define SKIP_ULEB(start, end)					\
   do								\
     {								\
       unsigned int _len;					\
-      read_leb128 (start, end, FALSE, &_len, NULL);		\
+      read_leb128 (start, end, false, &_len, NULL);		\
       start += _len;						\
     }								\
   while (0)
@@ -285,7 +287,7 @@ report_leb_status (int status, const char *file, unsigned long lnum)
   do								\
     {								\
       unsigned int _len;					\
-      read_leb128 (start, end, TRUE, &_len, NULL);		\
+      read_leb128 (start, end, true, &_len, NULL);		\
       start += _len;						\
     }								\
   while (0)
@@ -297,12 +299,12 @@ report_leb_status (int status, const char *file, unsigned long lnum)
       unsigned int _len;					\
       int _status;						\
 								\
-      _val = read_leb128 (start, end, FALSE, &_len, &_status);	\
+      _val = read_leb128 (start, end, false, &_len, &_status);	\
       start += _len;						\
       (var) = _val;						\
       if ((var) != _val)					\
 	_status |= 2;						\
-      report_leb_status (_status, __FILE__, __LINE__);		\
+      report_leb_status (_status);				\
     }								\
   while (0)
 
@@ -313,11 +315,11 @@ report_leb_status (int status, const char *file, unsigned long lnum)
       unsigned int _len;					\
       int _status;						\
 								\
-      _val = read_leb128 (start, end, TRUE, &_len, &_status);	\
+      _val = read_leb128 (start, end, true, &_len, &_status);	\
       start += _len;						\
       (var) = _val;						\
       if ((var) != _val)					\
 	_status |= 2;						\
-      report_leb_status (_status, __FILE__, __LINE__);		\
+      report_leb_status (_status);				\
     }								\
   while (0)

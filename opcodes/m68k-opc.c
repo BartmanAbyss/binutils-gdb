@@ -1,5 +1,5 @@
 /* Opcode table for m680[012346]0/m6888[12]/m68851/mcf5200.
-   Copyright (C) 1989-2020 Free Software Foundation, Inc.
+   Copyright (C) 1989-2021 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -235,8 +235,8 @@ const struct m68k_opcode m68k_opcodes[] =
 {"chk2w", 4, 	two(0001300,0004000),	two(0177700,07777), "!sR1", m68020up | cpu32 | fido_a, dis_nonbranch },
 {"chk2l", 4, 	two(0002300,0004000),	two(0177700,07777), "!sR1", m68020up | cpu32 | fido_a, dis_nonbranch },
 
-{"chkl", 2,	one(0040400),		one(0170700), ";lDd", m68000up, dis_nonbranch },
-{"chkw", 2,	one(0040600),		one(0170700), ";wDd", m68000up, dis_nonbranch },
+{"chkl", 2,	one(0040400),		one(0170700), ";lDd", m68020up, dis_nonbranch },
+{"chkw", 2,	one(0040600),		one(0170700), ";wDd", m68020up, dis_nonbranch },
 
 #define SCOPE_LINE (0x1 << 3)
 #define SCOPE_PAGE (0x2 << 3)

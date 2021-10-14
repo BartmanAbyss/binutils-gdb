@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2020 Free Software Foundation, Inc.
+# Copyright (C) 2012-2021 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,6 +17,10 @@
 #
 # i386 tests
 #
+if { ![istarget "i*86-*-*"] && ![istarget "x86_64-*-*"] } then {
+    return
+}
+
 proc gas_64_check { } {
     global NM
     global NMFLAGS
@@ -37,11 +41,10 @@ proc gas_bfd64_check { } {
     global AS
 
     set status [gas_host_run "$AS --help" ""]
-    return [regexp "32bit/64bit/x32" [lindex $status 1]];
+    return [regexp "32bit/64bit" [lindex $status 1]];
 }
 
-if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]]  then {
-
+if [gas_32_check] then {
     global ASFLAGS
     set old_ASFLAGS "$ASFLAGS"
     set ASFLAGS "$ASFLAGS --32"
@@ -66,6 +69,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "prefix"
     run_list_test "prefix32" "-al"
     run_dump_test "lea"
+    run_dump_test "lea16"
     run_dump_test "amd"
     run_dump_test "katmai"
     run_dump_test "jump"
@@ -83,6 +87,10 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "disp"
     run_dump_test "disp-intel"
     run_dump_test "disp32"
+    run_list_test "disp-imm-16"
+    if { [gas_bfd64_check] } {
+	run_dump_test "disp-imm-32"
+    }
     run_dump_test "vmx"
     run_dump_test "vmfunc"
     run_dump_test "smx"
@@ -91,7 +99,10 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_list_test "suffix-bad"
     run_dump_test "immed32"
     run_dump_test "equ"
+    run_list_test "equ-bad"
     run_dump_test "divide"
+    run_dump_test "quoted"
+    run_dump_test "unary"
     run_dump_test "padlock"
     run_dump_test "crx"
     run_list_test "cr-err" ""
@@ -107,7 +118,6 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_list_test "lockbad-1" "-al"
     run_dump_test "long-1"
     run_dump_test "long-1-intel"
-    run_dump_test "fp"
     run_dump_test "nops"
     run_dump_test "nops16-1"
     run_dump_test "nops-1"
@@ -130,22 +140,29 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "nops-5-i686"
     run_dump_test "nops-6"
     run_dump_test "nops-7"
+    run_dump_test "nops-8"
     run_dump_test "noreg16"
     run_list_test "noreg16"
+    run_dump_test "noreg16-data32"
     run_dump_test "noreg32"
     run_list_test "noreg32"
+    run_dump_test "noreg32-data16"
     run_list_test "movx16" "-I${srcdir}/$subdir -al"
     run_list_test "movx32" "-al"
+    run_dump_test "sizing32"
     run_dump_test "addr16"
     run_dump_test "addr32"
     run_dump_test "code16"
     run_list_test "oversized16" "-al"
+    run_dump_test "wrap32-text"
+    run_dump_test "wrap32-data"
     run_dump_test "sse4_1"
     run_dump_test "sse4_1-intel"
     run_dump_test "sse4_2"
     run_dump_test "sse4_2-intel"
     run_dump_test "crc32"
     run_dump_test "crc32-intel"
+    run_dump_test "crc32-suffix"
     run_list_test "inval-crc32" "-al"
     run_dump_test "simd"
     run_dump_test "simd-intel"
@@ -175,6 +192,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "arch-10-bdver4"
     run_dump_test "arch-13-znver1"
     run_dump_test "arch-13-znver2"
+    run_dump_test "arch-14-znver3"
     run_dump_test "arch-10-btver1"
     run_dump_test "arch-10-btver2"
     run_list_test "arch-10-1" "-march=generic32 -I${srcdir}/$subdir -al"
@@ -184,6 +202,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "arch-11"
     run_dump_test "arch-12"
     run_dump_test "arch-13"
+    run_dump_test "arch-14"
     run_dump_test "8087"
     run_dump_test "287"
     run_dump_test "387"
@@ -251,6 +270,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "evex-lig-2"
     run_dump_test "evex-wig1"
     run_dump_test "evex-wig1-intel"
+    run_dump_test "evex-no-scale-32"
     run_dump_test "sse2avx"
     run_list_test "inval-avx" "-al"
     run_list_test "inval-avx512f" "-al"
@@ -266,6 +286,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "sse-noavx"
     run_dump_test "movbe"
     run_dump_test "movbe-intel"
+    run_dump_test "movbe-suffix"
     run_list_test "inval-movbe" "-al"
     run_dump_test "ept"
     run_dump_test "ept-intel"
@@ -299,9 +320,11 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "rtm"
     run_dump_test "rtm-intel"
     run_dump_test "fma4"
+    run_dump_test "fma4-lig"
     run_dump_test "lwp"
     run_dump_test "lwp-16bit"
     run_dump_test "xop"
+    run_dump_test "xop-lig"
     run_dump_test "xop32reg"
     run_dump_test "bmi"
     run_dump_test "bmi-intel"
@@ -446,8 +469,13 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "avx512_bf16"
     run_dump_test "avx512_bf16_vl"
     run_list_test "avx512_bf16_vl-inval"
+    run_dump_test "avx-vnni"
+    run_list_test "avx-vnni-inval"
     run_list_test "sg"
     run_dump_test "clzero"
+    run_dump_test "invlpgb"
+    run_dump_test "tlbsync"
+    run_dump_test "snp"
     run_dump_test "disassem"
     run_dump_test "mwaitx-bdver4"
     run_list_test "mwaitx-reg"
@@ -472,15 +500,27 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "cldemote-intel"
     run_dump_test "movdir"
     run_dump_test "movdir-intel"
+    run_dump_test "movdir-16bit"
     run_list_test "movdir64b-reg"
     run_dump_test "enqcmd"
     run_dump_test "enqcmd-intel"
+    run_dump_test "enqcmd-16bit"
     run_list_test "enqcmd-inval"
     run_dump_test "serialize"
+    run_dump_test "tdx"
     run_dump_test "tsxldtrk"
+    run_dump_test "hreset"
     run_dump_test "vp2intersect"
     run_dump_test "vp2intersect-intel"
     run_list_test "vp2intersect-inval-bcast"
+    run_dump_test "keylocker"
+    run_dump_test "keylocker-intel"
+    run_dump_test "avx512_fp16"
+    run_dump_test "avx512_fp16-intel"
+    run_dump_test "avx512_fp16_vl"
+    run_dump_test "avx512_fp16_vl-intel"
+    run_dump_test "avx512_fp16_pseudo_ops"
+    run_list_test "avx512_fp16-inval-bcast"
     run_list_test "avx512vl-1" "-al"
     run_list_test "avx512vl-2" "-al"
     run_list_test "avx512vl-ambig"
@@ -491,6 +531,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_list_test "cet-ibt-inval"
     run_list_test "cet-shstk-inval"
     run_dump_test "pseudos"
+    run_list_test "pseudos-bad"
     run_dump_test "notrack"
     run_dump_test "notrack-intel"
     run_list_test "notrackbad" "-al"
@@ -498,6 +539,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "align-1b"
     run_list_test "inval-pseudo" "-al"
     run_dump_test "nop-1"
+    run_dump_test "nop-1-suffix"
     run_dump_test "nop-2"
     run_dump_test "optimize-1"
     run_dump_test "optimize-1a"
@@ -510,6 +552,8 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "optimize-6b"
     run_list_test "optimize-7" "-I${srcdir}/$subdir -march=+noavx2 -al"
     run_dump_test "lea-optimize"
+    run_dump_test "lea16-optimize"
+    run_dump_test "lea16-optimize2"
     run_dump_test "align-branch-1a"
     run_dump_test "align-branch-1b"
     run_dump_test "align-branch-1c"
@@ -538,10 +582,14 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     run_dump_test "lfence-ret-c"
     run_dump_test "lfence-ret-d"
     run_dump_test "lfence-byte"
+    run_dump_test "branch"
 
     # These tests require support for 8 and 16 bit relocs,
     # so we only run them for ELF and COFF targets.
-    if {[is_elf_format] || [istarget "*-*-coff*"]} then {
+    if {[is_elf_format]
+	|| [istarget "*-*-vxworks*"]
+	|| [istarget "*-*-coff*"]
+    } then {
 	run_dump_test "reloc"
 	run_dump_test "jump16"
 	run_list_test "white" "-al --listing-lhs-width=3"
@@ -557,7 +605,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
     }
 
     # ELF specific tests
-    if [is_elf_format] then {
+    if {[is_elf_format] || [istarget "*-*-vxworks*"]} then {
 	# PIC is only supported on ELF targets.
 	run_dump_test "intelpic"
 
@@ -585,15 +633,29 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
 	run_dump_test "localpic"
 	run_dump_test "debug1"
 
+	run_dump_test "dwarf2-line-1"
+	run_dump_test "dwarf2-line-2"
+	run_dump_test "dwarf2-line-3"
+	run_dump_test "dwarf2-line-4"
+	run_dump_test "dwarf4-line-1"
+	run_dump_test "dwarf5-line-1"
+	run_dump_test "dwarf5-line-2"
+	run_dump_test "dwarf5-line-3"
+	run_dump_test "dwarf5-line-4"
+
 	run_dump_test "dw2-compress-2"
 	run_dump_test "dw2-compressed-2"
 
+	run_dump_test "bad-bcast-intel"
+	run_dump_test "bad-bcast"
 	run_dump_test "bad-size"
 
 	run_dump_test "size-1"
 	run_dump_test "size-2"
 	run_dump_test "size-3"
 	run_dump_test "size-4"
+	run_dump_test "size-5a"
+	run_dump_test "size-5b"
 
 	run_dump_test "note"
 
@@ -604,6 +666,8 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
 	run_dump_test "got"
 	run_dump_test "got-no-relax"
 
+	run_dump_test "no-got"
+
 	run_dump_test "addend"
 	run_dump_test "nop-3"
 	run_dump_test "nop-4"
@@ -611,10 +675,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
 	run_dump_test "nop-6"
 	run_dump_test "unique"
 
-	run_dump_test "evex-no-scale-32"
 	run_dump_test "property-1"
-	run_dump_test "property-2"
-	run_dump_test "property-3"
 
 	if {[istarget "*-*-linux*"]} then {
 	    run_dump_test "align-branch-3"
@@ -629,7 +690,7 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
 	    run_list_test "code64-inval" "-I${srcdir}/$subdir -al"
 	}
 
-	if {![istarget "*-*-nacl*"]} then {
+	if {![istarget "*-*-vxworks*"]} then {
 	    run_dump_test "iamcu-1"
 	    run_dump_test "iamcu-2"
 	    run_dump_test "iamcu-3"
@@ -653,34 +714,56 @@ if [expr ([istarget "i*86-*-*"] ||  [istarget "x86_64-*-*"]) && [gas_32_check]] 
 }
 
 # Common tests
-if [expr [istarget "i*86-*-*"] || [istarget "x86_64-*-*"]] then {
-    if {![istarget "i*86-*-elfiamcu"] && [gas_64_check]} then {
-	run_dump_test "intel-expr"
-	run_dump_test "string-ok"
-    }
-    run_list_test "string-bad" ""
-    run_list_test "reg-bad" ""
-    run_list_test "space1" "-al"
-    run_list_test "xmmword" ""
-    run_dump_test rept
-    run_dump_test pr19498
-    run_list_test "nop-bad-1" ""
-    run_list_test "unspec" ""
-    if [is_elf_format] then {
-	run_list_test_stdin "list-1" "-al"
-	run_list_test_stdin "list-2" "-al"
-	run_list_test_stdin "list-3" "-al"
-	run_dump_test "dw2-compress-1"
-	run_dump_test "dw2-compress-3a"
-	run_dump_test "dw2-compress-3b"
-	run_dump_test "dw2-compressed-1"
-	run_dump_test "dw2-compressed-3a"
-	run_dump_test "dw2-compressed-3b"
+if {![istarget "i*86-*-elfiamcu"] && [gas_64_check]} then {
+    run_dump_test "intel-expr"
+    run_dump_test "string-ok"
+}
+run_list_test "string-bad" ""
+run_list_test "reg-bad" ""
+run_list_test "space1" "-al"
+run_list_test "xmmword" ""
+run_dump_test rept
+run_dump_test pr19498
+run_list_test "nop-bad-1" ""
+run_list_test "unspec" ""
+run_dump_test "fp"
+if {[is_elf_format] || [istarget "*-*-vxworks*"]} then {
+    run_list_test_stdin "list-1" "-al"
+    run_list_test_stdin "list-2" "-al"
+    run_list_test_stdin "list-3" "-al"
+    run_dump_test "dw2-compress-1"
+    run_dump_test "dw2-compress-3a"
+    run_dump_test "dw2-compress-3b"
+    run_dump_test "dw2-compressed-1"
+    run_dump_test "dw2-compressed-3a"
+    run_dump_test "dw2-compressed-3b"
+
+    run_dump_test "property-2"
+    run_dump_test "property-3"
+    run_dump_test "property-4"
+    run_dump_test "property-5"
+    run_dump_test "property-6"
+    run_dump_test "property-10"
+    run_dump_test "property-11"
+    run_dump_test "property-12"
+    run_dump_test "property-13"
+    run_dump_test "property-cvtpi2pd"
+    run_dump_test "property-cvtpi2ps"
+    run_dump_test "property-ldmxcsr"
+    run_dump_test "property-vldmxcsr"
+    run_dump_test "property-vzeroall"
+    run_dump_test "code16-2"
+
+    if {![istarget "*-*-dragonfly*"]
+	&& ![istarget "*-*-gnu*"]
+	&& ![istarget "*-*-freebsd*"]
+	&& ![istarget "*-*-linux*"]
+	&& ![istarget "*-*-netbsd*"]} then {
+	run_dump_test "svr4"
     }
 }
 
-if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] then {
-
+if [gas_64_check] then {
     global ASFLAGS
     set old_ASFLAGS "$ASFLAGS"
     set ASFLAGS "$ASFLAGS --64 --defsym x86_64=1 --strip-local-absolute"
@@ -689,6 +772,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86_64-intel"
     run_dump_test "x86-64-addr32"
     run_dump_test "x86-64-addr32-intel"
+    run_list_test "x86-64-addr32-bad" "-al"
     run_dump_test "x86-64-opcode"
     run_dump_test "x86-64-intel64"
     if { ! [istarget "*-*-*cygwin*"] && ![istarget "*-*-mingw*"] } then {
@@ -697,8 +781,11 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     } else {
       run_dump_test "x86-64-w64-pcrel"
     }
+    run_list_test "pcrel64" "-al"
     run_dump_test "x86-64-rip"
     run_dump_test "x86-64-rip-intel"
+    run_list_test "x86-64-rip-inval-1" "-al"
+    run_list_test "x86-64-rip-inval-2" "-al"
     run_dump_test "x86-64-stack"
     run_dump_test "x86-64-stack-intel"
     run_dump_test "x86-64-stack-suffix"
@@ -710,6 +797,8 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "movz64"
     run_dump_test "x86-64-relax-1"
     run_dump_test "svme64"
+    run_dump_test "snp64"
+    run_dump_test "invlpgb64"
     run_dump_test "x86-64-amdfam10"
     run_dump_test "x86-64-vmx"
     run_dump_test "x86-64-vmfunc"
@@ -757,14 +846,20 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_list_test "x86-64-sysenter-amd" "-mamd64"
     run_dump_test "noreg64"
     run_list_test "noreg64"
+    run_dump_test "noreg64-data16"
+    run_dump_test "noreg64-rex64"
+    run_dump_test "noreg-intel64"
+    run_list_test "noreg-intel64" "-I${srcdir}/$subdir -mintel64"
     run_list_test "movx64" "-al"
     run_list_test "cvtsi2sX"
+    run_list_test "x86-64-nosse2" "-al"
     run_dump_test "x86-64-sse4_1"
     run_dump_test "x86-64-sse4_1-intel"
     run_dump_test "x86-64-sse4_2"
     run_dump_test "x86-64-sse4_2-intel"
     run_dump_test "x86-64-crc32"
     run_dump_test "x86-64-crc32-intel"
+    run_dump_test "x86-64-crc32-suffix"
     run_list_test "x86-64-inval-crc32" "-al"
     run_dump_test "x86-64-simd"
     run_dump_test "x86-64-simd-intel"
@@ -778,6 +873,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-sib-intel"
     run_dump_test "x86-64-disp"
     run_dump_test "x86-64-disp-intel"
+    run_list_test "disp-imm-64"
     run_dump_test "intel-movs64"
     run_dump_test "intel-cmps64"
     run_dump_test "x86-64-disp32"
@@ -793,6 +889,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-arch-1"
     run_dump_test "x86-64-arch-2"
     run_dump_test "x86-64-arch-3"
+    run_dump_test "x86-64-arch-4"
     run_dump_test "x86-64-arch-2-lzcnt"
     run_dump_test "x86-64-arch-2-prefetchw"
     run_dump_test "x86-64-arch-2-bdver1"
@@ -801,6 +898,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-arch-2-bdver4"
     run_dump_test "x86-64-arch-3-znver1"
     run_dump_test "x86-64-arch-3-znver2"
+    run_dump_test "x86-64-arch-4-znver3"
     run_dump_test "x86-64-arch-2-btver1"
     run_dump_test "x86-64-arch-2-btver2"
     run_list_test "x86-64-arch-2-1" "-march=generic64 -I${srcdir}/$subdir -al"
@@ -839,6 +937,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-avx512er-intel"
     run_dump_test "x86-64-avx512pf"
     run_dump_test "x86-64-avx512pf-intel"
+    run_dump_test "x86-64-evex"
     run_dump_test "x86-64-evex-lig256"
     run_dump_test "x86-64-evex-lig512"
     run_dump_test "x86-64-evex-lig256-intel"
@@ -847,6 +946,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-evex-wig1"
     run_dump_test "x86-64-evex-wig1-intel"
     run_dump_test "x86-64-evex-wig2"
+    run_dump_test "evex-no-scale-64"
     run_dump_test "x86-64-sse2avx"
     run_list_test "x86-64-inval-avx" "-al"
     run_list_test "x86-64-inval-avx512f" "-al"
@@ -862,6 +962,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-sse-noavx"
     run_dump_test "x86-64-movbe"
     run_dump_test "x86-64-movbe-intel"
+    run_dump_test "x86-64-movbe-suffix"
     run_list_test "x86-64-inval-movbe" "-al"
     run_dump_test "x86-64-ept"
     run_dump_test "x86-64-ept-intel"
@@ -924,6 +1025,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-prefetchwt1-intel"
     run_dump_test "x86-64-se1"
     run_dump_test "x86-64-equ"
+    run_list_test "x86-64-equ-bad"
     run_dump_test "x86-64-avx512f_vl-intel"
     run_dump_test "x86-64-avx512f_vl-opts-intel"
     run_dump_test "x86-64-avx512f_vl-opts"
@@ -1028,6 +1130,8 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-avx512_bf16"
     run_dump_test "x86-64-avx512_bf16_vl"
     run_list_test "x86-64-avx512_bf16_vl-inval"
+    run_dump_test "x86-64-avx-vnni"
+    run_list_test "x86-64-avx-vnni-inval"
     run_dump_test "x86-64-clzero"
     run_dump_test "x86-64-mwaitx-bdver4"
     run_list_test "x86-64-mwaitx-reg"
@@ -1048,6 +1152,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-pconfig-intel"
     run_dump_test "x86-64-waitpkg"
     run_dump_test "x86-64-waitpkg-intel"
+    run_dump_test "x86-64-uintr"
     run_dump_test "x86-64-cldemote"
     run_dump_test "x86-64-cldemote-intel"
     run_dump_test "x86-64-movdir"
@@ -1057,10 +1162,22 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-enqcmd-intel"
     run_list_test "x86-64-enqcmd-inval"
     run_dump_test "x86-64-serialize"
+    run_dump_test "x86-64-tdx"
     run_dump_test "x86-64-tsxldtrk"
+    run_dump_test "x86-64-hreset"
     run_dump_test "x86-64-vp2intersect"
     run_dump_test "x86-64-vp2intersect-intel"
     run_list_test "x86-64-vp2intersect-inval-bcast"
+    run_dump_test "x86-64-keylocker"
+    run_dump_test "x86-64-keylocker-intel"
+    run_dump_test "x86-64-avx512_fp16"
+    run_dump_test "x86-64-avx512_fp16-intel"
+    run_dump_test "x86-64-avx512_fp16_vl"
+    run_dump_test "x86-64-avx512_fp16_vl-intel"
+    run_dump_test "x86-64-avx512_fp16_pseudo_ops"
+    run_list_test "x86-64-avx512_fp16-inval-bcast"
+    run_list_test "x86-64-avx512_fp16-inval-register"
+    run_dump_test "x86-64-avx512_fp16-bad"
     run_dump_test "x86-64-fence-as-lock-add-yes"
     run_dump_test "x86-64-fence-as-lock-add-no"
     run_dump_test "x86-64-pr20141"
@@ -1072,6 +1189,8 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_list_test "x86-64-cet-ibt-inval"
     run_list_test "x86-64-cet-shstk-inval"
     run_dump_test "x86-64-pseudos"
+    run_list_test "x86-64-pseudos-bad"
+    run_list_test "x86-64-inval-pseudo" "-al"
     run_dump_test "x86-64-notrack"
     run_dump_test "x86-64-notrack-intel"
     run_list_test "x86-64-notrackbad" "-al"
@@ -1110,6 +1229,8 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
 	run_dump_test "x86-64-align-branch-2a"
 	run_dump_test "x86-64-align-branch-2b"
 	run_dump_test "x86-64-align-branch-2c"
+	run_dump_test "lea64"
+	run_dump_test "lea64-optimize"
     }
     run_dump_test "x86-64-align-branch-4a"
     run_dump_test "x86-64-align-branch-4b"
@@ -1128,6 +1249,10 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
     run_dump_test "x86-64-lfence-ret-d"
     run_dump_test "x86-64-lfence-ret-e"
     run_dump_test "x86-64-lfence-byte"
+    run_list_test "x86-64-amx-inval"
+    run_dump_test "x86-64-amx"
+    run_dump_test "x86-64-amx-intel"
+    run_dump_test "x86-64-amx-bad"
 
     if { ![istarget "*-*-aix*"]
       && ![istarget "*-*-beos*"]
@@ -1150,6 +1275,7 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
 	run_dump_test "reloc64"
 	run_list_test "reloc64" "--defsym _bad_=1"
 	run_dump_test "mixed-mode-reloc64"
+	run_dump_test "rela"
 	run_dump_test "x86-64-ifunc"
 	run_dump_test "x86-64-opcode-inval"
 	run_dump_test "x86-64-opcode-inval-intel"
@@ -1181,9 +1307,13 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
 	run_list_test "x86-64-branch-4" "-al -mintel64"
 	run_list_test "x86-64-branch-5" "-al"
 
+	run_dump_test "x86-64-rip-2"
+
 	run_dump_test "x86-64-gotpcrel"
 	run_dump_test "x86-64-gotpcrel-no-relax"
 	run_dump_test "x86-64-gotpcrel-2"
+
+	run_dump_test "x86-64-no-got"
 
 	run_dump_test "x86-64-addend"
 	run_dump_test "x86-64-nop-3"
@@ -1192,16 +1322,23 @@ if [expr ([istarget "i*86-*-*"] || [istarget "x86_64-*-*"]) && [gas_64_check]] t
 	run_dump_test "x86-64-nop-6"
 	run_dump_test "x86-64-unique"
 
-	run_dump_test "evex-no-scale-64"
 	run_dump_test "x86-64-property-1"
-	run_dump_test "x86-64-property-2"
-	run_dump_test "x86-64-property-3"
+	run_dump_test "x86-64-property-7"
+	run_dump_test "x86-64-property-8"
+	run_dump_test "x86-64-property-9"
+	run_dump_test "x86-64-property-14"
+	run_dump_test "x86-64-code16-2"
 
 	if {[istarget "*-*-linux*"]} then {
 	    run_dump_test "x86-64-align-branch-3"
 	}
 
     }
+    run_dump_test pr27198
+
+    set ASFLAGS "$old_ASFLAGS --64"
+
+    run_dump_test "sizing64"
 
     set ASFLAGS "$old_ASFLAGS"
 }

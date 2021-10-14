@@ -1,6 +1,6 @@
 /* Modula 2 language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 1992-2020 Free Software Foundation, Inc.
+   Copyright (C) 1992-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -28,84 +28,135 @@
 #include "c-lang.h"
 #include "valprint.h"
 #include "gdbarch.h"
+#include "m2-exp.h"
 
-static void m2_printchar (int, struct type *, struct ui_file *);
-static void m2_emit_char (int, struct type *, struct ui_file *, int);
+/* A helper function for UNOP_HIGH.  */
 
-/* Print the character C on STREAM as part of the contents of a literal
-   string whose delimiter is QUOTER.  Note that that format for printing
-   characters and strings is language specific.
-   FIXME:  This is a copy of the same function from c-exp.y.  It should
-   be replaced with a true Modula version.  */
-
-static void
-m2_emit_char (int c, struct type *type, struct ui_file *stream, int quoter)
+struct value *
+eval_op_m2_high (struct type *expect_type, struct expression *exp,
+		 enum noside noside,
+		 struct value *arg1)
 {
-
-  c &= 0xFF;			/* Avoid sign bit follies.  */
-
-  if (PRINT_LITERAL_FORM (c))
-    {
-      if (c == '\\' || c == quoter)
-	{
-	  fputs_filtered ("\\", stream);
-	}
-      fprintf_filtered (stream, "%c", c);
-    }
+  if (noside == EVAL_AVOID_SIDE_EFFECTS)
+    return arg1;
   else
     {
-      switch (c)
+      arg1 = coerce_ref (arg1);
+      struct type *type = check_typedef (value_type (arg1));
+
+      if (m2_is_unbounded_array (type))
 	{
-	case '\n':
-	  fputs_filtered ("\\n", stream);
-	  break;
-	case '\b':
-	  fputs_filtered ("\\b", stream);
-	  break;
-	case '\t':
-	  fputs_filtered ("\\t", stream);
-	  break;
-	case '\f':
-	  fputs_filtered ("\\f", stream);
-	  break;
-	case '\r':
-	  fputs_filtered ("\\r", stream);
-	  break;
-	case '\033':
-	  fputs_filtered ("\\e", stream);
-	  break;
-	case '\007':
-	  fputs_filtered ("\\a", stream);
-	  break;
-	default:
-	  fprintf_filtered (stream, "\\%.3o", (unsigned int) c);
-	  break;
+	  struct value *temp = arg1;
+
+	  type = type->field (1).type ();
+	  /* i18n: Do not translate the "_m2_high" part!  */
+	  arg1 = value_struct_elt (&temp, {}, "_m2_high", NULL,
+				   _("unbounded structure "
+				     "missing _m2_high field"));
+
+	  if (value_type (arg1) != type)
+	    arg1 = value_cast (type, arg1);
 	}
     }
+  return arg1;
 }
 
-/* FIXME:  This is a copy of the same function from c-exp.y.  It should
-   be replaced with a true Modula version.  */
+/* A helper function for BINOP_SUBSCRIPT.  */
 
-static void
-m2_printchar (int c, struct type *type, struct ui_file *stream)
+struct value *
+eval_op_m2_subscript (struct type *expect_type, struct expression *exp,
+		      enum noside noside,
+		      struct value *arg1, struct value *arg2)
+{
+  /* If the user attempts to subscript something that is not an
+     array or pointer type (like a plain int variable for example),
+     then report this as an error.  */
+
+  arg1 = coerce_ref (arg1);
+  struct type *type = check_typedef (value_type (arg1));
+
+  if (m2_is_unbounded_array (type))
+    {
+      struct value *temp = arg1;
+      type = type->field (0).type ();
+      if (type == NULL || (type->code () != TYPE_CODE_PTR))
+	error (_("internal error: unbounded "
+		 "array structure is unknown"));
+      /* i18n: Do not translate the "_m2_contents" part!  */
+      arg1 = value_struct_elt (&temp, {}, "_m2_contents", NULL,
+			       _("unbounded structure "
+				 "missing _m2_contents field"));
+	  
+      if (value_type (arg1) != type)
+	arg1 = value_cast (type, arg1);
+
+      check_typedef (value_type (arg1));
+      return value_ind (value_ptradd (arg1, value_as_long (arg2)));
+    }
+  else
+    if (type->code () != TYPE_CODE_ARRAY)
+      {
+	if (type->name ())
+	  error (_("cannot subscript something of type `%s'"),
+		 type->name ());
+	else
+	  error (_("cannot subscript requested type"));
+      }
+
+  if (noside == EVAL_AVOID_SIDE_EFFECTS)
+    return value_zero (TYPE_TARGET_TYPE (type), VALUE_LVAL (arg1));
+  else
+    return value_subscript (arg1, value_as_long (arg2));
+}
+
+
+
+/* Single instance of the M2 language.  */
+
+static m2_language m2_language_defn;
+
+/* See language.h.  */
+
+void
+m2_language::language_arch_info (struct gdbarch *gdbarch,
+				 struct language_arch_info *lai) const
+{
+  const struct builtin_m2_type *builtin = builtin_m2_type (gdbarch);
+
+  /* Helper function to allow shorter lines below.  */
+  auto add  = [&] (struct type * t)
+  {
+    lai->add_primitive_type (t);
+  };
+
+  add (builtin->builtin_char);
+  add (builtin->builtin_int);
+  add (builtin->builtin_card);
+  add (builtin->builtin_real);
+  add (builtin->builtin_bool);
+
+  lai->set_string_char_type (builtin->builtin_char);
+  lai->set_bool_type (builtin->builtin_bool, "BOOLEAN");
+}
+
+/* See languge.h.  */
+
+void
+m2_language::printchar (int c, struct type *type,
+			struct ui_file *stream) const
 {
   fputs_filtered ("'", stream);
-  LA_EMIT_CHAR (c, type, stream, '\'');
+  emitchar (c, type, stream, '\'');
   fputs_filtered ("'", stream);
 }
 
-/* Print the character string STRING, printing at most LENGTH characters.
-   Printing stops early if the number hits print_max; repeat counts
-   are printed as appropriate.  Print ellipses at the end if we
-   had to stop before printing LENGTH characters, or if FORCE_ELLIPSES.
-   FIXME:  This is a copy of the same function from c-exp.y.  It should
-   be replaced with a true Modula version.  */
+/* See language.h.  */
 
-static void
-m2_printstr (struct ui_file *stream, struct type *type, const gdb_byte *string,
-	     unsigned int length, const char *encoding, int force_ellipses,
-	     const struct value_print_options *options)
+void
+m2_language::printstr (struct ui_file *stream, struct type *elttype,
+			const gdb_byte *string, unsigned int length,
+			const char *encoding, int force_ellipses,
+			const struct value_print_options *options) const
 {
   unsigned int i;
   unsigned int things_printed = 0;
@@ -121,7 +172,7 @@ m2_printstr (struct ui_file *stream, struct type *type, const gdb_byte *string,
   for (i = 0; i < length && things_printed < options->print_max; ++i)
     {
       /* Position of the character we are examining
-         to see whether it is repeated.  */
+	 to see whether it is repeated.  */
       unsigned int rep1;
       /* Number of repetitions we have detected so far.  */
       unsigned int reps;
@@ -149,7 +200,7 @@ m2_printstr (struct ui_file *stream, struct type *type, const gdb_byte *string,
 	      fputs_filtered ("\", ", stream);
 	      in_quotes = 0;
 	    }
-	  m2_printchar (string[i], type, stream);
+	  printchar (string[i], elttype, stream);
 	  fprintf_filtered (stream, " <repeats %u times>", reps);
 	  i = rep1 - 1;
 	  things_printed += options->repeat_count_threshold;
@@ -162,7 +213,7 @@ m2_printstr (struct ui_file *stream, struct type *type, const gdb_byte *string,
 	      fputs_filtered ("\"", stream);
 	      in_quotes = 1;
 	    }
-	  LA_EMIT_CHAR (string[i], type, stream, '"');
+	  emitchar (string[i], elttype, stream, '"');
 	  ++things_printed;
 	}
     }
@@ -175,254 +226,54 @@ m2_printstr (struct ui_file *stream, struct type *type, const gdb_byte *string,
     fputs_filtered ("...", stream);
 }
 
-/* Return true if TYPE is a string.  */
+/* See language.h.  */
 
-static bool
-m2_is_string_type_p (struct type *type)
+void
+m2_language::emitchar (int ch, struct type *chtype,
+		       struct ui_file *stream, int quoter) const
 {
-  type = check_typedef (type);
-  if (TYPE_CODE (type) == TYPE_CODE_ARRAY
-      && TYPE_LENGTH (type) > 0
-      && TYPE_LENGTH (TYPE_TARGET_TYPE (type)) > 0)
+  ch &= 0xFF;			/* Avoid sign bit follies.  */
+
+  if (PRINT_LITERAL_FORM (ch))
     {
-      struct type *elttype = check_typedef (TYPE_TARGET_TYPE (type));
-
-      if (TYPE_LENGTH (elttype) == 1
-	  && (TYPE_CODE (elttype) == TYPE_CODE_INT
-	      || TYPE_CODE (elttype) == TYPE_CODE_CHAR))
-	return true;
+      if (ch == '\\' || ch == quoter)
+	fputs_filtered ("\\", stream);
+      fprintf_filtered (stream, "%c", ch);
     }
-
-  return false;
-}
-
-static struct value *
-evaluate_subexp_modula2 (struct type *expect_type, struct expression *exp,
-			 int *pos, enum noside noside)
-{
-  enum exp_opcode op = exp->elts[*pos].opcode;
-  struct value *arg1;
-  struct value *arg2;
-  struct type *type;
-
-  switch (op)
+  else
     {
-    case UNOP_HIGH:
-      (*pos)++;
-      arg1 = evaluate_subexp_with_coercion (exp, pos, noside);
-
-      if (noside == EVAL_SKIP || noside == EVAL_AVOID_SIDE_EFFECTS)
-	return arg1;
-      else
+      switch (ch)
 	{
-	  arg1 = coerce_ref (arg1);
-	  type = check_typedef (value_type (arg1));
-
-	  if (m2_is_unbounded_array (type))
-	    {
-	      struct value *temp = arg1;
-
-	      type = TYPE_FIELD_TYPE (type, 1);
-	      /* i18n: Do not translate the "_m2_high" part!  */
-	      arg1 = value_struct_elt (&temp, NULL, "_m2_high", NULL,
-				       _("unbounded structure "
-					 "missing _m2_high field"));
-	  
-	      if (value_type (arg1) != type)
-		arg1 = value_cast (type, arg1);
-	    }
+	case '\n':
+	  fputs_filtered ("\\n", stream);
+	  break;
+	case '\b':
+	  fputs_filtered ("\\b", stream);
+	  break;
+	case '\t':
+	  fputs_filtered ("\\t", stream);
+	  break;
+	case '\f':
+	  fputs_filtered ("\\f", stream);
+	  break;
+	case '\r':
+	  fputs_filtered ("\\r", stream);
+	  break;
+	case '\033':
+	  fputs_filtered ("\\e", stream);
+	  break;
+	case '\007':
+	  fputs_filtered ("\\a", stream);
+	  break;
+	default:
+	  fprintf_filtered (stream, "\\%.3o", (unsigned int) ch);
+	  break;
 	}
-      return arg1;
-
-    case BINOP_SUBSCRIPT:
-      (*pos)++;
-      arg1 = evaluate_subexp_with_coercion (exp, pos, noside);
-      arg2 = evaluate_subexp_with_coercion (exp, pos, noside);
-      if (noside == EVAL_SKIP)
-	goto nosideret;
-      /* If the user attempts to subscript something that is not an
-         array or pointer type (like a plain int variable for example),
-         then report this as an error.  */
-
-      arg1 = coerce_ref (arg1);
-      type = check_typedef (value_type (arg1));
-
-      if (m2_is_unbounded_array (type))
-	{
-	  struct value *temp = arg1;
-	  type = TYPE_FIELD_TYPE (type, 0);
-	  if (type == NULL || (TYPE_CODE (type) != TYPE_CODE_PTR))
-	    {
-	      warning (_("internal error: unbounded "
-			 "array structure is unknown"));
-	      return evaluate_subexp_standard (expect_type, exp, pos, noside);
-	    }
-	  /* i18n: Do not translate the "_m2_contents" part!  */
-	  arg1 = value_struct_elt (&temp, NULL, "_m2_contents", NULL,
-				   _("unbounded structure "
-				     "missing _m2_contents field"));
-	  
-	  if (value_type (arg1) != type)
-	    arg1 = value_cast (type, arg1);
-
-	  check_typedef (value_type (arg1));
-	  return value_ind (value_ptradd (arg1, value_as_long (arg2)));
-	}
-      else
-	if (TYPE_CODE (type) != TYPE_CODE_ARRAY)
-	  {
-	    if (TYPE_NAME (type))
-	      error (_("cannot subscript something of type `%s'"),
-		     TYPE_NAME (type));
-	    else
-	      error (_("cannot subscript requested type"));
-	  }
-
-      if (noside == EVAL_AVOID_SIDE_EFFECTS)
-	return value_zero (TYPE_TARGET_TYPE (type), VALUE_LVAL (arg1));
-      else
-	return value_subscript (arg1, value_as_long (arg2));
-
-    default:
-      return evaluate_subexp_standard (expect_type, exp, pos, noside);
     }
-
- nosideret:
-  return value_from_longest (builtin_type (exp->gdbarch)->builtin_int, 1);
-}
-
-
-/* Table of operators and their precedences for printing expressions.  */
-
-static const struct op_print m2_op_print_tab[] =
-{
-  {"+", BINOP_ADD, PREC_ADD, 0},
-  {"+", UNOP_PLUS, PREC_PREFIX, 0},
-  {"-", BINOP_SUB, PREC_ADD, 0},
-  {"-", UNOP_NEG, PREC_PREFIX, 0},
-  {"*", BINOP_MUL, PREC_MUL, 0},
-  {"/", BINOP_DIV, PREC_MUL, 0},
-  {"DIV", BINOP_INTDIV, PREC_MUL, 0},
-  {"MOD", BINOP_REM, PREC_MUL, 0},
-  {":=", BINOP_ASSIGN, PREC_ASSIGN, 1},
-  {"OR", BINOP_LOGICAL_OR, PREC_LOGICAL_OR, 0},
-  {"AND", BINOP_LOGICAL_AND, PREC_LOGICAL_AND, 0},
-  {"NOT", UNOP_LOGICAL_NOT, PREC_PREFIX, 0},
-  {"=", BINOP_EQUAL, PREC_EQUAL, 0},
-  {"<>", BINOP_NOTEQUAL, PREC_EQUAL, 0},
-  {"<=", BINOP_LEQ, PREC_ORDER, 0},
-  {">=", BINOP_GEQ, PREC_ORDER, 0},
-  {">", BINOP_GTR, PREC_ORDER, 0},
-  {"<", BINOP_LESS, PREC_ORDER, 0},
-  {"^", UNOP_IND, PREC_PREFIX, 0},
-  {"@", BINOP_REPEAT, PREC_REPEAT, 0},
-  {"CAP", UNOP_CAP, PREC_BUILTIN_FUNCTION, 0},
-  {"CHR", UNOP_CHR, PREC_BUILTIN_FUNCTION, 0},
-  {"ORD", UNOP_ORD, PREC_BUILTIN_FUNCTION, 0},
-  {"FLOAT", UNOP_FLOAT, PREC_BUILTIN_FUNCTION, 0},
-  {"HIGH", UNOP_HIGH, PREC_BUILTIN_FUNCTION, 0},
-  {"MAX", UNOP_MAX, PREC_BUILTIN_FUNCTION, 0},
-  {"MIN", UNOP_MIN, PREC_BUILTIN_FUNCTION, 0},
-  {"ODD", UNOP_ODD, PREC_BUILTIN_FUNCTION, 0},
-  {"TRUNC", UNOP_TRUNC, PREC_BUILTIN_FUNCTION, 0},
-  {NULL, OP_NULL, PREC_BUILTIN_FUNCTION, 0}
-};
-
-/* The built-in types of Modula-2.  */
-
-enum m2_primitive_types {
-  m2_primitive_type_char,
-  m2_primitive_type_int,
-  m2_primitive_type_card,
-  m2_primitive_type_real,
-  m2_primitive_type_bool,
-  nr_m2_primitive_types
-};
-
-static void
-m2_language_arch_info (struct gdbarch *gdbarch,
-		       struct language_arch_info *lai)
-{
-  const struct builtin_m2_type *builtin = builtin_m2_type (gdbarch);
-
-  lai->string_char_type = builtin->builtin_char;
-  lai->primitive_type_vector
-    = GDBARCH_OBSTACK_CALLOC (gdbarch, nr_m2_primitive_types + 1,
-                              struct type *);
-
-  lai->primitive_type_vector [m2_primitive_type_char]
-    = builtin->builtin_char;
-  lai->primitive_type_vector [m2_primitive_type_int]
-    = builtin->builtin_int;
-  lai->primitive_type_vector [m2_primitive_type_card]
-    = builtin->builtin_card;
-  lai->primitive_type_vector [m2_primitive_type_real]
-    = builtin->builtin_real;
-  lai->primitive_type_vector [m2_primitive_type_bool]
-    = builtin->builtin_bool;
-
-  lai->bool_type_symbol = "BOOLEAN";
-  lai->bool_type_default = builtin->builtin_bool;
 }
 
-const struct exp_descriptor exp_descriptor_modula2 = 
-{
-  print_subexp_standard,
-  operator_length_standard,
-  operator_check_standard,
-  op_name_standard,
-  dump_subexp_body_standard,
-  evaluate_subexp_modula2
-};
-
-extern const struct language_defn m2_language_defn =
-{
-  "modula-2",
-  "Modula-2",
-  language_m2,
-  range_check_on,
-  case_sensitive_on,
-  array_row_major,
-  macro_expansion_no,
-  NULL,
-  &exp_descriptor_modula2,
-  m2_parse,			/* parser */
-  null_post_parser,
-  m2_printchar,			/* Print character constant */
-  m2_printstr,			/* function to print string constant */
-  m2_emit_char,			/* Function to print a single character */
-  m2_print_type,		/* Print a type using appropriate syntax */
-  m2_print_typedef,		/* Print a typedef using appropriate syntax */
-  m2_value_print_inner,		/* la_value_print_inner */
-  c_value_print,		/* Print a top-level value */
-  default_read_var_value,	/* la_read_var_value */
-  NULL,				/* Language specific skip_trampoline */
-  NULL,		                /* name_of_this */
-  false,			/* la_store_sym_names_in_linkage_form_p */
-  basic_lookup_symbol_nonlocal,	/* lookup_symbol_nonlocal */
-  basic_lookup_transparent_type,/* lookup_transparent_type */
-  NULL,				/* Language specific symbol demangler */
-  NULL,
-  NULL,				/* Language specific
-				   class_name_from_physname */
-  m2_op_print_tab,		/* expression operators for printing */
-  0,				/* arrays are first-class (not c-style) */
-  0,				/* String lower bound */
-  default_word_break_characters,
-  default_collect_symbol_completion_matches,
-  m2_language_arch_info,
-  default_print_array_index,
-  default_pass_by_reference,
-  c_watch_location_expression,
-  NULL,				/* la_get_symbol_name_matcher */
-  iterate_over_symbols,
-  default_search_name_hash,
-  &default_varobj_ops,
-  NULL,
-  NULL,
-  m2_is_string_type_p,
-  "{...}"			/* la_struct_too_deep_ellipsis */
-};
+/* Called during architecture gdbarch initialisation to create language
+   specific types.  */
 
 static void *
 build_m2_types (struct gdbarch *gdbarch)

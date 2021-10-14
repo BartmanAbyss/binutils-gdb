@@ -1,4 +1,4 @@
-# Copyright 2019-2020 Free Software Foundation, Inc.
+# Copyright 2019-2021 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 #
 # Ref.: https://bugzilla.redhat.com/show_bug.cgi?id=1765117
 
-load_lib "tuiterm.exp"
+tuiterm_env
 
 standard_testfile tui-layout.c
 
@@ -35,7 +35,6 @@ if { [use_gdb_stub] || [target_info gdb_protocol] == "extended-remote" } {
 }
 
 if { ![runto_main] } {
-    untested "could not run to main"
     return -1
 }
 
@@ -47,6 +46,7 @@ if { ![gdb_gcore_cmd "$core" "save a corefile"] } {
 Term::clean_restart 24 80 $testfile
 if {![Term::enter_tui]} {
     unsupported "TUI not supported"
+    return
 }
 
 set text [Term::get_all_lines]
@@ -54,7 +54,7 @@ gdb_assert {![string match "No Source Available" $text]} \
     "initial source listing"
 
 Term::command "core-file $core"
-Term::check_contents "load corefile" "21 *return 0"
+Term::check_contents "load corefile" "21 *return 0.*$gdb_prompt .*"
 
 Term::command "run"
 Term::check_contents "run until the end" \

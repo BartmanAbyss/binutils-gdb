@@ -1,5 +1,5 @@
 /* GDB self-testing.
-   Copyright (C) 2016-2020 Free Software Foundation, Inc.
+   Copyright (C) 2016-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,6 +19,8 @@
 #ifndef COMMON_SELFTEST_H
 #define COMMON_SELFTEST_H
 
+#include "gdbsupport/array-view.h"
+
 /* A test is just a function that does some checks and throws an
    exception if something has gone wrong.  */
 
@@ -35,6 +37,10 @@ struct selftest
   virtual void operator() () const = 0;
 };
 
+/* True if selftest should run verbosely.  */
+
+extern bool run_verbose ();
+
 /* Register a new self-test.  */
 
 extern void register_test (const std::string &name, selftest *test);
@@ -42,15 +48,16 @@ extern void register_test (const std::string &name, selftest *test);
 /* Register a new self-test.  */
 
 extern void register_test (const std::string &name,
-			   self_test_function *function);
+			   std::function<void(void)> function);
 
 /* Run all the self tests.  This print a message describing the number
    of test and the number of failures.
 
-   If FILTER is not NULL and not empty, only tests with names containing FILTER
-   will be ran.  */
+   If FILTERS is not empty, only run tests with names containing one of the
+   element of FILTERS.  */
 
-extern void run_tests (const char *filter);
+extern void run_tests (gdb::array_view<const char *const> filters,
+		       bool verbose = false);
 
 /* Reset GDB or GDBserver's internal state.  */
 extern void reset ();

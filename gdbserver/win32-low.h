@@ -1,5 +1,5 @@
 /* Internal interfaces for the Win32 specific target code for gdbserver.
-   Copyright (C) 2007-2020 Free Software Foundation, Inc.
+   Copyright (C) 2007-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,11 +29,6 @@ struct target_desc;
 extern const struct target_desc *win32_tdesc;
 #ifdef __x86_64__
 extern const struct target_desc *wow64_win32_tdesc;
-
-extern bool wow64_process;
-
-typedef BOOL (WINAPI *winapi_Wow64GetThreadContext) (HANDLE, PWOW64_CONTEXT);
-extern winapi_Wow64GetThreadContext win32_Wow64GetThreadContext;
 #endif
 
 struct win32_target_ops
@@ -116,7 +111,7 @@ public:
   void resume (thread_resume *resume_info, size_t n) override;
 
   ptid_t wait (ptid_t ptid, target_waitstatus *status,
-	       int options) override;
+	       target_wait_flags options) override;
 
   void fetch_registers (regcache *regcache, int regno) override;
 
@@ -143,10 +138,6 @@ public:
   bool stopped_by_watchpoint () override;
 
   CORE_ADDR stopped_data_address () override;
-
-#ifdef _WIN32_WCE
-  void hostio_last_error (char *buf) override;
-#endif
 
   bool supports_qxfer_siginfo () override;
 
@@ -182,9 +173,5 @@ extern void win32_require_context (windows_nat::windows_thread_info *th);
    The strwinerror function does not change the current setting
    of GetLastError.  */
 extern char * strwinerror (DWORD error);
-
-/* in wincecompat.c */
-
-extern void to_back_slashes (char *);
 
 #endif /* GDBSERVER_WIN32_LOW_H */

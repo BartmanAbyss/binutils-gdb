@@ -9,6 +9,10 @@ _start:
 # SSE2 instruction
 	addpd %xmm2,%xmm1
 
+# special case SSE2 instruction
+	cvtpi2pd %mm2,%xmm1
+	cvtpi2pd (%edx),%xmm1
+
 # SSE3 instruction
 	addsubpd %xmm2,%xmm1
 
@@ -19,7 +23,7 @@ _start:
 	blendvpd %xmm0,%xmm1,%xmm0
 	pcmpgtq %xmm1,%xmm0
 
-# SSE4a instruction
+# SSE4a instruction (no diagnostic)
 	extrq $0, $0, %xmm0
 
 # PCMUL instruction

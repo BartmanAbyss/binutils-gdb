@@ -1,6 +1,6 @@
 /* Shared library declarations for GDB, the GNU Debugger.
    
-   Copyright (C) 1992-2020 Free Software Foundation, Inc.
+   Copyright (C) 1992-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -27,9 +27,6 @@ struct target_so_ops;
 struct program_space;
 
 #include "symfile-add-flags.h"
-
-/* List of known shared objects */
-#define so_list_head current_program_space->so_list
 
 /* Called when we free all symtabs, to free the shared library information
    as well.  */
@@ -81,9 +78,9 @@ extern void set_solib_ops (struct gdbarch *gdbarch,
 /* Synchronize GDB's shared object list with inferior's.
 
    Extract the list of currently loaded shared objects from the
-   inferior, and compare it with the list of shared objects currently
-   in GDB's so_list_head list.  Edit so_list_head to bring it in sync
-   with the inferior's new list.
+   inferior, and compare it with the list of shared objects in the
+   current program space's list of shared libraries.  Edit
+   so_list_head to bring it in sync with the inferior's new list.
 
    If we notice that the inferior has unloaded some shared objects,
    free any symbolic info GDB had read about those shared objects.
@@ -114,6 +111,12 @@ extern CORE_ADDR gdb_bfd_lookup_symbol_from_symtab (bfd *abfd,
 						      (const asymbol *,
 						       const void *),
 						    const void *data);
+
+/* Scan for DESIRED_DYNTAG in .dynamic section of ABFD.  If DESIRED_DYNTAG is
+   found, 1 is returned and the corresponding PTR and PTR_ADDR are set.  */
+
+extern int gdb_bfd_scan_elf_dyntag (const int desired_dyntag, bfd *abfd,
+				    CORE_ADDR *ptr, CORE_ADDR *ptr_addr);
 
 /* Enable or disable optional solib event breakpoints as appropriate.  */
 

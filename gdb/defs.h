@@ -1,7 +1,7 @@
 /* *INDENT-OFF* */ /* ATTRIBUTE_PRINTF confuses indent, avoid running it
 		      for now.  */
 /* Basic, host-specific, and target-specific definitions for GDB.
-   Copyright (C) 1986-2020 Free Software Foundation, Inc.
+   Copyright (C) 1986-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -121,7 +121,7 @@ using RequireLongest = gdb::Requires<gdb::Or<std::is_same<T, LONGEST>,
 extern int dbx_commands;
 
 /* * System root path, used to find libraries etc.  */
-extern char *gdb_sysroot;
+extern std::string gdb_sysroot;
 
 /* * GDB datadir, used to store data files.  */
 extern std::string gdb_datadir;
@@ -131,7 +131,7 @@ extern std::string gdb_datadir;
 extern std::string python_libdir;
 
 /* * Search path for separate debug files.  */
-extern char *debug_file_directory;
+extern std::string debug_file_directory;
 
 /* GDB's SIGINT handler basically sets a flag; code that might take a
    long time before it gets back to the event loop, and which ought to

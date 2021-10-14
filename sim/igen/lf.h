@@ -1,6 +1,6 @@
 /* The IGEN simulator generator for GDB, the GNU Debugger.
 
-   Copyright 2002-2020 Free Software Foundation, Inc.
+   Copyright 2002-2021 Free Software Foundation, Inc.
 
    Contributed by Andrew Cagney.
 
@@ -19,7 +19,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-
+#include "ansidecl.h"
 
 /* LF: Line Numbered Output Stream */
 
@@ -54,6 +54,8 @@ extern lf *lf_open
    lf_file_references file_references,
    lf_file_type type, const char *program);
 
+extern lf_file_type lf_get_file_type (const lf *file);
+
 extern void lf_close (lf *file);
 
 
@@ -70,7 +72,7 @@ extern int lf_putint (lf *file, int decimal);
 extern int lf_putbin (lf *file, int decimal, int width);
 
 extern int lf_printf
-  (lf *file, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
+  (lf *file, const char *fmt, ...) ATTRIBUTE_PRINTF (2, 3);
 
 
 /* Indentation control.

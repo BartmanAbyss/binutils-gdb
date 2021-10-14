@@ -1,4 +1,4 @@
-# Copyright 1999-2020 Free Software Foundation, Inc.
+# Copyright 1999-2021 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -126,27 +126,48 @@ gdb_test_multiple "info break" "breakpoint info" {
 #
 #exp_internal 1
 set binexp [string_to_regexp $binfile]
+
+set warning_slow_re \
+    "warning: File transfers from remote targets can be slow\[^\r\n\]+"
+set warning_gdb_index_re \
+    [multi_line \
+	 "warning: Skipping \[^\r\n\]+ .gdb_index section in \[^\r\n\]+" \
+	 "Do \"set use-deprecated-index-sections on\" before the file is read" \
+	 "to use the section anyway\\."]
+set reading_re \
+    "Reading \[^\r\n\]+"
+set libthread_db_re \
+    [multi_line \
+	 "\\\[Thread debugging using libthread_db enabled\\\]" \
+	 "Using host libthread_db library \[^\r\n\]+"]
+
+set run_re \
+    [list \
+	 "\r\n\032\032post-prompt\r\nStarting program: $binexp " \
+	 "\(\(\r\n$reading_re\)|\(\r\n$warning_slow_re\)\)*" \
+	 "\(\r\n$warning_gdb_index_re\)?" \
+	 "\(\(\r\n\r\n\032\032frames-invalid\)|\(\r\n\r\n\032\032breakpoints-invalid\)\)*\r\n\r\n" \
+	 "\032\032starting\(\(\r\n$reading_re\)|\(\r\n$warning_slow_re\)|\r\n$libthread_db_re\)*" \
+	 "\(\(\r\n\r\n\032\032frames-invalid\)|\(\r\n\r\n\032\032breakpoints-invalid\)\)*\r\n\r\n" \
+	 "\032\032breakpoint 1\r\n\r\n" \
+	 "Breakpoint 1, \r\n" \
+	 "\032\032frame-begin 0 $hex\r\n\r\n" \
+	 "\032\032frame-function-name\r\n" \
+	 "main\r\n" \
+	 "\032\032frame-args\r\n \\(\\)\r\n" \
+	 "\032\032frame-source-begin\r\n at \r\n" \
+	 "\032\032frame-source-file\r\n.*annota1.c\r\n" \
+	 "\032\032frame-source-file-end\r\n:\r\n" \
+	 "\032\032frame-source-line\r\n$main_line\r\n" \
+	 "\032\032frame-source-end\r\n\r\n\r\n" \
+	 "\032\032source.*$srcfile:$main_line:.*:beg:$hex\r\n\r\n" \
+	 "\032\032frame-end\r\n\r\n" \
+	 "\032\032stopped"]
+
+set run_re [join $run_re ""]
+
 gdb_test_multiple "run" "run until main breakpoint" {
-    -re [join { "\r\n\032\032post-prompt\r\nStarting program: $binexp " \
-		    "\(\(\r\nReading \[^\r\n\]+\)|\(\r\nwarning: File transfers from remote targets can be slow\[^\r\n\]+\)\)*" \
-		    "\(\r\nwarning: Skipping \[^\r\n\]+ .gdb_index section in \[^\r\n\]+\r\nDo \"set use-deprecated-index-sections on\" before the file is read\r\nto use the section anyway\\.\)?" \
-		    "\(\(\r\n\r\n\032\032frames-invalid\)|\(\r\n\r\n\032\032breakpoints-invalid\)\)*\r\n\r\n" \
-		    "\032\032starting\(\(\r\nReading \[^\r\n\]+\)|\(\r\nwarning: File transfers from remote targets can be slow\[^\r\n\]+\)\)*" \
-		    "\(\(\r\n\r\n\032\032frames-invalid\)|\(\r\n\r\n\032\032breakpoints-invalid\)\)*\r\n\r\n" \
-		    "\032\032breakpoint 1\r\n\r\n" \
-		    "Breakpoint 1, \r\n" \
-		    "\032\032frame-begin 0 $hex\r\n\r\n" \
-		    "\032\032frame-function-name\r\n" \
-		    "main\r\n" \
-		    "\032\032frame-args\r\n \\(\\)\r\n" \
-		    "\032\032frame-source-begin\r\n at \r\n" \
-		    "\032\032frame-source-file\r\n.*annota1.c\r\n" \
-		    "\032\032frame-source-file-end\r\n:\r\n" \
-		    "\032\032frame-source-line\r\n$main_line\r\n" \
-		    "\032\032frame-source-end\r\n\r\n\r\n" \
-		    "\032\032source.*$srcfile:$main_line:.*:beg:$hex\r\n\r\n" \
-		    "\032\032frame-end\r\n\r\n" \
-		    "\032\032stopped.*$gdb_prompt$" } ] {
+    -re $run_re.*$gdb_prompt$ {
 	pass $gdb_test_name
     }
 }
@@ -223,7 +244,7 @@ gdb_test_multiple "break printf" "break printf" {
 #
 # get to printf
 #
-set pat_begin "\r\n\032\032post-prompt\r\nContinuing.\r\n\r\n\032\032starting\r\n\r\n\032\032frames-invalid\r\n${breakpoints_invalid}"
+set pat_begin "\r\n\032\032post-prompt\r\nContinuing.\r\n\r\n\032\032starting\r\n\r\n\032\032frames-invalid\r\n${breakpoints_invalid}\r\n\032\032frames-invalid\r\n"
 set pat_adjust "warning: Breakpoint 3 address previously adjusted from $hex to $hex.\r\n"
 set pat_end "\r\n\032\032breakpoint 3\r\n\r\nBreakpoint 3, \r\n\032\032frame-begin 0 $hex\r\n\r\n(\032\032frame-address\r\n$hex\r\n\032\032frame-address-end\r\n in \r\n)*.*\032\032frame-function-name\r\n.*printf(@.*)?\r\n\032\032frame-args\r\n.*\032\032frame-end\r\n\r\n\032\032stopped\r\n$gdb_prompt$"
 
@@ -268,10 +289,10 @@ if [target_info exists gdb,nosignals] {
     unsupported "backtrace @ signal handler"
 } else {
     gdb_test_multiple "signal SIGUSR1" "send SIGUSR1" {
-	-re "\r\n\032\032post-prompt\r\nContinuing with signal SIGUSR1.\r\n\r\n\032\032starting\(\(\r\n\r\n\032\032frames-invalid\)|\(\r\n\r\n\032\032breakpoints-invalid\)\)+\r\n\r\n\032\032breakpoint 2\r\n\r\nBreakpoint 2, \r\n\032\032frame-begin 0 $hex\r\n\r\n\032\032frame-function-name\r\nhandle_USR1\r\n\032\032frame-args\r\n \\(\r\n\032\032arg-begin\r\nsig\r\n\032\032arg-name-end\r\n=\r\n\032\032arg-value -\r\n$decimal\r\n\032\032arg-end\r\n\\)\r\n\032\032frame-source-begin\r\n at \r\n\032\032frame-source-file\r\n${escapedsrcfile}\r\n\032\032frame-source-file-end\r\n:\r\n\032\032frame-source-line\r\n.*\r\n\032\032frame-source-end\r\n\r\n\r\n\032\032source.*annota1.c:.*:.*:beg:$hex\r\n$decimal\[^\r\n\]+\r\n\r\n\032\032frame-end\r\n\r\n\032\032stopped\r\n$gdb_prompt$" {
+	-re "\r\n\032\032post-prompt\r\nContinuing with signal SIGUSR1.\r\n\r\n\032\032starting\(\(\r\n\r\n\032\032frames-invalid\)|\(\r\n\r\n\032\032breakpoints-invalid\)\)+\r\n\r\n\032\032breakpoint 2\r\n\r\nBreakpoint 2, \r\n\032\032frame-begin 0 $hex\r\n\r\n\032\032frame-function-name\r\nhandle_USR1\r\n\032\032frame-args\r\n \\(\r\n\032\032arg-begin\r\nsig\r\n\032\032arg-name-end\r\n=\r\n\032\032arg-value -\r\n$decimal\r\n\032\032arg-end\r\n\\)\r\n\032\032frame-source-begin\r\n at \r\n\032\032frame-source-file\r\n${escapedsrcfile}\r\n\032\032frame-source-file-end\r\n:\r\n\032\032frame-source-line\r\n.*\r\n\032\032frame-source-end\r\n\r\n\r\n\032\032source.*annota1.c:.*:.*:beg:$hex\r\n\r\n\032\032frame-end\r\n\r\n\032\032stopped\r\n$gdb_prompt$" {
 	    pass $gdb_test_name
 	}
-	-re "\r\n\032\032post-prompt\r\nContinuing with signal SIGUSR1.\r\n\r\n\032\032starting\(\(\r\n\r\n\032\032frames-invalid\)|\(\r\n\r\n\032\032breakpoints-invalid\)\)+\r\n\r\n\032\032breakpoint 2\r\n\r\nBreakpoint 2, \r\n\032\032frame-begin 0 $hex\r\n\r\n\032\032frame-function-name\r\nhandle_USR1\r\n\032\032frame-args\r\n \\(\r\n\032\032arg-begin\r\nsig\r\n\032\032arg-name-end\r\n=\r\n\032\032arg-value -\r\n$decimal\r\n\032\032arg-end\r\n\\)\r\n\032\032frame-source-begin\r\n at \r\n\032\032frame-source-file\r\n.*${srcfile}\r\n\032\032frame-source-file-end\r\n:\r\n\032\032frame-source-line\r\n.*\r\n\032\032frame-source-end\r\n\r\n\r\n\032\032source.*annota1.c:.*:.*:beg:$hex\r\n$decimal\[^\r\n\]+\r\n\r\n\032\032frame-end\r\n\r\n\032\032stopped\r\n$gdb_prompt$" {
+	-re "\r\n\032\032post-prompt\r\nContinuing with signal SIGUSR1.\r\n\r\n\032\032starting\(\(\r\n\r\n\032\032frames-invalid\)|\(\r\n\r\n\032\032breakpoints-invalid\)\)+\r\n\r\n\032\032breakpoint 2\r\n\r\nBreakpoint 2, \r\n\032\032frame-begin 0 $hex\r\n\r\n\032\032frame-function-name\r\nhandle_USR1\r\n\032\032frame-args\r\n \\(\r\n\032\032arg-begin\r\nsig\r\n\032\032arg-name-end\r\n=\r\n\032\032arg-value -\r\n$decimal\r\n\032\032arg-end\r\n\\)\r\n\032\032frame-source-begin\r\n at \r\n\032\032frame-source-file\r\n.*${srcfile}\r\n\032\032frame-source-file-end\r\n:\r\n\032\032frame-source-line\r\n.*\r\n\032\032frame-source-end\r\n\r\n\r\n\032\032source.*annota1.c:.*:.*:beg:$hex\r\n\r\n\032\032frame-end\r\n\r\n\032\032stopped\r\n$gdb_prompt$" {
 	    setup_xfail "*-*-*" 1270
 	    fail $gdb_test_name
 	}
@@ -459,8 +480,7 @@ proc thread_test {} {
 	gdb_start
 	gdb_reinitialize_dir $srcdir/$subdir
 	gdb_load ${binfile}
-	if { ![runto main] } then {
-	    fail "run to main"
+	if { ![runto_main] } then {
 	    return
 	}
 

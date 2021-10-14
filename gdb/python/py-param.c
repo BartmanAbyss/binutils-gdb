@@ -1,6 +1,6 @@
 /* GDB parameters implemented in Python
 
-   Copyright (C) 2008-2020 Free Software Foundation, Inc.
+   Copyright (C) 2008-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,13 +29,10 @@
 #include "arch-utils.h"
 
 /* Parameter constants and their values.  */
-struct parm_constant
-{
+static struct {
   const char *name;
   int value;
-};
-
-struct parm_constant parm_constants[] =
+} parm_constants[] =
 {
   { "PARAM_BOOLEAN", var_boolean }, /* ARI: var_boolean */
   { "PARAM_AUTO_BOOLEAN", var_auto_boolean },
@@ -67,8 +64,9 @@ union parmpy_variable
   /* Hold an unsigned integer value, for uinteger.  */
   unsigned int uintval;
 
-  /* Hold a string, for the various string types.  */
-  char *stringval;
+  /* Hold a string, for the various string types.  The std::string is
+     new-ed.  */
+  std::string *stringval;
 
   /* Hold a string, for enums.  */
   const char *cstringval;
@@ -91,7 +89,28 @@ struct parmpy_object
   const char **enumeration;
 };
 
-typedef struct parmpy_object parmpy_object;
+/* Wraps a setting around an existing parmpy_object.  This abstraction
+   is used to manipulate the value in S->VALUE in a type safe manner using
+   the setting interface.  */
+
+static setting
+make_setting (parmpy_object *s)
+{
+  if (var_type_uses<bool> (s->type))
+    return setting (s->type, &s->value.boolval);
+  else if (var_type_uses<int> (s->type))
+    return setting (s->type, &s->value.intval);
+  else if (var_type_uses<auto_boolean> (s->type))
+    return setting (s->type, &s->value.autoboolval);
+  else if (var_type_uses<unsigned int> (s->type))
+    return setting (s->type, &s->value.uintval);
+  else if (var_type_uses<std::string> (s->type))
+    return setting (s->type, s->value.stringval);
+  else if (var_type_uses<const char *> (s->type))
+    return setting (s->type, &s->value.cstringval);
+  else
+    gdb_assert_not_reached ("unhandled var type");
+}
 
 extern PyTypeObject parmpy_object_type
     CPYCHECKER_TYPE_OBJECT_FOR_TYPEDEF ("parmpy_object");
@@ -115,7 +134,7 @@ get_attr (PyObject *obj, PyObject *attr_name)
     {
       parmpy_object *self = (parmpy_object *) obj;
 
-      return gdbpy_parameter_value (self->type, &self->value);
+      return gdbpy_parameter_value (make_setting (self));
     }
 
   return PyObject_GenericGetAttr (obj, attr_name);
@@ -144,13 +163,7 @@ set_parameter_value (parmpy_object *self, PyObject *value)
 	  return -1;
 	}
       if (value == Py_None)
-	{
-	  xfree (self->value.stringval);
-	  if (self->type == var_optional_filename)
-	    self->value.stringval = xstrdup ("");
-	  else
-	    self->value.stringval = NULL;
-	}
+	self->value.stringval->clear ();
       else
 	{
 	  gdb::unique_xmalloc_ptr<char>
@@ -158,8 +171,7 @@ set_parameter_value (parmpy_object *self, PyObject *value)
 	  if (string == NULL)
 	    return -1;
 
-	  xfree (self->value.stringval);
-	  self->value.stringval = string.release ();
+	  *self->value.stringval = string.get ();
 	}
       break;
 
@@ -373,16 +385,15 @@ call_doc_function (PyObject *obj, PyObject *method, PyObject *arg)
 }
 
 /* A callback function that is registered against the respective
-   add_setshow_* set_doc prototype.  This function will either call
-   the Python function "get_set_string" or extract the Python
-   attribute "set_doc" and return the contents as a string.  If
-   neither exist, insert a string indicating the Parameter is not
-   documented.  */
+   add_setshow_* set_doc prototype.  This function calls the Python function
+   "get_set_string" if it exists, which will return a string.  That string
+   is then printed.  If "get_set_string" does not exist, or returns an
+   empty string, then nothing is printed.  */
 static void
 get_set_value (const char *args, int from_tty,
 	       struct cmd_list_element *c)
 {
-  PyObject *obj = (PyObject *) get_cmd_context (c);
+  PyObject *obj = (PyObject *) c->context ();
   gdb::unique_xmalloc_ptr<char> set_doc_string;
 
   gdbpy_enter enter_py (get_current_arch (), current_language);
@@ -417,7 +428,7 @@ get_show_value (struct ui_file *file, int from_tty,
 		struct cmd_list_element *c,
 		const char *value)
 {
-  PyObject *obj = (PyObject *) get_cmd_context (c);
+  PyObject *obj = (PyObject *) c->context ();
   gdb::unique_xmalloc_ptr<char> show_doc_string;
 
   gdbpy_enter enter_py (get_current_arch (), current_language);
@@ -464,119 +475,122 @@ get_show_value (struct ui_file *file, int from_tty,
    function.  */
 static void
 add_setshow_generic (int parmclass, enum command_class cmdclass,
-		     const char *cmd_name, parmpy_object *self,
+		     gdb::unique_xmalloc_ptr<char> cmd_name,
+		     parmpy_object *self,
 		     const char *set_doc, const char *show_doc,
 		     const char *help_doc,
 		     struct cmd_list_element **set_list,
 		     struct cmd_list_element **show_list)
 {
-  struct cmd_list_element *param = NULL;
-  const char *tmp_name = NULL;
+  set_show_commands commands;
 
   switch (parmclass)
     {
     case var_boolean:
-
-      add_setshow_boolean_cmd (cmd_name, cmdclass,
-			       &self->value.boolval, set_doc, show_doc,
-			       help_doc, get_set_value, get_show_value,
-			       set_list, show_list);
+      commands = add_setshow_boolean_cmd (cmd_name.get (), cmdclass,
+					  &self->value.boolval, set_doc,
+					  show_doc, help_doc, get_set_value,
+					  get_show_value, set_list, show_list);
 
       break;
 
     case var_auto_boolean:
-      add_setshow_auto_boolean_cmd (cmd_name, cmdclass,
-				    &self->value.autoboolval,
-				    set_doc, show_doc, help_doc,
-				    get_set_value, get_show_value,
-				    set_list, show_list);
+      commands = add_setshow_auto_boolean_cmd (cmd_name.get (), cmdclass,
+					       &self->value.autoboolval,
+					       set_doc, show_doc, help_doc,
+					       get_set_value, get_show_value,
+					       set_list, show_list);
       break;
 
     case var_uinteger:
-      add_setshow_uinteger_cmd (cmd_name, cmdclass,
-				&self->value.uintval, set_doc, show_doc,
-				help_doc, get_set_value, get_show_value,
-				set_list, show_list);
+      commands = add_setshow_uinteger_cmd (cmd_name.get (), cmdclass,
+					   &self->value.uintval, set_doc,
+					   show_doc, help_doc, get_set_value,
+					   get_show_value, set_list, show_list);
       break;
 
     case var_integer:
-      add_setshow_integer_cmd (cmd_name, cmdclass,
-			       &self->value.intval, set_doc, show_doc,
-			       help_doc, get_set_value, get_show_value,
-			       set_list, show_list); break;
+      commands = add_setshow_integer_cmd (cmd_name.get (), cmdclass,
+					  &self->value.intval, set_doc,
+					  show_doc, help_doc, get_set_value,
+					  get_show_value, set_list, show_list);
+      break;
 
     case var_string:
-      add_setshow_string_cmd (cmd_name, cmdclass,
-			      &self->value.stringval, set_doc, show_doc,
-			      help_doc, get_set_value, get_show_value,
-			      set_list, show_list); break;
+      commands = add_setshow_string_cmd (cmd_name.get (), cmdclass,
+					 self->value.stringval, set_doc,
+					 show_doc, help_doc, get_set_value,
+					 get_show_value, set_list, show_list);
+      break;
 
     case var_string_noescape:
-      add_setshow_string_noescape_cmd (cmd_name, cmdclass,
-				       &self->value.stringval,
-				       set_doc, show_doc, help_doc,
-				       get_set_value, get_show_value,
-				       set_list, show_list);
-
+      commands = add_setshow_string_noescape_cmd (cmd_name.get (), cmdclass,
+						  self->value.stringval,
+						  set_doc, show_doc, help_doc,
+						  get_set_value, get_show_value,
+						  set_list, show_list);
       break;
 
     case var_optional_filename:
-      add_setshow_optional_filename_cmd (cmd_name, cmdclass,
-					 &self->value.stringval, set_doc,
-					 show_doc, help_doc, get_set_value,
-					 get_show_value, set_list,
-					 show_list);
+      commands = add_setshow_optional_filename_cmd (cmd_name.get (), cmdclass,
+						    self->value.stringval,
+						    set_doc, show_doc, help_doc,
+						    get_set_value,
+						    get_show_value, set_list,
+						    show_list);
       break;
 
     case var_filename:
-      add_setshow_filename_cmd (cmd_name, cmdclass,
-				&self->value.stringval, set_doc, show_doc,
-				help_doc, get_set_value, get_show_value,
-				set_list, show_list); break;
+      commands = add_setshow_filename_cmd (cmd_name.get (), cmdclass,
+					   self->value.stringval, set_doc,
+					   show_doc, help_doc, get_set_value,
+					   get_show_value, set_list, show_list);
+      break;
 
     case var_zinteger:
-      add_setshow_zinteger_cmd (cmd_name, cmdclass,
-				&self->value.intval, set_doc, show_doc,
-				help_doc, get_set_value, get_show_value,
-				set_list, show_list);
+      commands = add_setshow_zinteger_cmd (cmd_name.get (), cmdclass,
+					   &self->value.intval, set_doc,
+					   show_doc, help_doc, get_set_value,
+					   get_show_value, set_list, show_list);
       break;
 
     case var_zuinteger:
-      add_setshow_zuinteger_cmd (cmd_name, cmdclass,
-				&self->value.uintval, set_doc, show_doc,
-				help_doc, get_set_value, get_show_value,
-				set_list, show_list);
+      commands = add_setshow_zuinteger_cmd (cmd_name.get (), cmdclass,
+					    &self->value.uintval, set_doc,
+					    show_doc, help_doc, get_set_value,
+					    get_show_value, set_list,
+					    show_list);
       break;
 
     case var_zuinteger_unlimited:
-      add_setshow_zuinteger_unlimited_cmd (cmd_name, cmdclass,
-					   &self->value.intval, set_doc,
-					   show_doc, help_doc, get_set_value,
-					   get_show_value,
-					   set_list, show_list);
+      commands = add_setshow_zuinteger_unlimited_cmd (cmd_name.get (), cmdclass,
+						      &self->value.intval,
+						      set_doc, show_doc,
+						      help_doc, get_set_value,
+						      get_show_value, set_list,
+						      show_list);
       break;
 
     case var_enum:
-      add_setshow_enum_cmd (cmd_name, cmdclass, self->enumeration,
-			    &self->value.cstringval, set_doc, show_doc,
-			    help_doc, get_set_value, get_show_value,
-			    set_list, show_list);
+      commands = add_setshow_enum_cmd (cmd_name.get (), cmdclass,
+				       self->enumeration,
+				       &self->value.cstringval, set_doc,
+				       show_doc, help_doc, get_set_value,
+				       get_show_value, set_list, show_list);
       /* Initialize the value, just in case.  */
       self->value.cstringval = self->enumeration[0];
       break;
+
+    default:
+      gdb_assert_not_reached ("Unhandled parameter class.");
     }
 
-  /* Lookup created parameter, and register Python object against the
-     parameter context.  Perform this task against both lists.  */
-  tmp_name = cmd_name;
-  param = lookup_cmd (&tmp_name, *show_list, "", 0, 1);
-  if (param)
-    set_cmd_context (param, self);
+  /* Register Python objects in both commands' context.  */
+  commands.set->set_context (self);
+  commands.show->set_context (self);
 
-  tmp_name = cmd_name;
-  param = lookup_cmd (&tmp_name, *set_list, "", 0, 1);
-  if (param)
-    set_cmd_context (param, self);
+  /* We (unfortunately) currently leak the command name.  */
+  cmd_name.release ();
 }
 
 /* A helper which computes enum values.  Returns 1 on success.  Returns 0 on
@@ -663,7 +677,6 @@ parmpy_init (PyObject *self, PyObject *args, PyObject *kwds)
   parmpy_object *obj = (parmpy_object *) self;
   const char *name;
   gdb::unique_xmalloc_ptr<char> set_doc, show_doc, doc;
-  char *cmd_name;
   int parmclass, cmdtype;
   PyObject *enum_values = NULL;
   struct cmd_list_element **set_list, **show_list;
@@ -712,15 +725,16 @@ parmpy_init (PyObject *self, PyObject *args, PyObject *kwds)
   obj->type = (enum var_types) parmclass;
   memset (&obj->value, 0, sizeof (obj->value));
 
-  cmd_name = gdbpy_parse_command_name (name, &set_list,
-				       &setlist);
+  if (var_type_uses<std::string> (obj->type))
+    obj->value.stringval = new std::string;
 
-  if (! cmd_name)
+  gdb::unique_xmalloc_ptr<char> cmd_name
+    = gdbpy_parse_command_name (name, &set_list, &setlist);
+  if (cmd_name == nullptr)
     return -1;
-  xfree (cmd_name);
-  cmd_name = gdbpy_parse_command_name (name, &show_list,
-				       &showlist);
-  if (! cmd_name)
+
+  cmd_name = gdbpy_parse_command_name (name, &show_list, &showlist);
+  if (cmd_name == nullptr)
     return -1;
 
   set_doc = get_doc_string (self, set_doc_cst);
@@ -732,13 +746,12 @@ parmpy_init (PyObject *self, PyObject *args, PyObject *kwds)
   try
     {
       add_setshow_generic (parmclass, (enum command_class) cmdtype,
-			   cmd_name, obj,
+			   std::move (cmd_name), obj,
 			   set_doc.get (), show_doc.get (),
 			   doc.get (), set_list, show_list);
     }
   catch (const gdb_exception &except)
     {
-      xfree (cmd_name);
       Py_DECREF (self);
       gdbpy_convert_exception (except);
       return -1;
@@ -747,7 +760,16 @@ parmpy_init (PyObject *self, PyObject *args, PyObject *kwds)
   return 0;
 }
 
-
+/* Deallocate function for a gdb.Parameter.  */
+
+static void
+parmpy_dealloc (PyObject *obj)
+{
+  parmpy_object *parm_obj = (parmpy_object *) obj;
+
+  if (var_type_uses<std::string> (parm_obj->type))
+    delete parm_obj->value.stringval;
+}
 
 /* Initialize the 'parameters' module.  */
 int
@@ -786,7 +808,7 @@ PyTypeObject parmpy_object_type =
   "gdb.Parameter",		  /*tp_name*/
   sizeof (parmpy_object),	  /*tp_basicsize*/
   0,				  /*tp_itemsize*/
-  0,				  /*tp_dealloc*/
+  parmpy_dealloc,		  /*tp_dealloc*/
   0,				  /*tp_print*/
   0,				  /*tp_getattr*/
   0,				  /*tp_setattr*/

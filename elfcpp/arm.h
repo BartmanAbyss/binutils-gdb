@@ -1,6 +1,6 @@
 // arm.h -- ELF definitions specific to EM_ARM  -*- C++ -*-
 
-// Copyright (C) 2009-2020 Free Software Foundation, Inc.
+// Copyright (C) 2009-2021 Free Software Foundation, Inc.
 // Written by Doug Kwan <dougkwan@google.com>.
 
 // This file is part of elfcpp.
@@ -306,6 +306,10 @@ enum
   Tag_undefined43 = 43,
   Tag_DIV_use = 44,
   Tag_MVE_arch = 48,
+  Tag_PAC_extension = 50,
+  Tag_BTI_extension = 52,
+  Tag_BTI_use = 74,
+  Tag_PACRET_use = 76,
   Tag_nodefaults = 64,
   Tag_also_compatible_with = 65,
   Tag_T2EE_use = 66,

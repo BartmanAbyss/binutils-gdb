@@ -1,5 +1,5 @@
 /* Common target dependent code for GDB on ARM systems.
-   Copyright (C) 2002-2020 Free Software Foundation, Inc.
+   Copyright (C) 2002-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -100,12 +100,24 @@ struct gdbarch_tdep
   /* The number of VFP registers reported by the target.  It is zero
      if VFP registers are not supported.  */
   int vfp_register_count;
-  bool have_vfp_pseudos;	/* Are we synthesizing the single precision
+  bool have_s_pseudos;		/* Are we synthesizing the single precision
 				   VFP registers?  */
-  bool have_neon_pseudos;	/* Are we synthesizing the quad precision
-				   NEON registers?  Requires
-				   have_vfp_pseudos.  */
+  int s_pseudo_base;		/* Register number for the first S pseudo
+				   register.  */
+  int s_pseudo_count;		/* Number of S pseudo registers.  */
+  bool have_q_pseudos;		/* Are we synthesizing the quad precision
+				   Q (NEON or MVE) registers?  Requires
+				   have_s_pseudos.  */
+  int q_pseudo_base;		/* Register number for the first quad
+				   precision pseudo register.  */
+  int q_pseudo_count;		/* Number of quad precision pseudo
+				   registers.  */
   bool have_neon;		/* Do we have a NEON unit?  */
+
+  bool have_mve;		/* Do we have a MVE extension?  */
+  int mve_vpr_regnum;		/* MVE VPR register number.  */
+  int mve_pseudo_base;		/* Number of the first MVE pseudo register.  */
+  int mve_pseudo_count;		/* Total number of MVE pseudo registers.  */
 
   bool is_m;			/* Does the target follow the "M" profile.  */
   CORE_ADDR lowest_pc;		/* Lowest address at which instructions 
@@ -149,7 +161,8 @@ struct gdbarch_tdep
    sequence) and any scratch words, etc.  */
 #define ARM_DISPLACED_MODIFIED_INSNS	8
 
-struct arm_displaced_step_closure : public displaced_step_closure
+struct arm_displaced_step_copy_insn_closure
+  : public displaced_step_copy_insn_closure
 {
   ULONGEST tmp[DISPLACED_TEMPS];
   int rd;
@@ -194,9 +207,9 @@ struct arm_displaced_step_closure : public displaced_step_closure
     struct
     {
       /* If non-NULL, override generic SVC handling (e.g. for a particular
-         OS).  */
+	 OS).  */
       int (*copy_svc_os) (struct gdbarch *gdbarch, struct regcache *regs,
-			  arm_displaced_step_closure *dsc);
+			  arm_displaced_step_copy_insn_closure *dsc);
     } svc;
   } u;
 
@@ -215,7 +228,7 @@ struct arm_displaced_step_closure : public displaced_step_closure
   CORE_ADDR insn_addr;
   CORE_ADDR scratch_base;
   void (*cleanup) (struct gdbarch *, struct regcache *,
-		   arm_displaced_step_closure *);
+		   arm_displaced_step_copy_insn_closure *);
 };
 
 /* Values for the WRITE_PC argument to displaced_write_reg.  If the register
@@ -234,16 +247,17 @@ enum pc_write_style
 extern void
   arm_process_displaced_insn (struct gdbarch *gdbarch, CORE_ADDR from,
 			      CORE_ADDR to, struct regcache *regs,
-			      arm_displaced_step_closure *dsc);
+			      arm_displaced_step_copy_insn_closure *dsc);
 extern void
   arm_displaced_init_closure (struct gdbarch *gdbarch, CORE_ADDR from,
-			      CORE_ADDR to, arm_displaced_step_closure *dsc);
+			      CORE_ADDR to,
+			      arm_displaced_step_copy_insn_closure *dsc);
 extern ULONGEST
-  displaced_read_reg (struct regcache *regs, arm_displaced_step_closure *dsc,
+  displaced_read_reg (regcache *regs, arm_displaced_step_copy_insn_closure *dsc,
 		      int regno);
 extern void
   displaced_write_reg (struct regcache *regs,
-		       arm_displaced_step_closure *dsc, int regno,
+		       arm_displaced_step_copy_insn_closure *dsc, int regno,
 		       ULONGEST val, enum pc_write_style write_pc);
 
 CORE_ADDR arm_skip_stub (struct frame_info *, CORE_ADDR);
@@ -262,7 +276,7 @@ int arm_is_thumb (struct regcache *regcache);
 int arm_frame_is_thumb (struct frame_info *frame);
 
 extern void arm_displaced_step_fixup (struct gdbarch *,
-				      struct displaced_step_closure *,
+				      displaced_step_copy_insn_closure *,
 				      CORE_ADDR, CORE_ADDR, struct regcache *);
 
 /* Return the bit mask in ARM_PS_REGNUM that indicates Thumb mode.  */
@@ -273,7 +287,7 @@ extern int arm_psr_thumb_bit (struct gdbarch *);
 extern int arm_pc_is_thumb (struct gdbarch *, CORE_ADDR);
 
 extern int arm_process_record (struct gdbarch *gdbarch, 
-                               struct regcache *regcache, CORE_ADDR addr);
+			       struct regcache *regcache, CORE_ADDR addr);
 /* Functions exported from arm-bsd-tdep.h.  */
 
 /* Return the appropriate register set for the core section identified

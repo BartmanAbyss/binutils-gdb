@@ -1,5 +1,5 @@
 /* Handle TIC6X (DSBT) shared libraries for GDB, the GNU Debugger.
-   Copyright (C) 2010-2020 Free Software Foundation, Inc.
+   Copyright (C) 2010-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -280,7 +280,8 @@ dsbt_get_initial_loadmaps (void)
 {
   struct dsbt_info *info = get_dsbt_info ();
   gdb::optional<gdb::byte_vector> buf
-    = target_read_alloc (current_top_target (), TARGET_OBJECT_FDPIC, "exec");
+    = target_read_alloc (current_inferior ()->top_target (),
+			 TARGET_OBJECT_FDPIC, "exec");
 
   if (!buf || buf->empty ())
     {
@@ -291,7 +292,8 @@ dsbt_get_initial_loadmaps (void)
   if (solib_dsbt_debug)
     dsbt_print_loadmap (info->exec_loadmap);
 
-  buf = target_read_alloc (current_top_target (), TARGET_OBJECT_FDPIC, "exec");
+  buf = target_read_alloc (current_inferior ()->top_target (),
+			   TARGET_OBJECT_FDPIC, "exec");
   if (!buf || buf->empty ())
     {
       info->interp_loadmap = NULL;
@@ -394,105 +396,6 @@ fetch_loadmap (CORE_ADDR ldmaddr)
 static void dsbt_relocate_main_executable (void);
 static int enable_break (void);
 
-/* Scan for DYNTAG in .dynamic section of ABFD. If DYNTAG is found 1 is
-   returned and the corresponding PTR is set.  */
-
-static int
-scan_dyntag (int dyntag, bfd *abfd, CORE_ADDR *ptr)
-{
-  int arch_size, step, sect_size;
-  long dyn_tag;
-  CORE_ADDR dyn_ptr, dyn_addr;
-  gdb_byte *bufend, *bufstart, *buf;
-  Elf32_External_Dyn *x_dynp_32;
-  Elf64_External_Dyn *x_dynp_64;
-  struct bfd_section *sect;
-  struct target_section *target_section;
-
-  if (abfd == NULL)
-    return 0;
-
-  if (bfd_get_flavour (abfd) != bfd_target_elf_flavour)
-    return 0;
-
-  arch_size = bfd_get_arch_size (abfd);
-  if (arch_size == -1)
-    return 0;
-
-  /* Find the start address of the .dynamic section.  */
-  sect = bfd_get_section_by_name (abfd, ".dynamic");
-  if (sect == NULL)
-    return 0;
-
-  for (target_section = current_target_sections->sections;
-       target_section < current_target_sections->sections_end;
-       target_section++)
-    if (sect == target_section->the_bfd_section)
-      break;
-  if (target_section < current_target_sections->sections_end)
-    dyn_addr = target_section->addr;
-  else
-    {
-      /* ABFD may come from OBJFILE acting only as a symbol file without being
-	 loaded into the target (see add_symbol_file_command).  This case is
-	 such fallback to the file VMA address without the possibility of
-	 having the section relocated to its actual in-memory address.  */
-
-      dyn_addr = bfd_section_vma (sect);
-    }
-
-  /* Read in .dynamic from the BFD.  We will get the actual value
-     from memory later.  */
-  sect_size = bfd_section_size (sect);
-  buf = bufstart = (gdb_byte *) alloca (sect_size);
-  if (!bfd_get_section_contents (abfd, sect,
-				 buf, 0, sect_size))
-    return 0;
-
-  /* Iterate over BUF and scan for DYNTAG.  If found, set PTR and return.  */
-  step = (arch_size == 32) ? sizeof (Elf32_External_Dyn)
-			   : sizeof (Elf64_External_Dyn);
-  for (bufend = buf + sect_size;
-       buf < bufend;
-       buf += step)
-  {
-    if (arch_size == 32)
-      {
-	x_dynp_32 = (Elf32_External_Dyn *) buf;
-	dyn_tag = bfd_h_get_32 (abfd, (bfd_byte *) x_dynp_32->d_tag);
-	dyn_ptr = bfd_h_get_32 (abfd, (bfd_byte *) x_dynp_32->d_un.d_ptr);
-      }
-    else
-      {
-	x_dynp_64 = (Elf64_External_Dyn *) buf;
-	dyn_tag = bfd_h_get_64 (abfd, (bfd_byte *) x_dynp_64->d_tag);
-	dyn_ptr = bfd_h_get_64 (abfd, (bfd_byte *) x_dynp_64->d_un.d_ptr);
-      }
-     if (dyn_tag == DT_NULL)
-       return 0;
-     if (dyn_tag == dyntag)
-       {
-	 /* If requested, try to read the runtime value of this .dynamic
-	    entry.  */
-	 if (ptr)
-	   {
-	     struct type *ptr_type;
-	     gdb_byte ptr_buf[8];
-	     CORE_ADDR ptr_addr;
-
-	     ptr_type = builtin_type (target_gdbarch ())->builtin_data_ptr;
-	     ptr_addr = dyn_addr + (buf - bufstart) + arch_size / 8;
-	     if (target_read_memory (ptr_addr, ptr_buf, arch_size / 8) == 0)
-	       dyn_ptr = extract_typed_address (ptr_buf, ptr_type);
-	     *ptr = dyn_ptr;
-	   }
-	 return 1;
-       }
-  }
-
-  return 0;
-}
-
 /* See solist.h. */
 
 static int
@@ -552,7 +455,7 @@ lm_base (void)
     return info->lm_base_cache;
 
   got_sym = lookup_minimal_symbol ("_GLOBAL_OFFSET_TABLE_", NULL,
-				   symfile_objfile);
+				   current_program_space->symfile_object_file);
 
   if (got_sym.minsym != 0)
     {
@@ -562,7 +465,9 @@ lm_base (void)
 			    "lm_base: get addr %x by _GLOBAL_OFFSET_TABLE_.\n",
 			    (unsigned int) addr);
     }
-  else if (scan_dyntag (DT_PLTGOT, exec_bfd, &addr))
+  else if (gdb_bfd_scan_elf_dyntag (DT_PLTGOT,
+				    current_program_space->exec_bfd (),
+				    &addr, NULL))
     {
       struct int_elf32_dsbt_loadmap *ldm;
 
@@ -681,8 +586,6 @@ dsbt_current_sos (void)
 	 this in the list of shared objects.  */
       if (dsbt_index != 0)
 	{
-	  int errcode;
-	  gdb::unique_xmalloc_ptr<char> name_buf;
 	  struct int_elf32_dsbt_loadmap *loadmap;
 	  struct so_list *sop;
 	  CORE_ADDR addr;
@@ -703,12 +606,11 @@ dsbt_current_sos (void)
 	  addr = extract_unsigned_integer (lm_buf.l_name,
 					   sizeof (lm_buf.l_name),
 					   byte_order);
-	  target_read_string (addr, &name_buf, SO_NAME_MAX_PATH_SIZE - 1,
-			      &errcode);
+	  gdb::unique_xmalloc_ptr<char> name_buf
+	    = target_read_string (addr, SO_NAME_MAX_PATH_SIZE - 1);
 
-	  if (errcode != 0)
-	    warning (_("Can't read pathname for link map entry: %s."),
-		     safe_strerror (errcode));
+	  if (name_buf == nullptr)
+	    warning (_("Can't read pathname for link map entry."));
 	  else
 	    {
 	      if (solib_dsbt_debug)
@@ -781,10 +683,10 @@ enable_break (void)
   asection *interp_sect;
   struct dsbt_info *info;
 
-  if (exec_bfd == NULL)
+  if (current_program_space->exec_bfd () == NULL)
     return 0;
 
-  if (!target_has_execution)
+  if (!target_has_execution ())
     return 0;
 
   info = get_dsbt_info ();
@@ -796,7 +698,8 @@ enable_break (void)
 
   /* Find the .interp section; if not found, warn the user and drop
      into the old breakpoint at symbol code.  */
-  interp_sect = bfd_get_section_by_name (exec_bfd, ".interp");
+  interp_sect = bfd_get_section_by_name (current_program_space->exec_bfd (),
+					 ".interp");
   if (interp_sect)
     {
       unsigned int interp_sect_size;
@@ -809,8 +712,8 @@ enable_break (void)
 	 the contents specify the dynamic linker this program uses.  */
       interp_sect_size = bfd_section_size (interp_sect);
       buf = (char *) alloca (interp_sect_size);
-      bfd_get_section_contents (exec_bfd, interp_sect,
-				buf, 0, interp_sect_size);
+      bfd_get_section_contents (current_program_space->exec_bfd (),
+				interp_sect, buf, 0, interp_sect_size);
 
       /* Now we need to figure out where the dynamic linker was
 	 loaded so that we can load its symbols and place a breakpoint
@@ -911,21 +814,22 @@ dsbt_relocate_main_executable (void)
   info->main_executable_lm_info = new lm_info_dsbt;
   info->main_executable_lm_info->map = ldm;
 
-  section_offsets new_offsets (symfile_objfile->section_offsets.size ());
+  objfile *objf = current_program_space->symfile_object_file;
+  section_offsets new_offsets (objf->section_offsets.size ());
   changed = 0;
 
-  ALL_OBJFILE_OSECTIONS (symfile_objfile, osect)
+  ALL_OBJFILE_OSECTIONS (objf, osect)
     {
       CORE_ADDR orig_addr, addr, offset;
       int osect_idx;
       int seg;
 
-      osect_idx = osect - symfile_objfile->sections;
+      osect_idx = osect - objf->sections;
 
       /* Current address of section.  */
-      addr = obj_section_addr (osect);
+      addr = osect->addr ();
       /* Offset from where this section started.  */
-      offset = symfile_objfile->section_offsets[osect_idx];
+      offset = objf->section_offsets[osect_idx];
       /* Original address prior to any past relocations.  */
       orig_addr = addr - offset;
 
@@ -945,10 +849,10 @@ dsbt_relocate_main_executable (void)
     }
 
   if (changed)
-    objfile_relocate (symfile_objfile, new_offsets);
+    objfile_relocate (objf, new_offsets);
 
-  /* Now that symfile_objfile has been relocated, we can compute the
-     GOT value and stash it away.  */
+  /* Now that OBJF has been relocated, we can compute the GOT value
+     and stash it away.  */
 }
 
 /* When gdb starts up the inferior, it nurses it along (through the

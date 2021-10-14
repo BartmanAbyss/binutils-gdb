@@ -1,6 +1,6 @@
 /* Generic serial interface routines
 
-   Copyright (C) 1992-2020 Free Software Foundation, Inc.
+   Copyright (C) 1992-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -38,7 +38,7 @@ static struct serial *scb_base;
 /* Non-NULL gives filename which contains a recording of the remote session,
    suitable for playback by gdbserver.  */
 
-static char *serial_logfile = NULL;
+static std::string serial_logfile;
 static struct ui_file *serial_logfp = NULL;
 
 static const struct serial_ops *serial_interface_lookup (const char *);
@@ -216,7 +216,7 @@ serial_open (const char *name)
     {
 #ifndef USE_WIN32API
       /* Check to see if name is a socket.  If it is, then treat it
-         as such.  Otherwise assume that it's a character device.  */
+	 as such.  Otherwise assume that it's a character device.  */
       struct stat sb;
       if (stat (name, &sb) == 0 && (sb.st_mode & S_IFMT) == S_IFSOCK)
 	ops = serial_interface_lookup ("local");
@@ -251,12 +251,12 @@ serial_open_ops_1 (const struct serial_ops *ops, const char *open_name)
   scb->next = scb_base;
   scb_base = scb;
 
-  if (serial_logfile != NULL)
+  if (!serial_logfile.empty ())
     {
       stdio_file_up file (new stdio_file ());
 
-      if (!file->open (serial_logfile, "w"))
-	perror_with_name (serial_logfile);
+      if (!file->open (serial_logfile.c_str (), "w"))
+	perror_with_name (serial_logfile.c_str ());
 
       serial_logfp = file.release ();
     }
@@ -284,7 +284,7 @@ serial_fdopen_ops (const int fd, const struct serial_ops *ops)
     {
       ops = serial_interface_lookup ("terminal");
       if (!ops)
- 	ops = serial_interface_lookup ("hardwire");
+	ops = serial_interface_lookup ("hardwire");
     }
 
   if (!ops)
@@ -401,7 +401,7 @@ serial_readchar (struct serial *scb, int timeout)
       serial_logchar (serial_logfp, 'r', ch, timeout);
 
       /* Make sure that the log file is as up-to-date as possible,
-         in case we are getting ready to dump core or something.  */
+	 in case we are getting ready to dump core or something.  */
       gdb_flush (serial_logfp);
     }
   if (serial_debug_p (scb))
@@ -427,7 +427,7 @@ serial_write (struct serial *scb, const void *buf, size_t count)
 	serial_logchar (serial_logfp, 'w', str[c] & 0xff, 0);
 
       /* Make sure that the log file is as up-to-date as possible,
-         in case we are getting ready to dump core or something.  */
+	 in case we are getting ready to dump core or something.  */
       gdb_flush (serial_logfp);
     }
   if (serial_debug_p (scb))
@@ -623,10 +623,7 @@ serial_pipe (struct serial *scbs[2])
 static struct cmd_list_element *serial_set_cmdlist;
 static struct cmd_list_element *serial_show_cmdlist;
 
-/* Baud rate specified for talking to serial target systems.  Default
-   is left as -1, so targets can choose their own defaults.  */
-/* FIXME: This means that "show serial baud" and gr_files_info can
-   print -1 or (unsigned int)-1.  This is a Bad User Interface.  */
+/* See serial.h.  */
 
 int baud_rate = -1;
 
@@ -638,7 +635,7 @@ serial_baud_show_cmd (struct ui_file *file, int from_tty,
 		    value);
 }
 
-/* Parity for serial port.  */
+/* See serial.h.  */
 
 int serial_parity = GDBPARITY_NONE;
 
@@ -674,13 +671,13 @@ Use <CR>~. or <CR>~^D to break out."));
 
   add_basic_prefix_cmd ("serial", class_maintenance, _("\
 Set default serial/parallel port configuration."),
-			&serial_set_cmdlist, "set serial ",
+			&serial_set_cmdlist,
 			0/*allow-unknown*/,
 			&setlist);
 
   add_show_prefix_cmd ("serial", class_maintenance, _("\
 Show default serial/parallel port configuration."),
-		       &serial_show_cmdlist, "show serial ",
+		       &serial_show_cmdlist,
 		       0/*allow-unknown*/,
 		       &showlist);
 
@@ -696,12 +693,12 @@ using remote targets."),
 			    &serial_set_cmdlist, &serial_show_cmdlist);
 
   add_setshow_enum_cmd ("parity", no_class, parity_enums,
-                        &parity, _("\
+			&parity, _("\
 Set parity for remote serial I/O."), _("\
 Show parity for remote serial I/O."), NULL,
-                        set_parity,
-                        NULL, /* FIXME: i18n: */
-                        &serial_set_cmdlist, &serial_show_cmdlist);
+			set_parity,
+			NULL, /* FIXME: i18n: */
+			&serial_set_cmdlist, &serial_show_cmdlist);
 
   add_setshow_filename_cmd ("remotelogfile", no_class, &serial_logfile, _("\
 Set filename for remote session recording."), _("\

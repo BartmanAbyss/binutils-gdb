@@ -626,7 +626,7 @@ typedef struct
   int len;
 } arg;
 
-macro macros[] =
+static macro const macros[] =
 {
   { "sizeof", "(`1.end + (- `1))"},
   { "startof", "(`1 | 0)" },
@@ -659,10 +659,10 @@ str_append (char *dest, const char *input, int len)
   return strncat (new_dest, input, len);
 }
 
-static macro *
+static const macro *
 lookup_macro (const char *name)
 {
-  macro *m;
+  const macro *m;
 
   for (m = macros; m->name; ++m)
     if (strncmp (m->name, name, strlen(m->name)) == 0)
@@ -672,7 +672,7 @@ lookup_macro (const char *name)
 }
 
 static char *
-expand_macro (arg *args, int narg, macro *mac)
+expand_macro (arg *args, int narg, const macro *mac)
 {
   char *result = 0, *rescanned_result = 0;
   char *e = mac->expansion;
@@ -722,7 +722,7 @@ expand_string (const char *in, int first_only)
   arg args[MAXARGS];
   int state = IN_TEXT;
   const char *mark = in;
-  macro *pmacro = NULL;
+  const macro *pmacro = NULL;
   char *expansion = 0;
   char *result = 0;
 
@@ -855,8 +855,7 @@ mep_cgen_expand_macros_and_parse_operand (CGEN_CPU_DESC cd, int opindex,
 	*strp_in += (str - hold); 
     }
 
-  if (hold)
-    free (hold);
+  free (hold);
 
   return errmsg;
 }
@@ -1272,7 +1271,7 @@ print_slot_insn (CGEN_CPU_DESC cd,
   CGEN_INSN_INT insn_value;
   CGEN_EXTRACT_INFO ex_info;
 
-  insn_value = cgen_get_insn_value (cd, buf, 32);
+  insn_value = cgen_get_insn_value (cd, buf, 32, cd->insn_endian);
 
   /* Fill in ex_info fields like read_insn would.  Don't actually call
      read_insn, since the incoming buffer is already read (and possibly

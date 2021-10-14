@@ -1,5 +1,5 @@
 /* ARM ELF support for BFD.
-   Copyright (C) 1998-2020 Free Software Foundation, Inc.
+   Copyright (C) 1998-2021 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -327,6 +327,10 @@ enum
   Tag_DIV_use,
   Tag_DSP_extension = 46,
   Tag_MVE_arch = 48,
+  Tag_PAC_extension = 50,
+  Tag_BTI_extension = 52,
+  Tag_BTI_use = 74,
+  Tag_PACRET_use = 76,
   Tag_nodefaults = 64,
   Tag_also_compatible_with,
   Tag_T2EE_use,

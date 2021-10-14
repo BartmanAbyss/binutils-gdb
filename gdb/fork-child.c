@@ -1,6 +1,6 @@
 /* Fork a Unix child process, and set up to debug it, for GDB.
 
-   Copyright (C) 1990-2020 Free Software Foundation, Inc.
+   Copyright (C) 1990-2021 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support.
 
@@ -33,14 +33,14 @@
 /* The exec-wrapper, if any, that will be used when starting the
    inferior.  */
 
-static char *exec_wrapper = NULL;
+static std::string exec_wrapper;
 
 /* See gdbsupport/common-inferior.h.  */
 
 const char *
 get_exec_wrapper ()
 {
-  return exec_wrapper;
+  return !exec_wrapper.empty () ? exec_wrapper.c_str () : nullptr;
 }
 
 /* See nat/fork-inferior.h.  */
@@ -61,8 +61,6 @@ static struct ui *saved_ui = NULL;
 void
 prefork_hook (const char *args)
 {
-  const char *inferior_io_terminal = get_inferior_io_terminal ();
-
   gdb_assert (saved_ui == NULL);
   /* Retain a copy of our UI, since the child will replace this value
      and if we're vforked, we have to restore it.  */
@@ -70,7 +68,7 @@ prefork_hook (const char *args)
 
   /* Tell the terminal handling subsystem what tty we plan to run on;
      it will just record the information for later.  */
-  new_tty_prefork (inferior_io_terminal);
+  new_tty_prefork (current_inferior ()->tty ());
 }
 
 /* See nat/fork-inferior.h.  */
@@ -81,9 +79,6 @@ postfork_hook (pid_t pid)
   inferior *inf = current_inferior ();
 
   inferior_appeared (inf, pid);
-
-  /* Needed for wait_for_inferior stuff.  */
-  inferior_ptid = ptid_t (pid);
 
   gdb_assert (saved_ui != NULL);
   current_ui = saved_ui;
@@ -144,8 +139,7 @@ gdb_startup_inferior (pid_t pid, int num_traps)
 static void
 unset_exec_wrapper_command (const char *args, int from_tty)
 {
-  xfree (exec_wrapper);
-  exec_wrapper = NULL;
+  exec_wrapper.clear ();
 }
 
 static void
@@ -170,8 +164,8 @@ Show the wrapper for running programs."), NULL,
 			    &setlist, &showlist);
 
   add_cmd ("exec-wrapper", class_run, unset_exec_wrapper_command,
-           _("Disable use of an execution wrapper."),
-           &unsetlist);
+	   _("Disable use of an execution wrapper."),
+	   &unsetlist);
 
   add_setshow_boolean_cmd ("startup-with-shell", class_support,
 			   &startup_with_shell, _("\

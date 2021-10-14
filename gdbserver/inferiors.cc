@@ -1,5 +1,5 @@
 /* Inferior process information for the remote server for GDB.
-   Copyright (C) 2002-2020 Free Software Foundation, Inc.
+   Copyright (C) 2002-2021 Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
 
@@ -28,8 +28,10 @@ std::list<thread_info *> all_threads;
 
 struct thread_info *current_thread;
 
-/* The current working directory used to start the inferior.  */
-static const char *current_inferior_cwd = NULL;
+/* The current working directory used to start the inferior.
+
+   Empty if not specified.  */
+static std::string current_inferior_cwd;
 
 struct thread_info *
 add_thread (ptid_t thread_id, void *target_data)
@@ -103,9 +105,9 @@ remove_thread (struct thread_info *thread)
 
   discard_queued_stop_replies (ptid_of (thread));
   all_threads.remove (thread);
-  free_one_thread (thread);
   if (current_thread == thread)
     current_thread = NULL;
+  free_one_thread (thread);
 }
 
 void *
@@ -223,22 +225,28 @@ switch_to_thread (process_stratum_target *ops, ptid_t ptid)
   current_thread = find_thread_ptid (ptid);
 }
 
+/* See inferiors.h.  */
+
+void
+switch_to_process (process_info *proc)
+{
+  int pid = pid_of (proc);
+
+  current_thread = find_any_thread_of_pid (pid);
+}
+
 /* See gdbsupport/common-inferior.h.  */
 
-const char *
+const std::string &
 get_inferior_cwd ()
 {
   return current_inferior_cwd;
 }
 
-/* See gdbsupport/common-inferior.h.  */
+/* See inferiors.h.  */
 
 void
-set_inferior_cwd (const char *cwd)
+set_inferior_cwd (std::string cwd)
 {
-  xfree ((void *) current_inferior_cwd);
-  if (cwd != NULL)
-    current_inferior_cwd = xstrdup (cwd);
-  else
-    current_inferior_cwd = NULL;
+  current_inferior_cwd = std::move (cwd);
 }

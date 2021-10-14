@@ -1,5 +1,5 @@
 /* Remote utility routines for the remote server for GDB.
-   Copyright (C) 1986-2020 Free Software Foundation, Inc.
+   Copyright (C) 1986-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -68,10 +68,6 @@
 #include <ws2tcpip.h>
 #endif
 
-#if __QNX__
-#include <sys/iomgr.h>
-#endif /* __QNX__ */
-
 #ifndef HAVE_SOCKLEN_T
 typedef int socklen_t;
 #endif
@@ -106,6 +102,10 @@ static int remote_desc = -1;
 static int listen_desc = -1;
 
 #ifdef USE_WIN32API
+/* gnulib wraps these as macros, undo them.  */
+# undef read
+# undef write
+
 # define read(fd, buf, len) recv (fd, (char *) buf, len, 0)
 # define write(fd, buf, len) send (fd, (char *) buf, len, 0)
 #endif
@@ -198,7 +198,7 @@ handle_accept_event (int err, gdb_client_data client_data)
   enable_async_notification (remote_desc);
 
   /* Register the event loop handler.  */
-  add_file_handler (remote_desc, handle_serial_event, NULL);
+  add_file_handler (remote_desc, handle_serial_event, NULL, "remote-net");
 
   /* We have a new GDB connection now.  If we were disconnected
      tracing, there's a window where the target could report a stop
@@ -335,7 +335,7 @@ remote_open (const char *name)
       enable_async_notification (remote_desc);
 
       /* Register the event loop handler.  */
-      add_file_handler (remote_desc, handle_serial_event, NULL);
+      add_file_handler (remote_desc, handle_serial_event, NULL, "remote-stdio");
     }
 #ifndef USE_WIN32API
   else if (port_str == NULL)
@@ -376,7 +376,8 @@ remote_open (const char *name)
       enable_async_notification (remote_desc);
 
       /* Register the event loop handler.  */
-      add_file_handler (remote_desc, handle_serial_event, NULL);
+      add_file_handler (remote_desc, handle_serial_event, NULL,
+			"remote-device");
     }
 #endif /* USE_WIN32API */
   else
@@ -402,7 +403,8 @@ remote_open (const char *name)
       fflush (stderr);
 
       /* Register the event loop handler.  */
-      add_file_handler (listen_desc, handle_accept_event, NULL);
+      add_file_handler (listen_desc, handle_accept_event, NULL,
+			"remote-listen");
     }
 }
 
@@ -579,7 +581,7 @@ read_ptid (const char *buf, const char **obuf)
 
       if (obuf)
 	*obuf = pp;
-      return ptid_t (pid, tid, 0);
+      return ptid_t (pid, tid);
     }
 
   /* No multi-process.  Just a tid.  */
@@ -592,7 +594,7 @@ read_ptid (const char *buf, const char **obuf)
 
   if (obuf)
     *obuf = pp;
-  return ptid_t (pid, tid, 0);
+  return ptid_t (pid, tid);
 }
 
 /* Write COUNT bytes in BUF to the client.
@@ -804,28 +806,6 @@ block_unblock_async_io (int block)
 #endif
 }
 
-#ifdef __QNX__
-static void
-nto_comctrl (int enable)
-{
-  struct sigevent event;
-
-  if (enable)
-    {
-      event.sigev_notify = SIGEV_SIGNAL_THREAD;
-      event.sigev_signo = SIGIO;
-      event.sigev_code = 0;
-      event.sigev_value.sival_ptr = NULL;
-      event.sigev_priority = -1;
-      ionotify (remote_desc, _NOTIFY_ACTION_POLLARM, _NOTIFY_COND_INPUT,
-		&event);
-    }
-  else
-    ionotify (remote_desc, _NOTIFY_ACTION_POLL, _NOTIFY_COND_INPUT, NULL);
-}
-#endif /* __QNX__ */
-
-
 /* Current state of asynchronous I/O.  */
 static int async_io_enabled;
 
@@ -839,9 +819,6 @@ enable_async_io (void)
   block_unblock_async_io (0);
 
   async_io_enabled = 1;
-#ifdef __QNX__
-  nto_comctrl (1);
-#endif /* __QNX__ */
 }
 
 /* Disable asynchronous I/O.  */
@@ -854,10 +831,6 @@ disable_async_io (void)
   block_unblock_async_io (1);
 
   async_io_enabled = 0;
-#ifdef __QNX__
-  nto_comctrl (0);
-#endif /* __QNX__ */
-
 }
 
 void
@@ -1297,11 +1270,11 @@ prepare_resume_reply (char *buf, ptid_t ptid,
 	      }
 	  }
 
-	if (dlls_changed)
+	if (current_process ()->dlls_changed)
 	  {
 	    strcpy (buf, "library:;");
 	    buf += strlen (buf);
-	    dlls_changed = 0;
+	    current_process ()->dlls_changed = false;
 	  }
 
 	current_thread = saved_thread;
@@ -1335,31 +1308,11 @@ prepare_resume_reply (char *buf, ptid_t ptid,
     }
 }
 
-void
-decode_m_packet (char *from, CORE_ADDR *mem_addr_ptr, unsigned int *len_ptr)
-{
-  int i = 0, j = 0;
-  char ch;
-  *mem_addr_ptr = *len_ptr = 0;
+/* See remote-utils.h.  */
 
-  while ((ch = from[i++]) != ',')
-    {
-      *mem_addr_ptr = *mem_addr_ptr << 4;
-      *mem_addr_ptr |= fromhex (ch) & 0x0f;
-    }
-
-  for (j = 0; j < 4; j++)
-    {
-      if ((ch = from[i++]) == 0)
-	break;
-      *len_ptr = *len_ptr << 4;
-      *len_ptr |= fromhex (ch) & 0x0f;
-    }
-}
-
-void
-decode_M_packet (char *from, CORE_ADDR *mem_addr_ptr, unsigned int *len_ptr,
-		 unsigned char **to_p)
+const char *
+decode_m_packet_params (const char *from, CORE_ADDR *mem_addr_ptr,
+			unsigned int *len_ptr, const char end_marker)
 {
   int i = 0;
   char ch;
@@ -1371,16 +1324,32 @@ decode_M_packet (char *from, CORE_ADDR *mem_addr_ptr, unsigned int *len_ptr,
       *mem_addr_ptr |= fromhex (ch) & 0x0f;
     }
 
-  while ((ch = from[i++]) != ':')
+  while ((ch = from[i++]) != end_marker)
     {
       *len_ptr = *len_ptr << 4;
       *len_ptr |= fromhex (ch) & 0x0f;
     }
 
+  return from + i;
+}
+
+void
+decode_m_packet (const char *from, CORE_ADDR *mem_addr_ptr,
+		 unsigned int *len_ptr)
+{
+  decode_m_packet_params (from, mem_addr_ptr, len_ptr, '\0');
+}
+
+void
+decode_M_packet (const char *from, CORE_ADDR *mem_addr_ptr,
+		 unsigned int *len_ptr, unsigned char **to_p)
+{
+  from = decode_m_packet_params (from, mem_addr_ptr, len_ptr, ':');
+
   if (*to_p == NULL)
     *to_p = (unsigned char *) xmalloc (*len_ptr);
 
-  hex2bin (&from[i++], *to_p, *len_ptr);
+  hex2bin (from, *to_p, *len_ptr);
 }
 
 int

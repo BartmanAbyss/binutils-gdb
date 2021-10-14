@@ -1,5 +1,5 @@
 /* Target operations for the remote server for GDB.
-   Copyright (C) 2002-2020 Free Software Foundation, Inc.
+   Copyright (C) 2002-2021 Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
 
@@ -27,8 +27,10 @@
 #include "target/wait.h"
 #include "target/waitstatus.h"
 #include "mem-break.h"
+#include "gdbsupport/array-view.h"
 #include "gdbsupport/btrace-common.h"
 #include <vector>
+#include "gdbsupport/byte-vector.h"
 
 struct emit_ops;
 struct buffer;
@@ -127,7 +129,7 @@ public:
      no child stop to report, return is
      null_ptid/TARGET_WAITKIND_IGNORE.  */
   virtual ptid_t wait (ptid_t ptid, target_waitstatus *status,
-		       int options) = 0;
+		       target_wait_flags options) = 0;
 
   /* Fetch registers from the inferior process.
 
@@ -254,10 +256,6 @@ public:
   virtual int get_tls_address (thread_info *thread, CORE_ADDR offset,
 			       CORE_ADDR load_module, CORE_ADDR *address);
 
-  /* Fill BUF with an hostio error packet representing the last hostio
-     error.  */
-  virtual void hostio_last_error (char *buf);
-
   /* Return true if the qxfer_osdata target op is supported.  */
   virtual bool supports_qxfer_osdata ();
 
@@ -315,8 +313,9 @@ public:
 			    unsigned char *myaddr, unsigned int len);
 
   /* Target specific qSupported support.  FEATURES is an array of
-     features with COUNT elements.  */
-  virtual void process_qsupported (char **features, int count);
+     features unsupported by the core of GDBserver.  */
+  virtual void process_qsupported
+    (gdb::array_view<const char * const> features);
 
   /* Return true if the target supports tracepoints, false otherwise.  */
   virtual bool supports_tracepoints ();
@@ -437,7 +436,7 @@ public:
      character string containing the pathname is returned.  This
      string should be copied into a buffer by the client if the string
      will not be immediately used, or if it must persist.  */
-  virtual char *pid_to_exec_file (int pid);
+  virtual const char *pid_to_exec_file (int pid);
 
   /* Return true if any of the multifs ops is supported.  */
   virtual bool supports_multifs ();
@@ -497,6 +496,23 @@ public:
 
   /* Return tdesc index for IPA.  */
   virtual int get_ipa_tdesc_idx ();
+
+  /* Returns true if the target supports memory tagging facilities.  */
+  virtual bool supports_memory_tagging ();
+
+  /* Return the allocated memory tags of type TYPE associated with
+     [ADDRESS, ADDRESS + LEN) in TAGS.
+
+     Returns true if successful and false otherwise.  */
+  virtual bool fetch_memtags (CORE_ADDR address, size_t len,
+			      gdb::byte_vector &tags, int type);
+
+  /* Write the allocation tags of type TYPE contained in TAGS to the
+     memory range [ADDRESS, ADDRESS + LEN).
+
+     Returns true if successful and false otherwise.  */
+  virtual bool store_memtags (CORE_ADDR address, size_t len,
+			      const gdb::byte_vector &tags, int type);
 };
 
 extern process_stratum_target *the_target;
@@ -523,6 +539,9 @@ int kill_inferior (process_info *proc);
 #define target_supports_exec_events() \
   the_target->supports_exec_events ()
 
+#define target_supports_memory_tagging() \
+  the_target->supports_memory_tagging ()
+
 #define target_handle_new_gdb_connection()		 \
   the_target->handle_new_gdb_connection ()
 
@@ -547,8 +566,8 @@ int kill_inferior (process_info *proc);
 #define target_async(enable) \
   the_target->async (enable)
 
-#define target_process_qsupported(features, count)	\
-  the_target->process_qsupported (features, count)
+#define target_process_qsupported(features) \
+  the_target->process_qsupported (features)
 
 #define target_supports_catch_syscall()              	\
   the_target->supports_catch_syscall ()
@@ -661,8 +680,8 @@ target_read_btrace_conf (struct btrace_target_info *tinfo,
 #define target_supports_software_single_step() \
   the_target->supports_software_single_step ()
 
-ptid_t mywait (ptid_t ptid, struct target_waitstatus *ourstatus, int options,
-	       int connected_wait);
+ptid_t mywait (ptid_t ptid, struct target_waitstatus *ourstatus,
+	       target_wait_flags options, int connected_wait);
 
 /* Prepare to read or write memory from the inferior process.  See the
    corresponding process_stratum_target methods for more details.  */

@@ -1,6 +1,6 @@
 /* Dynamic architecture support for GDB, the GNU debugger.
 
-   Copyright (C) 1998-2020 Free Software Foundation, Inc.
+   Copyright (C) 1998-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -38,9 +38,8 @@
 
 #include "dis-asm.h"
 
-int
-default_displaced_step_hw_singlestep (struct gdbarch *gdbarch,
-				      struct displaced_step_closure *closure)
+bool
+default_displaced_step_hw_singlestep (struct gdbarch *gdbarch)
 {
   return !gdbarch_software_single_step_p (gdbarch);
 }
@@ -76,6 +75,55 @@ legacy_register_sim_regno (struct gdbarch *gdbarch, int regnum)
     return regnum;
   else
     return LEGACY_SIM_REGNO_IGNORE;
+}
+
+
+/* See arch-utils.h */
+
+std::string
+default_memtag_to_string (struct gdbarch *gdbarch, struct value *tag)
+{
+  error (_("This architecture has no method to convert a memory tag to"
+	   " a string."));
+}
+
+/* See arch-utils.h */
+
+bool
+default_tagged_address_p (struct gdbarch *gdbarch, struct value *address)
+{
+  /* By default, assume the address is untagged.  */
+  return false;
+}
+
+/* See arch-utils.h */
+
+bool
+default_memtag_matches_p (struct gdbarch *gdbarch, struct value *address)
+{
+  /* By default, assume the tags match.  */
+  return true;
+}
+
+/* See arch-utils.h */
+
+bool
+default_set_memtags (struct gdbarch *gdbarch, struct value *address,
+		     size_t length, const gdb::byte_vector &tags,
+		     memtag_type tag_type)
+{
+  /* By default, return true (successful);  */
+  return true;
+}
+
+/* See arch-utils.h */
+
+struct value *
+default_get_memtag (struct gdbarch *gdbarch, struct value *address,
+		    memtag_type tag_type)
+{
+  /* By default, return no tag.  */
+  return nullptr;
 }
 
 CORE_ADDR
@@ -211,7 +259,7 @@ legacy_virtual_frame_pointer (struct gdbarch *gdbarch,
     *frame_regnum = gdbarch_deprecated_fp_regnum (gdbarch);
   else if (gdbarch_sp_regnum (gdbarch) >= 0
 	   && gdbarch_sp_regnum (gdbarch)
-	        < gdbarch_num_regs (gdbarch))
+		< gdbarch_num_regs (gdbarch))
     *frame_regnum = gdbarch_sp_regnum (gdbarch);
   else
     /* Should this be an internal error?  I guess so, it is reflecting
@@ -231,7 +279,13 @@ default_floatformat_for_type (struct gdbarch *gdbarch,
 {
   const struct floatformat **format = NULL;
 
-  if (len == gdbarch_half_bit (gdbarch))
+  /* Check if this is a bfloat16 type.  It has the same size as the
+     IEEE half float type, so we use the base type name to tell them
+     apart.  */
+  if (name != nullptr && strcmp (name, "__bf16") == 0
+      && len == gdbarch_bfloat16_bit (gdbarch))
+    format = gdbarch_bfloat16_format (gdbarch);
+  else if (len == gdbarch_half_bit (gdbarch))
     format = gdbarch_half_format (gdbarch);
   else if (len == gdbarch_float_bit (gdbarch))
     format = gdbarch_float_format (gdbarch);
@@ -317,25 +371,23 @@ show_endian (struct ui_file *file, int from_tty, struct cmd_list_element *c,
   if (target_byte_order_user == BFD_ENDIAN_UNKNOWN)
     if (gdbarch_byte_order (get_current_arch ()) == BFD_ENDIAN_BIG)
       fprintf_unfiltered (file, _("The target endianness is set automatically "
-				  "(currently big endian)\n"));
+				  "(currently big endian).\n"));
     else
       fprintf_unfiltered (file, _("The target endianness is set automatically "
-				  "(currently little endian)\n"));
+				  "(currently little endian).\n"));
   else
     if (target_byte_order_user == BFD_ENDIAN_BIG)
       fprintf_unfiltered (file,
-			  _("The target is assumed to be big endian\n"));
+			  _("The target is set to big endian.\n"));
     else
       fprintf_unfiltered (file,
-			  _("The target is assumed to be little endian\n"));
+			  _("The target is set to little endian.\n"));
 }
 
 static void
 set_endian (const char *ignore_args, int from_tty, struct cmd_list_element *c)
 {
   struct gdbarch_info info;
-
-  gdbarch_info_init (&info);
 
   if (set_endian_string == endian_auto)
     {
@@ -476,11 +528,11 @@ show_architecture (struct ui_file *file, int from_tty,
 		   struct cmd_list_element *c, const char *value)
 {
   if (target_architecture_user == NULL)
-    fprintf_filtered (file, _("The target architecture is set "
-			      "automatically (currently %s)\n"),
+    fprintf_filtered (file, _("The target architecture is set to "
+			      "\"auto\" (currently \"%s\").\n"),
 		      gdbarch_bfd_arch_info (get_current_arch ())->printable_name);
   else
-    fprintf_filtered (file, _("The target architecture is assumed to be %s\n"),
+    fprintf_filtered (file, _("The target architecture is set to \"%s\".\n"),
 		      set_architecture_string);
 }
 
@@ -493,8 +545,6 @@ set_architecture (const char *ignore_args,
 		  int from_tty, struct cmd_list_element *c)
 {
   struct gdbarch_info info;
-
-  gdbarch_info_init (&info);
 
   if (strcmp (set_architecture_string, "auto") == 0)
     {
@@ -527,7 +577,7 @@ gdbarch_update_p (struct gdbarch_info info)
 
   /* Check for the current file.  */
   if (info.abfd == NULL)
-    info.abfd = exec_bfd;
+    info.abfd = current_program_space->exec_bfd ();
   if (info.abfd == NULL)
     info.abfd = core_bfd;
 
@@ -576,7 +626,6 @@ struct gdbarch *
 gdbarch_from_bfd (bfd *abfd)
 {
   struct gdbarch_info info;
-  gdbarch_info_init (&info);
 
   info.abfd = abfd;
   return gdbarch_find_by_info (info);
@@ -591,7 +640,6 @@ set_gdbarch_from_file (bfd *abfd)
   struct gdbarch_info info;
   struct gdbarch *gdbarch;
 
-  gdbarch_info_init (&info);
   info.abfd = abfd;
   info.target_desc = target_current_description ();
   gdbarch = gdbarch_find_by_info (info);
@@ -621,14 +669,14 @@ static const bfd_target *default_bfd_vec;
 
 static enum bfd_endian default_byte_order = BFD_ENDIAN_UNKNOWN;
 
+/* Printable names of architectures.  Used as the enum list of the
+   "set arch" command.  */
+static std::vector<const char *> arches;
+
 void
 initialize_current_architecture (void)
 {
-  const char **arches = gdbarch_printable_names ();
-  struct gdbarch_info info;
-
-  /* determine a default architecture and byte order.  */
-  gdbarch_info_init (&info);
+  arches = gdbarch_printable_names ();
   
   /* Find a default architecture.  */
   if (default_bfd_arch == NULL)
@@ -636,21 +684,24 @@ initialize_current_architecture (void)
       /* Choose the architecture by taking the first one
 	 alphabetically.  */
       const char *chosen = arches[0];
-      const char **arch;
-      for (arch = arches; *arch != NULL; arch++)
+
+      for (const char *arch : arches)
 	{
-	  if (strcmp (*arch, chosen) < 0)
-	    chosen = *arch;
+	  if (strcmp (arch, chosen) < 0)
+	    chosen = arch;
 	}
+
       if (chosen == NULL)
 	internal_error (__FILE__, __LINE__,
 			_("initialize_current_architecture: No arch"));
+
       default_bfd_arch = bfd_scan_arch (chosen);
       if (default_bfd_arch == NULL)
 	internal_error (__FILE__, __LINE__,
 			_("initialize_current_architecture: Arch not found"));
     }
 
+  gdbarch_info info;
   info.bfd_arch_info = default_bfd_arch;
 
   /* Take several guesses at a byte order.  */
@@ -698,34 +749,18 @@ initialize_current_architecture (void)
      list of architectures.  */
   {
     /* Append ``auto''.  */
-    int nr;
-    for (nr = 0; arches[nr] != NULL; nr++);
-    arches = XRESIZEVEC (const char *, arches, nr + 2);
-    arches[nr + 0] = "auto";
-    arches[nr + 1] = NULL;
-    add_setshow_enum_cmd ("architecture", class_support,
-			  arches, &set_architecture_string, 
-			  _("Set architecture of target."),
-			  _("Show architecture of target."), NULL,
-			  set_architecture, show_architecture,
-			  &setlist, &showlist);
-    add_alias_cmd ("processor", "architecture", class_support, 1, &setlist);
+    arches.push_back ("auto");
+    arches.push_back (nullptr);
+    set_show_commands architecture_cmds
+      = add_setshow_enum_cmd ("architecture", class_support,
+			      arches.data (), &set_architecture_string,
+			      _("Set architecture of target."),
+			      _("Show architecture of target."), NULL,
+			      set_architecture, show_architecture,
+			      &setlist, &showlist);
+    add_alias_cmd ("processor", architecture_cmds.set, class_support, 1,
+		   &setlist);
   }
-}
-
-
-/* Initialize a gdbarch info to values that will be automatically
-   overridden.  Note: Originally, this ``struct info'' was initialized
-   using memset(0).  Unfortunately, that ran into problems, namely
-   BFD_ENDIAN_BIG is zero.  An explicit initialization function that
-   can explicitly set each field to a well defined value is used.  */
-
-void
-gdbarch_info_init (struct gdbarch_info *info)
-{
-  memset (info, 0, sizeof (struct gdbarch_info));
-  info->byte_order = BFD_ENDIAN_UNKNOWN;
-  info->byte_order_for_code = info->byte_order;
 }
 
 /* Similar to init, but this time fill in the blanks.  Information is
@@ -951,13 +986,15 @@ default_gnu_triplet_regexp (struct gdbarch *gdbarch)
   return gdbarch_bfd_arch_info (gdbarch)->arch_name;
 }
 
-/* Default method for gdbarch_addressable_memory_unit_size.  By default, a memory byte has
-   a size of 1 octet.  */
+/* Default method for gdbarch_addressable_memory_unit_size.  The default is
+   based on the bits_per_byte defined in the bfd library for the current
+   architecture, this is usually 8-bits, and so this function will usually
+   return 1 indicating 1 byte is 1 octet.  */
 
 int
 default_addressable_memory_unit_size (struct gdbarch *gdbarch)
 {
-  return 1;
+  return gdbarch_bfd_arch_info (gdbarch)->bits_per_byte / 8;
 }
 
 void
@@ -989,7 +1026,7 @@ default_print_insn (bfd_vma memaddr, disassemble_info *info)
   disassembler_ftype disassemble_fn;
 
   disassemble_fn = disassembler (info->arch, info->endian == BFD_ENDIAN_BIG,
-				 info->mach, exec_bfd);
+				 info->mach, current_program_space->exec_bfd ());
 
   gdb_assert (disassemble_fn != NULL);
   return (*disassemble_fn) (memaddr, info);
@@ -1034,6 +1071,21 @@ std::string
 default_get_pc_address_flags (frame_info *frame, CORE_ADDR pc)
 {
   return "";
+}
+
+/* See arch-utils.h.  */
+void
+default_read_core_file_mappings (struct gdbarch *gdbarch,
+				 struct bfd *cbfd,
+				 gdb::function_view<void (ULONGEST count)>
+				   pre_loop_cb,
+				 gdb::function_view<void (int num,
+							  ULONGEST start,
+							  ULONGEST end,
+							  ULONGEST file_ofs,
+							  const char *filename)>
+				   loop_cb)
+{
 }
 
 void _initialize_gdbarch_utils ();

@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2020 Free Software Foundation, Inc.
+/* Copyright (C) 2007-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -162,6 +162,7 @@ i386_supports_z_point_type (char z_type)
 {
   switch (z_type)
     {
+    case Z_PACKET_HW_BP:
     case Z_PACKET_WRITE_WP:
     case Z_PACKET_ACCESS_WP:
       return 1;
@@ -176,6 +177,7 @@ i386_insert_point (enum raw_bkpt_type type, CORE_ADDR addr,
 {
   switch (type)
     {
+    case raw_bkpt_type_hw:
     case raw_bkpt_type_write_wp:
     case raw_bkpt_type_access_wp:
       {
@@ -197,6 +199,7 @@ i386_remove_point (enum raw_bkpt_type type, CORE_ADDR addr,
 {
   switch (type)
     {
+    case raw_bkpt_type_hw:
     case raw_bkpt_type_write_wp:
     case raw_bkpt_type_access_wp:
       {
@@ -257,7 +260,7 @@ i386_get_thread_context (windows_thread_info *th)
   BOOL ret;
 #ifdef __x86_64__
   if (wow64_process)
-    ret = win32_Wow64GetThreadContext (th->h, &th->wow64_context);
+    ret = Wow64GetThreadContext (th->h, &th->wow64_context);
   else
 #endif
     ret = GetThreadContext (th->h, &th->context);

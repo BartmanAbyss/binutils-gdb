@@ -1,5 +1,5 @@
 /* read.h - of read.c
-   Copyright (C) 1986-2020 Free Software Foundation, Inc.
+   Copyright (C) 1986-2021 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -19,7 +19,7 @@
    02110-1301, USA.  */
 
 extern char *input_line_pointer;	/* -> char we are parsing now.  */
-extern bfd_boolean input_from_string;
+extern bool input_from_string;
 
 /* Define to make whitespace be allowed in many syntactically
    unnecessary places.  Normally undefined.  For compatibility with
@@ -114,7 +114,7 @@ extern char original_case_string[];
 
 extern void pop_insert (const pseudo_typeS *);
 extern unsigned int get_stab_string_offset
-  (const char *, const char *, bfd_boolean);
+  (const char *, const char *, bool);
 extern void aout_process_stab (int, const char *, int, int, int);
 extern char *demand_copy_string (int *lenP);
 extern char *demand_copy_C_string (int *len_pointer);
@@ -132,6 +132,7 @@ extern void emit_expr_with_reloc (expressionS *exp, unsigned int nbytes,
 				  TC_PARSE_CONS_RETURN_TYPE);
 extern void emit_expr_fix (expressionS *, unsigned int, fragS *, char *,
 			   TC_PARSE_CONS_RETURN_TYPE);
+extern void emit_leb128_expr (expressionS *, int);
 extern void equals (char *, int);
 extern void float_cons (int);
 extern void ignore_rest_of_line (void);
@@ -206,6 +207,7 @@ extern void s_purgem (int);
 extern void s_rept (int);
 extern void s_set (int);
 extern void s_space (int mult);
+extern void s_nop (int);
 extern void s_nops (int);
 extern void s_stab (int what);
 extern void s_struct (int);

@@ -1,6 +1,6 @@
 /* Generic static probe support for GDB.
 
-   Copyright (C) 2012-2020 Free Software Foundation, Inc.
+   Copyright (C) 2012-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -185,9 +185,7 @@ parse_probes (const struct event_location *location,
     }
   else
     {
-      struct program_space *pspace;
-
-      ALL_PSPACES (pspace)
+      for (struct program_space *pspace : program_spaces)
 	parse_probes_in_pspace (spops, pspace, objfile_namestr,
 				provider, name, &result);
     }
@@ -573,9 +571,8 @@ info_probes_for_spops (const char *arg, int from_tty,
 	ui_out_emit_tuple tuple_emitter (current_uiout, "probe");
 
 	current_uiout->field_string ("type", probe_type);
-	current_uiout->field_string ("provider",
-				     probe.prob->get_provider ().c_str ());
-	current_uiout->field_string ("name", probe.prob->get_name ().c_str ());
+	current_uiout->field_string ("provider", probe.prob->get_provider ());
+	current_uiout->field_string ("name", probe.prob->get_name ());
 	current_uiout->field_core_addr ("addr", probe.prob->get_gdbarch (),
 					probe.prob->get_relocated_address
 					(probe.objfile));
@@ -790,8 +787,7 @@ If you specify TYPE, there may be additional arguments needed by the\n\
 subcommand.\n\
 If you do not specify any argument, or specify `all', then the command\n\
 will show information about all types of probes."),
-		    &info_probes_cmdlist, "info probes ",
-		    0/*allow-unknown*/, &infolist);
+		    &info_probes_cmdlist, 0/*allow-unknown*/, &infolist);
 
   return &info_probes_cmdlist;
 }

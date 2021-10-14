@@ -1,5 +1,5 @@
 /* GDB self-testing.
-   Copyright (C) 2016-2020 Free Software Foundation, Inc.
+   Copyright (C) 2016-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,6 +21,7 @@
 #include "common-debug.h"
 #include "selftest.h"
 #include <map>
+#include <functional>
 
 namespace selftests
 {
@@ -29,22 +30,6 @@ namespace selftests
    exists.  */
 
 static std::map<std::string, std::unique_ptr<selftest>> tests;
-
-/* A selftest that calls the test function without arguments.  */
-
-struct simple_selftest : public selftest
-{
-  simple_selftest (self_test_function *function_)
-  : function (function_)
-  {}
-
-  void operator() () const override
-  {
-    function ();
-  }
-
-  self_test_function *function;
-};
 
 /* See selftest.h.  */
 
@@ -57,28 +42,70 @@ register_test (const std::string &name, selftest *test)
   tests[name] = std::unique_ptr<selftest> (test);
 }
 
+/* A selftest that calls the test function without arguments.  */
+
+struct lambda_selftest : public selftest
+{
+  lambda_selftest (std::function<void(void)> function_)
+  {
+    function  = function_;
+  }
+
+  void operator() () const override
+  {
+    function ();
+  }
+
+  std::function<void(void)> function;
+};
+
 /* See selftest.h.  */
 
 void
-register_test (const std::string &name, self_test_function *function)
+register_test (const std::string &name,
+	       std::function<void(void)> function)
 {
-  register_test (name, new simple_selftest (function));
+  register_test (name, new lambda_selftest (function));
+}
+
+/* See selftest.h.  */
+
+static bool run_verbose_ = false;
+
+/* See selftest.h.  */
+
+bool
+run_verbose ()
+{
+  return run_verbose_;
 }
 
 /* See selftest.h.  */
 
 void
-run_tests (const char *filter)
+run_tests (gdb::array_view<const char *const> filters, bool verbose)
 {
   int ran = 0, failed = 0;
+  run_verbose_ = verbose;
 
   for (const auto &pair : tests)
     {
       const std::string &name = pair.first;
       const std::unique_ptr<selftest> &test = pair.second;
+      bool run = false;
 
-      if (filter != NULL && *filter != '\0'
-	  && name.find (filter) == std::string::npos)
+      if (filters.empty ())
+	run = true;
+      else
+	{
+	  for (const char *filter : filters)
+	    {
+	      if (name.find (filter) != std::string::npos)
+		run = true;
+	    }
+	}
+
+      if (!run)
 	continue;
 
       try

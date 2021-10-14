@@ -1,6 +1,6 @@
 /* Disassemble support for GDB.
 
-   Copyright (C) 2000-2020 Free Software Foundation, Inc.
+   Copyright (C) 2000-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -39,7 +39,7 @@
 
 /* This variable is used to hold the prospective disassembler_options value
    which is set by the "set disassembler_options" command.  */
-static char *prospective_options = NULL;
+static std::string prospective_options;
 
 /* This structure is used to store line number information for the
    deprecated /m option.
@@ -148,7 +148,7 @@ gdb_disassembler::dis_asm_memory_error (int err, bfd_vma memaddr,
   gdb_disassembler *self
     = static_cast<gdb_disassembler *>(info->application_data);
 
-  self->m_err_memaddr = memaddr;
+  self->m_err_memaddr.emplace (memaddr);
 }
 
 /* Wrapper of print_address.  */
@@ -176,14 +176,14 @@ line_is_less_than (const deprecated_dis_line_entry &mle1,
       if (mle1.start_pc != mle2.start_pc)
 	val = mle1.start_pc < mle2.start_pc;
     else
-        val = mle1.line < mle2.line;
+	val = mle1.line < mle2.line;
     }
   else
     {
       if (mle1.line != mle2.line)
 	val = mle1.line < mle2.line;
       else
-        val = mle1.start_pc < mle2.start_pc;
+	val = mle1.start_pc < mle2.start_pc;
     }
   return val;
 }
@@ -238,13 +238,13 @@ gdb_pretty_print_disassembler::pretty_print_insn (const struct disasm_insn *insn
     std::string name, filename;
     bool omit_fname = ((flags & DISASSEMBLY_OMIT_FNAME) != 0);
     if (!build_address_symbolic (gdbarch, pc, false, omit_fname, &name,
-                                 &offset, &filename, &line, &unmapped))
+				 &offset, &filename, &line, &unmapped))
       {
 	/* We don't care now about line, filename and unmapped.  But we might in
 	   the future.  */
 	m_uiout->text (" <");
 	if (!omit_fname)
-	  m_uiout->field_string ("func-name", name.c_str (),
+	  m_uiout->field_string ("func-name", name,
 				 function_name_style.style ());
 	/* For negative offsets, avoid displaying them as +-N; the sign of
 	   the offset takes the place of the "+" here.  */
@@ -376,12 +376,6 @@ do_mixed_source_and_assembly_deprecated
       if (le[i].line == le[i + 1].line && le[i].pc == le[i + 1].pc)
 	continue;		/* Ignore duplicates.  */
 
-      /* Ignore non-statement line table entries.  This means we print the
-	 source line at the place where GDB would insert a breakpoint for
-	 that line, which seems more intuitive.  */
-      if (le[i].is_stmt == 0)
-	continue;
-
       /* Skip any end-of-function markers.  */
       if (le[i].line == 0)
 	continue;
@@ -466,7 +460,7 @@ do_mixed_source_and_assembly_deprecated
 				   how_many, flags, NULL);
 
       /* When we've reached the end of the mle array, or we've seen the last
-         assembly range for this source line, close out the list/tuple.  */
+	 assembly range for this source line, close out the list/tuple.  */
       if (i == (newlines - 1) || mle[i + 1].line > mle[i].line)
 	{
 	  inner_list_emitter.reset ();
@@ -760,8 +754,7 @@ get_all_disassembler_options (struct gdbarch *gdbarch)
 gdb_disassembler::gdb_disassembler (struct gdbarch *gdbarch,
 				    struct ui_file *file,
 				    di_read_memory_ftype read_memory_func)
-  : m_gdbarch (gdbarch),
-    m_err_memaddr (0)
+  : m_gdbarch (gdbarch)
 {
   init_disassemble_info (&m_di, file, fprintf_disasm);
   m_di.flavour = bfd_target_unknown_flavour;
@@ -796,12 +789,17 @@ int
 gdb_disassembler::print_insn (CORE_ADDR memaddr,
 			      int *branch_delay_insns)
 {
-  m_err_memaddr = 0;
+  m_err_memaddr.reset ();
 
   int length = gdbarch_print_insn (arch (), memaddr, &m_di);
 
   if (length < 0)
-    memory_error (TARGET_XFER_E_IO, m_err_memaddr);
+    {
+      if (m_err_memaddr.has_value ())
+	memory_error (TARGET_XFER_E_IO, *m_err_memaddr);
+      else
+	error (_("unknown disassembler error (error = %d)"), length);
+    }
 
   if (branch_delay_insns != NULL)
     {
@@ -934,13 +932,16 @@ get_disassembler_options (struct gdbarch *gdbarch)
 }
 
 void
-set_disassembler_options (char *prospective_options)
+set_disassembler_options (const char *prospective_options)
 {
   struct gdbarch *gdbarch = get_current_arch ();
   char **disassembler_options = gdbarch_disassembler_options (gdbarch);
   const disasm_options_and_args_t *valid_options_and_args;
   const disasm_options_t *valid_options;
-  char *options = remove_whitespace_and_extra_commas (prospective_options);
+  gdb::unique_xmalloc_ptr<char> prospective_options_local
+    = make_unique_xstrdup (prospective_options);
+  char *options = remove_whitespace_and_extra_commas
+    (prospective_options_local.get ());
   const char *opt;
 
   /* Allow all architectures, even ones that do not support 'set disassembler',
@@ -1009,7 +1010,7 @@ static void
 set_disassembler_options_sfunc (const char *args, int from_tty,
 				struct cmd_list_element *c)
 {
-  set_disassembler_options (prospective_options);
+  set_disassembler_options (prospective_options.c_str ());
 }
 
 static void
@@ -1145,11 +1146,10 @@ void _initialize_disasm ();
 void
 _initialize_disasm ()
 {
-  struct cmd_list_element *cmd;
-
   /* Add the command that controls the disassembler options.  */
-  cmd = add_setshow_string_noescape_cmd ("disassembler-options", no_class,
-					 &prospective_options, _("\
+  set_show_commands set_show_disas_opts
+    = add_setshow_string_noescape_cmd ("disassembler-options", no_class,
+				       &prospective_options, _("\
 Set the disassembler options.\n\
 Usage: set disassembler-options OPTION [,OPTION]...\n\n\
 See: 'show disassembler-options' for valid option values."), _("\
@@ -1157,5 +1157,5 @@ Show the disassembler options."), NULL,
 					 set_disassembler_options_sfunc,
 					 show_disassembler_options_sfunc,
 					 &setlist, &showlist);
-  set_cmd_completer (cmd, disassembler_options_completer);
+  set_cmd_completer (set_show_disas_opts.set, disassembler_options_completer);
 }

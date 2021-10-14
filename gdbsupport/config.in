@@ -28,10 +28,6 @@
 /* define if the compiler supports basic C++11 syntax */
 #undef HAVE_CXX11
 
-/* Define to 1 if you have the declaration of `ADDR_NO_RANDOMIZE', and to 0 if
-   you don't. */
-#undef HAVE_DECL_ADDR_NO_RANDOMIZE
-
 /* Define to 1 if you have the declaration of `asprintf', and to 0 if you
    don't. */
 #undef HAVE_DECL_ASPRINTF
@@ -112,7 +108,7 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* Define to 1 if your system has the kinfo_getfile function. */
+/* Define to 1 if you have the `kinfo_getfile' function. */
 #undef HAVE_KINFO_GETFILE
 
 /* Define if you have <langinfo.h> and nl_langinfo(CODESET). */
@@ -141,9 +137,6 @@
 
 /* Define to 1 if you have a working `mmap' system call. */
 #undef HAVE_MMAP
-
-/* Define if you support the personality syscall. */
-#undef HAVE_PERSONALITY
 
 /* Define to 1 if you have the `pipe' function. */
 #undef HAVE_PIPE
@@ -216,6 +209,9 @@
 
 /* Define if sigsetjmp is available. */
 #undef HAVE_SIGSETJMP
+
+/* Define to 1 if you have the `sigtimedwait' function. */
+#undef HAVE_SIGTIMEDWAIT
 
 /* Define to 1 if you have the `socketpair' function. */
 #undef HAVE_SOCKETPAIR
@@ -358,9 +354,6 @@
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
 
-/* Define to the word size for the target. */
-#undef TARGET_WORD_SIZE
-
 /* Enable extensions on AIX 3, Interix.  */
 #ifndef _ALL_SOURCE
 # undef _ALL_SOURCE
@@ -411,6 +404,9 @@
 
 /* Define to 1 if you need to in order for `stat' and other things to work. */
 #undef _POSIX_SOURCE
+
+/* Use structured /proc on Solaris. */
+#undef _STRUCTURED_PROC
 
 /* Define to `int' if <sys/types.h> does not define. */
 #undef pid_t

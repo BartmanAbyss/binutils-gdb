@@ -21,18 +21,15 @@
 #ifndef _CPU_C_
 #define _CPU_C_
 
+/* This must come before any other includes.  */
+#include "defs.h"
+
 #include <setjmp.h>
 
 #include "cpu.h"
 #include "idecode.h"
 
-#ifdef HAVE_STRING_H
 #include <string.h>
-#else
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
-#endif
 
 struct _cpu {
 

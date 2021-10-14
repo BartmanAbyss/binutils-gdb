@@ -31,10 +31,6 @@
 /* define if the compiler supports basic C++11 syntax */
 #undef HAVE_CXX11
 
-/* Define to 1 if you have the declaration of `ADDR_NO_RANDOMIZE', and to 0 if
-   you don't. */
-#undef HAVE_DECL_ADDR_NO_RANDOMIZE
-
 /* Define to 1 if you have the declaration of `asprintf', and to 0 if you
    don't. */
 #undef HAVE_DECL_ASPRINTF
@@ -131,7 +127,7 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* Define to 1 if your system has the kinfo_getfile function. */
+/* Define to 1 if you have the `kinfo_getfile' function. */
 #undef HAVE_KINFO_GETFILE
 
 /* Define if you have <langinfo.h> and nl_langinfo(CODESET). */
@@ -181,9 +177,6 @@
 
 /* Define to 1 if you have the <netinet/tcp.h> header file. */
 #undef HAVE_NETINET_TCP_H
-
-/* Define if you support the personality syscall. */
-#undef HAVE_PERSONALITY
 
 /* Define to 1 if you have the `pipe' function. */
 #undef HAVE_PIPE
@@ -272,6 +265,9 @@
 
 /* Define if sigsetjmp is available. */
 #undef HAVE_SIGSETJMP
+
+/* Define to 1 if you have the `sigtimedwait' function. */
+#undef HAVE_SIGTIMEDWAIT
 
 /* Define to 1 if you have the `socketpair' function. */
 #undef HAVE_SOCKETPAIR
@@ -377,6 +373,9 @@
 
 /* Define to 1 if `vfork' works. */
 #undef HAVE_WORKING_VFORK
+
+/* Define to 1 if you have the <ws2tcpip.h> header file. */
+#undef HAVE_WS2TCPIP_H
 
 /* Define to the address where bug reports for this package should be sent. */
 #undef PACKAGE_BUGREPORT
@@ -491,6 +490,9 @@
 
 /* Define to 1 if you need to in order for `stat' and other things to work. */
 #undef _POSIX_SOURCE
+
+/* Use structured /proc on Solaris. */
+#undef _STRUCTURED_PROC
 
 /* Define to `int' if <sys/types.h> does not define. */
 #undef pid_t

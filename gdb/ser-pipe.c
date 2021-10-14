@@ -1,5 +1,5 @@
 /* Serial interface for a pipe to a separate program
-   Copyright (C) 1999-2020 Free Software Foundation, Inc.
+   Copyright (C) 1999-2021 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions.
 
@@ -30,6 +30,7 @@
 #include "gdbsupport/gdb_sys_time.h"
 #include <fcntl.h>
 #include "gdbsupport/filestuff.h"
+#include "gdbsupport/pathstuff.h"
 
 #include <signal.h>
 
@@ -122,7 +123,9 @@ pipe_open (struct serial *scb, const char *name)
 	}
 
       close_most_fds ();
-      execl ("/bin/sh", "sh", "-c", name, (char *) 0);
+
+      const char *shellfile = get_shell ();
+      execl (shellfile, shellfile, "-c", name, (char *) 0);
       _exit (127);
     }
 

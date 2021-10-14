@@ -1,5 +1,5 @@
 /* windmc.h -- header file for windmc program.
-   Copyright (C) 2007-2020 Free Software Foundation, Inc.
+   Copyright (C) 2007-2021 Free Software Foundation, Inc.
    Written by Kai Tietz, Onevision.
 
    This file is part of GNU Binutils.
@@ -66,6 +66,7 @@ typedef struct mc_node
   unichar *symbol;
   rc_uint_type id;
   rc_uint_type vid;
+  unichar *id_typecast;
   mc_node_lang *sub;
 } mc_node;
 
@@ -88,9 +89,9 @@ void mc_set_inputfile (const char *);
 void mc_set_content (const unichar *);
 
 /* Lexer control variables. Used by mcparser.y file.  */
-extern bfd_boolean mclex_want_nl;
-extern bfd_boolean mclex_want_line;
-extern bfd_boolean mclex_want_filename;
+extern bool mclex_want_nl;
+extern bool mclex_want_line;
+extern bool mclex_want_filename;
 
 void mc_fatal (const char *, ...);
 void mc_warn (const char *, ...);

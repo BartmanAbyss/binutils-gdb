@@ -1,6 +1,6 @@
 /* Target-dependent code for FreeBSD, architecture-independent.
 
-   Copyright (C) 2002-2020 Free Software Foundation, Inc.
+   Copyright (C) 2002-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,6 +21,7 @@
 #include "auxv.h"
 #include "gdbcore.h"
 #include "inferior.h"
+#include "objfiles.h"
 #include "regcache.h"
 #include "regset.h"
 #include "gdbthread.h"
@@ -31,6 +32,7 @@
 
 #include "elf-bfd.h"
 #include "fbsd-tdep.h"
+#include "gcore-elf.h"
 
 /* This enum is derived from FreeBSD's <sys/signal.h>.  */
 
@@ -72,6 +74,63 @@ enum
     FREEBSD_SIGRTMIN = 65,
     FREEBSD_SIGRTMAX = 126,
   };
+
+/* Constants for values of si_code as defined in FreeBSD's
+   <sys/signal.h>.  */
+
+#define	FBSD_SI_USER		0x10001
+#define	FBSD_SI_QUEUE		0x10002
+#define	FBSD_SI_TIMER		0x10003
+#define	FBSD_SI_ASYNCIO		0x10004
+#define	FBSD_SI_MESGQ		0x10005
+#define	FBSD_SI_KERNEL		0x10006
+#define	FBSD_SI_LWP		0x10007
+
+#define	FBSD_ILL_ILLOPC		1
+#define	FBSD_ILL_ILLOPN		2
+#define	FBSD_ILL_ILLADR		3
+#define	FBSD_ILL_ILLTRP		4
+#define	FBSD_ILL_PRVOPC		5
+#define	FBSD_ILL_PRVREG		6
+#define	FBSD_ILL_COPROC		7
+#define	FBSD_ILL_BADSTK		8
+
+#define	FBSD_BUS_ADRALN		1
+#define	FBSD_BUS_ADRERR		2
+#define	FBSD_BUS_OBJERR		3
+#define	FBSD_BUS_OOMERR		100
+
+#define	FBSD_SEGV_MAPERR	1
+#define	FBSD_SEGV_ACCERR	2
+#define	FBSD_SEGV_PKUERR	100
+
+#define	FBSD_FPE_INTOVF		1
+#define	FBSD_FPE_INTDIV		2
+#define	FBSD_FPE_FLTDIV		3
+#define	FBSD_FPE_FLTOVF		4
+#define	FBSD_FPE_FLTUND		5
+#define	FBSD_FPE_FLTRES		6
+#define	FBSD_FPE_FLTINV		7
+#define	FBSD_FPE_FLTSUB		8
+
+#define	FBSD_TRAP_BRKPT		1
+#define	FBSD_TRAP_TRACE		2
+#define	FBSD_TRAP_DTRACE	3
+#define	FBSD_TRAP_CAP		4
+
+#define	FBSD_CLD_EXITED		1
+#define	FBSD_CLD_KILLED		2
+#define	FBSD_CLD_DUMPED		3
+#define	FBSD_CLD_TRAPPED	4
+#define	FBSD_CLD_STOPPED	5
+#define	FBSD_CLD_CONTINUED	6
+
+#define	FBSD_POLL_IN		1
+#define	FBSD_POLL_OUT		2
+#define	FBSD_POLL_MSG		3
+#define	FBSD_POLL_ERR		4
+#define	FBSD_POLL_PRI		5
+#define	FBSD_POLL_HUP		6
 
 /* FreeBSD kernels 12.0 and later include a copy of the
    'ptrace_lwpinfo' structure returned by the PT_LWPINFO ptrace
@@ -575,112 +634,11 @@ fbsd_core_xfer_siginfo (struct gdbarch *gdbarch, gdb_byte *readbuf,
 static int
 find_signalled_thread (struct thread_info *info, void *data)
 {
-  if (info->suspend.stop_signal != GDB_SIGNAL_0
+  if (info->stop_signal () != GDB_SIGNAL_0
       && info->ptid.pid () == inferior_ptid.pid ())
     return 1;
 
   return 0;
-}
-
-/* Structure for passing information from
-   fbsd_collect_thread_registers via an iterator to
-   fbsd_collect_regset_section_cb. */
-
-struct fbsd_collect_regset_section_cb_data
-{
-  const struct regcache *regcache;
-  bfd *obfd;
-  char *note_data;
-  int *note_size;
-  unsigned long lwp;
-  enum gdb_signal stop_signal;
-  int abort_iteration;
-};
-
-static void
-fbsd_collect_regset_section_cb (const char *sect_name, int supply_size,
-				int collect_size, const struct regset *regset,
-				const char *human_name, void *cb_data)
-{
-  char *buf;
-  struct fbsd_collect_regset_section_cb_data *data
-    = (struct fbsd_collect_regset_section_cb_data *) cb_data;
-
-  if (data->abort_iteration)
-    return;
-
-  gdb_assert (regset->collect_regset);
-
-  buf = (char *) xmalloc (collect_size);
-  regset->collect_regset (regset, data->regcache, -1, buf, collect_size);
-
-  /* PRSTATUS still needs to be treated specially.  */
-  if (strcmp (sect_name, ".reg") == 0)
-    data->note_data = (char *) elfcore_write_prstatus
-      (data->obfd, data->note_data, data->note_size, data->lwp,
-       gdb_signal_to_host (data->stop_signal), buf);
-  else
-    data->note_data = (char *) elfcore_write_register_note
-      (data->obfd, data->note_data, data->note_size,
-       sect_name, buf, collect_size);
-  xfree (buf);
-
-  if (data->note_data == NULL)
-    data->abort_iteration = 1;
-}
-
-/* Records the thread's register state for the corefile note
-   section.  */
-
-static char *
-fbsd_collect_thread_registers (const struct regcache *regcache,
-			       ptid_t ptid, bfd *obfd,
-			       char *note_data, int *note_size,
-			       enum gdb_signal stop_signal)
-{
-  struct gdbarch *gdbarch = regcache->arch ();
-  struct fbsd_collect_regset_section_cb_data data;
-
-  data.regcache = regcache;
-  data.obfd = obfd;
-  data.note_data = note_data;
-  data.note_size = note_size;
-  data.stop_signal = stop_signal;
-  data.abort_iteration = 0;
-  data.lwp = ptid.lwp ();
-
-  gdbarch_iterate_over_regset_sections (gdbarch,
-					fbsd_collect_regset_section_cb,
-					&data, regcache);
-  return data.note_data;
-}
-
-struct fbsd_corefile_thread_data
-{
-  struct gdbarch *gdbarch;
-  bfd *obfd;
-  char *note_data;
-  int *note_size;
-  enum gdb_signal stop_signal;
-};
-
-/* Records the thread's register state for the corefile note
-   section.  */
-
-static void
-fbsd_corefile_thread (struct thread_info *info,
-		      struct fbsd_corefile_thread_data *args)
-{
-  struct regcache *regcache;
-
-  regcache = get_thread_arch_regcache (info->inf->process_target (),
-				       info->ptid, args->gdbarch);
-
-  target_fetch_registers (regcache, -1);
-
-  args->note_data = fbsd_collect_thread_registers
-    (regcache, info->ptid, args->obfd, args->note_data,
-     args->note_size, args->stop_signal);
 }
 
 /* Return a byte_vector containing the contents of a core dump note
@@ -692,7 +650,7 @@ static gdb::optional<gdb::byte_vector>
 fbsd_make_note_desc (enum target_object object, uint32_t structsize)
 {
   gdb::optional<gdb::byte_vector> buf =
-    target_read_alloc (current_top_target (), object, NULL);
+    target_read_alloc (current_inferior ()->top_target (), object, NULL);
   if (!buf || buf->empty ())
     return {};
 
@@ -708,11 +666,10 @@ fbsd_make_note_desc (enum target_object object, uint32_t structsize)
 /* Create appropriate note sections for a corefile, returning them in
    allocated memory.  */
 
-static char *
+static gdb::unique_xmalloc_ptr<char>
 fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
 {
-  struct fbsd_corefile_thread_data thread_args;
-  char *note_data = NULL;
+  gdb::unique_xmalloc_ptr<char> note_data;
   Elf_Internal_Ehdr *i_ehdrp;
   struct thread_info *curr_thr, *signalled_thr;
 
@@ -727,12 +684,13 @@ fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
       const char *fname = lbasename (get_exec_file (0));
       std::string psargs = fname;
 
-      const char *infargs = get_inferior_args ();
-      if (infargs != NULL)
-	psargs = psargs + " " + infargs;
+      const std::string &infargs = current_inferior ()->args ();
+      if (!infargs.empty ())
+	psargs += ' ' + infargs;
 
-      note_data = elfcore_write_prpsinfo (obfd, note_data, note_size,
-					  fname, psargs.c_str ());
+      note_data.reset (elfcore_write_prpsinfo (obfd, note_data.release (),
+					       note_size, fname,
+					       psargs.c_str ()));
     }
 
   /* Thread register information.  */
@@ -750,7 +708,7 @@ fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
      In case there's more than one signalled thread, prefer the
      current thread, if it is signalled.  */
   curr_thr = inferior_thread ();
-  if (curr_thr->suspend.stop_signal != GDB_SIGNAL_0)
+  if (curr_thr->stop_signal () != GDB_SIGNAL_0)
     signalled_thr = curr_thr;
   else
     {
@@ -759,22 +717,17 @@ fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
 	signalled_thr = curr_thr;
     }
 
-  thread_args.gdbarch = gdbarch;
-  thread_args.obfd = obfd;
-  thread_args.note_data = note_data;
-  thread_args.note_size = note_size;
-  thread_args.stop_signal = signalled_thr->suspend.stop_signal;
-
-  fbsd_corefile_thread (signalled_thr, &thread_args);
+  enum gdb_signal stop_signal = signalled_thr->stop_signal ();
+  gcore_elf_build_thread_register_notes (gdbarch, signalled_thr, stop_signal,
+					 obfd, &note_data, note_size);
   for (thread_info *thr : current_inferior ()->non_exited_threads ())
     {
       if (thr == signalled_thr)
 	continue;
 
-      fbsd_corefile_thread (thr, &thread_args);
+      gcore_elf_build_thread_register_notes (gdbarch, thr, stop_signal,
+					     obfd, &note_data, note_size);
     }
-
-  note_data = thread_args.note_data;
 
   /* Auxiliary vector.  */
   uint32_t structsize = gdbarch_ptr_bit (gdbarch) / 4; /* Elf_Auxinfo  */
@@ -782,9 +735,11 @@ fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
     fbsd_make_note_desc (TARGET_OBJECT_AUXV, structsize);
   if (note_desc && !note_desc->empty ())
     {
-      note_data = elfcore_write_note (obfd, note_data, note_size, "FreeBSD",
-				      NT_FREEBSD_PROCSTAT_AUXV,
-				      note_desc->data (), note_desc->size ());
+      note_data.reset (elfcore_write_note (obfd, note_data.release (),
+					   note_size, "FreeBSD",
+					   NT_FREEBSD_PROCSTAT_AUXV,
+					   note_desc->data (),
+					   note_desc->size ()));
       if (!note_data)
 	return NULL;
     }
@@ -793,9 +748,11 @@ fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
   note_desc = fbsd_make_note_desc (TARGET_OBJECT_FREEBSD_VMMAP, 0);
   if (note_desc && !note_desc->empty ())
     {
-      note_data = elfcore_write_note (obfd, note_data, note_size, "FreeBSD",
-				      NT_FREEBSD_PROCSTAT_VMMAP,
-				      note_desc->data (), note_desc->size ());
+      note_data.reset (elfcore_write_note (obfd, note_data.release (),
+					   note_size, "FreeBSD",
+					   NT_FREEBSD_PROCSTAT_VMMAP,
+					   note_desc->data (),
+					   note_desc->size ()));
       if (!note_data)
 	return NULL;
     }
@@ -803,12 +760,17 @@ fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
   note_desc = fbsd_make_note_desc (TARGET_OBJECT_FREEBSD_PS_STRINGS, 0);
   if (note_desc && !note_desc->empty ())
     {
-      note_data = elfcore_write_note (obfd, note_data, note_size, "FreeBSD",
-				      NT_FREEBSD_PROCSTAT_PSSTRINGS,
-				      note_desc->data (), note_desc->size ());
+      note_data.reset (elfcore_write_note (obfd, note_data.release (),
+					   note_size, "FreeBSD",
+					   NT_FREEBSD_PROCSTAT_PSSTRINGS,
+					   note_desc->data (),
+					   note_desc->size ()));
       if (!note_data)
 	return NULL;
     }
+
+  /* Include the target description when possible.  */
+  gcore_elf_make_tdesc_note (obfd, &note_data, note_size);
 
   return note_data;
 }
@@ -1598,6 +1560,11 @@ fbsd_print_auxv_entry (struct gdbarch *gdbarch, struct ui_file *file,
       TAG (HWCAP, _("Machine-dependent CPU capability hints"), AUXV_FORMAT_HEX);
       TAG (HWCAP2, _("Extension of AT_HWCAP"), AUXV_FORMAT_HEX);
       TAG (BSDFLAGS, _("ELF BSD flags"), AUXV_FORMAT_HEX);
+      TAG (ARGC, _("Argument count"), AUXV_FORMAT_DEC);
+      TAG (ARGV, _("Argument vector"), AUXV_FORMAT_HEX);
+      TAG (ENVC, _("Environment count"), AUXV_FORMAT_DEC);
+      TAG (ENVV, _("Environment vector"), AUXV_FORMAT_HEX);
+      TAG (PS_STRINGS, _("Pointer to ps_strings"), AUXV_FORMAT_HEX);
     }
 
   fprint_auxv_entry (file, name, description, format, type, val);
@@ -1629,7 +1596,7 @@ fbsd_get_siginfo_type (struct gdbarch *gdbarch)
 
   /* union sigval */
   sigval_type = arch_composite_type (gdbarch, NULL, TYPE_CODE_UNION);
-  TYPE_NAME (sigval_type) = xstrdup ("sigval");
+  sigval_type->set_name (xstrdup ("sigval"));
   append_composite_type_field (sigval_type, "sival_int", int_type);
   append_composite_type_field (sigval_type, "sival_ptr", void_ptr_type);
 
@@ -1637,14 +1604,14 @@ fbsd_get_siginfo_type (struct gdbarch *gdbarch)
   pid_type = arch_type (gdbarch, TYPE_CODE_TYPEDEF,
 			TYPE_LENGTH (int32_type) * TARGET_CHAR_BIT, "__pid_t");
   TYPE_TARGET_TYPE (pid_type) = int32_type;
-  TYPE_TARGET_STUB (pid_type) = 1;
+  pid_type->set_target_is_stub (true);
 
   /* __uid_t */
   uid_type = arch_type (gdbarch, TYPE_CODE_TYPEDEF,
 			TYPE_LENGTH (uint32_type) * TARGET_CHAR_BIT,
 			"__uid_t");
   TYPE_TARGET_TYPE (uid_type) = uint32_type;
-  TYPE_TARGET_STUB (uid_type) = 1;
+  pid_type->set_target_is_stub (true);
 
   /* _reason */
   reason_type = arch_composite_type (gdbarch, NULL, TYPE_CODE_UNION);
@@ -1679,7 +1646,7 @@ fbsd_get_siginfo_type (struct gdbarch *gdbarch)
 
   /* struct siginfo */
   siginfo_type = arch_composite_type (gdbarch, NULL, TYPE_CODE_STRUCT);
-  TYPE_NAME (siginfo_type) = xstrdup ("siginfo");
+  siginfo_type->set_name (xstrdup ("siginfo"));
   append_composite_type_field (siginfo_type, "si_signo", int_type);
   append_composite_type_field (siginfo_type, "si_errno", int_type);
   append_composite_type_field (siginfo_type, "si_code", int_type);
@@ -1820,7 +1787,7 @@ fbsd_gdb_signal_from_target (struct gdbarch *gdbarch, int signal)
 
 static int
 fbsd_gdb_signal_to_target (struct gdbarch *gdbarch,
-                enum gdb_signal signal)
+		enum gdb_signal signal)
 {
   switch (signal)
     {
@@ -1983,9 +1950,9 @@ fbsd_fetch_rtld_offsets (struct gdbarch *gdbarch, struct fbsd_pspace_data *data)
 				     language_c, NULL).symbol;
       if (obj_entry_sym == NULL)
 	error (_("Unable to find Struct_Obj_Entry symbol"));
-      data->off_linkmap = lookup_struct_elt (SYMBOL_TYPE(obj_entry_sym),
+      data->off_linkmap = lookup_struct_elt (SYMBOL_TYPE (obj_entry_sym),
 					     "linkmap", 0).offset / 8;
-      data->off_tlsindex = lookup_struct_elt (SYMBOL_TYPE(obj_entry_sym),
+      data->off_tlsindex = lookup_struct_elt (SYMBOL_TYPE (obj_entry_sym),
 					      "tlsindex", 0).offset / 8;
       data->rtld_offsets_valid = true;
       return;
@@ -2066,6 +2033,232 @@ fbsd_get_thread_local_address (struct gdbarch *gdbarch, CORE_ADDR dtv_addr,
   return addr + offset;
 }
 
+/* See fbsd-tdep.h.  */
+
+CORE_ADDR
+fbsd_skip_solib_resolver (struct gdbarch *gdbarch, CORE_ADDR pc)
+{
+  struct bound_minimal_symbol msym = lookup_bound_minimal_symbol ("_rtld_bind");
+  if (msym.minsym != nullptr && BMSYMBOL_VALUE_ADDRESS (msym) == pc)
+    return frame_unwind_caller_pc (get_current_frame ());
+
+  return 0;
+}
+
+/* Return description of signal code or nullptr.  */
+
+static const char *
+fbsd_signal_cause (enum gdb_signal siggnal, int code)
+{
+  /* Signal-independent causes.  */
+  switch (code)
+    {
+    case FBSD_SI_USER:
+      return _("Sent by kill()");
+    case FBSD_SI_QUEUE:
+      return _("Sent by sigqueue()");
+    case FBSD_SI_TIMER:
+      return _("Timer expired");
+    case FBSD_SI_ASYNCIO:
+      return _("Asynchronous I/O request completed");
+    case FBSD_SI_MESGQ:
+      return _("Message arrived on empty message queue");
+    case FBSD_SI_KERNEL:
+      return _("Sent by kernel");
+    case FBSD_SI_LWP:
+      return _("Sent by thr_kill()");
+    }
+
+  switch (siggnal)
+    {
+    case GDB_SIGNAL_ILL:
+      switch (code)
+	{
+	case FBSD_ILL_ILLOPC:
+	  return _("Illegal opcode");
+	case FBSD_ILL_ILLOPN:
+	  return _("Illegal operand");
+	case FBSD_ILL_ILLADR:
+	  return _("Illegal addressing mode");
+	case FBSD_ILL_ILLTRP:
+	  return _("Illegal trap");
+	case FBSD_ILL_PRVOPC:
+	  return _("Privileged opcode");
+	case FBSD_ILL_PRVREG:
+	  return _("Privileged register");
+	case FBSD_ILL_COPROC:
+	  return _("Coprocessor error");
+	case FBSD_ILL_BADSTK:
+	  return _("Internal stack error");
+	}
+      break;
+    case GDB_SIGNAL_BUS:
+      switch (code)
+	{
+	case FBSD_BUS_ADRALN:
+	  return _("Invalid address alignment");
+	case FBSD_BUS_ADRERR:
+	  return _("Address not present");
+	case FBSD_BUS_OBJERR:
+	  return _("Object-specific hardware error");
+	case FBSD_BUS_OOMERR:
+	  return _("Out of memory");
+	}
+      break;
+    case GDB_SIGNAL_SEGV:
+      switch (code)
+	{
+	case FBSD_SEGV_MAPERR:
+	  return _("Address not mapped to object");
+	case FBSD_SEGV_ACCERR:
+	  return _("Invalid permissions for mapped object");
+	case FBSD_SEGV_PKUERR:
+	  return _("PKU violation");
+	}
+      break;
+    case GDB_SIGNAL_FPE:
+      switch (code)
+	{
+	case FBSD_FPE_INTOVF:
+	  return _("Integer overflow");
+	case FBSD_FPE_INTDIV:
+	  return _("Integer divide by zero");
+	case FBSD_FPE_FLTDIV:
+	  return _("Floating point divide by zero");
+	case FBSD_FPE_FLTOVF:
+	  return _("Floating point overflow");
+	case FBSD_FPE_FLTUND:
+	  return _("Floating point underflow");
+	case FBSD_FPE_FLTRES:
+	  return _("Floating point inexact result");
+	case FBSD_FPE_FLTINV:
+	  return _("Invalid floating point operation");
+	case FBSD_FPE_FLTSUB:
+	  return _("Subscript out of range");
+	}
+      break;
+    case GDB_SIGNAL_TRAP:
+      switch (code)
+	{
+	case FBSD_TRAP_BRKPT:
+	  return _("Breakpoint");
+	case FBSD_TRAP_TRACE:
+	  return _("Trace trap");
+	case FBSD_TRAP_DTRACE:
+	  return _("DTrace-induced trap");
+	case FBSD_TRAP_CAP:
+	  return _("Capability violation");
+	}
+      break;
+    case GDB_SIGNAL_CHLD:
+      switch (code)
+	{
+	case FBSD_CLD_EXITED:
+	  return _("Child has exited");
+	case FBSD_CLD_KILLED:
+	  return _("Child has terminated abnormally");
+	case FBSD_CLD_DUMPED:
+	  return _("Child has dumped core");
+	case FBSD_CLD_TRAPPED:
+	  return _("Traced child has trapped");
+	case FBSD_CLD_STOPPED:
+	  return _("Child has stopped");
+	case FBSD_CLD_CONTINUED:
+	  return _("Stopped child has continued");
+	}
+      break;
+    case GDB_SIGNAL_POLL:
+      switch (code)
+	{
+	case FBSD_POLL_IN:
+	  return _("Data input available");
+	case FBSD_POLL_OUT:
+	  return _("Output buffers available");
+	case FBSD_POLL_MSG:
+	  return _("Input message available");
+	case FBSD_POLL_ERR:
+	  return _("I/O error");
+	case FBSD_POLL_PRI:
+	  return _("High priority input available");
+	case FBSD_POLL_HUP:
+	  return _("Device disconnected");
+	}
+      break;
+    }
+
+  return nullptr;
+}
+
+/* Report additional details for a signal stop.  */
+
+static void
+fbsd_report_signal_info (struct gdbarch *gdbarch, struct ui_out *uiout,
+			 enum gdb_signal siggnal)
+{
+  LONGEST code, mqd, pid, status, timerid, uid;
+
+  try
+    {
+      code = parse_and_eval_long ("$_siginfo.si_code");
+      pid = parse_and_eval_long ("$_siginfo.si_pid");
+      uid = parse_and_eval_long ("$_siginfo.si_uid");
+      status = parse_and_eval_long ("$_siginfo.si_status");
+      timerid = parse_and_eval_long ("$_siginfo._reason._timer.si_timerid");
+      mqd = parse_and_eval_long ("$_siginfo._reason._mesgq.si_mqd");
+    }
+  catch (const gdb_exception_error &e)
+    {
+      return;
+    }
+
+  const char *meaning = fbsd_signal_cause (siggnal, code);
+  if (meaning == nullptr)
+    return;
+
+  uiout->text (".\n");
+  uiout->field_string ("sigcode-meaning", meaning);
+
+  switch (code)
+    {
+    case FBSD_SI_USER:
+    case FBSD_SI_QUEUE:
+    case FBSD_SI_LWP:
+      uiout->text (" from pid ");
+      uiout->field_string ("sending-pid", plongest (pid));
+      uiout->text (" and user ");
+      uiout->field_string ("sending-uid", plongest (uid));
+      return;
+    case FBSD_SI_TIMER:
+      uiout->text (": timerid ");
+      uiout->field_string ("timerid", plongest (timerid));
+      return;
+    case FBSD_SI_MESGQ:
+      uiout->text (": message queue ");
+      uiout->field_string ("message-queue", plongest (mqd));
+      return;
+    case FBSD_SI_ASYNCIO:
+      return;
+    }
+
+  if (siggnal == GDB_SIGNAL_CHLD)
+    {
+      uiout->text (": pid ");
+      uiout->field_string ("child-pid", plongest (pid));
+      uiout->text (", uid ");
+      uiout->field_string ("child-uid", plongest (uid));
+      if (code == FBSD_CLD_EXITED)
+	{
+	  uiout->text (", exit status ");
+	  uiout->field_string ("exit-status", plongest (status));
+	}
+      else
+	{
+	  uiout->text (", signal ");
+	  uiout->field_string ("signal", plongest (status));
+	}
+    }
+}
+
 /* To be called from GDB_OSABI_FREEBSD handlers. */
 
 void
@@ -2080,6 +2273,8 @@ fbsd_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_gdbarch_get_siginfo_type (gdbarch, fbsd_get_siginfo_type);
   set_gdbarch_gdb_signal_from_target (gdbarch, fbsd_gdb_signal_from_target);
   set_gdbarch_gdb_signal_to_target (gdbarch, fbsd_gdb_signal_to_target);
+  set_gdbarch_report_signal_info (gdbarch, fbsd_report_signal_info);
+  set_gdbarch_skip_solib_resolver (gdbarch, fbsd_skip_solib_resolver);
 
   /* `catch syscall' */
   set_xml_syscall_file_name (gdbarch, "syscalls/freebsd.xml");

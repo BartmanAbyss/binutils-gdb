@@ -1,6 +1,6 @@
 /* Cache and manage the values of registers for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2020 Free Software Foundation, Inc.
+   Copyright (C) 1986-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,7 +22,6 @@
 
 #include "gdbsupport/common-regcache.h"
 #include "gdbsupport/function-view.h"
-#include <forward_list>
 
 struct regcache;
 struct regset;
@@ -151,6 +150,15 @@ extern void regcache_collect_regset (const struct regset *regset,
 				     int regnum, void *buf, size_t size);
 
 
+/* Return true if a set of registers contains the value of the
+   register numbered REGNUM.  The size of the set of registers is
+   given in SIZE, and the layout of the set of registers is described
+   by MAP.  */
+
+extern bool regcache_map_supplies (const struct regcache_map_entry *map,
+				   int regnum, struct gdbarch *gdbarch,
+				   size_t size);
+
 /* The type of a register.  This function is slightly more efficient
    then its gdbarch vector counterpart since it returns a precomputed
    value stored in a table.  */
@@ -168,11 +176,11 @@ typedef gdb::function_view<register_status (int regnum, gdb_byte *buf)>
 
 /* A (register_number, register_value) pair.  */
 
-typedef struct cached_reg
+struct cached_reg_t
 {
   int num;
   gdb_byte *data;
-} cached_reg_t;
+};
 
 /* Buffer of registers.  */
 
@@ -397,12 +405,9 @@ public:
    debug.  */
   void debug_print_register (const char *func, int regno);
 
-  static void regcache_thread_ptid_changed (ptid_t old_ptid, ptid_t new_ptid);
 protected:
   regcache (process_stratum_target *target, gdbarch *gdbarch,
 	    const address_space *aspace);
-
-  static std::forward_list<regcache *> current_regcache;
 
 private:
 
@@ -437,10 +442,9 @@ private:
   get_thread_arch_aspace_regcache (process_stratum_target *target, ptid_t ptid,
 				   struct gdbarch *gdbarch,
 				   struct address_space *aspace);
-
-  friend void
-  registers_changed_ptid (process_stratum_target *target, ptid_t ptid);
 };
+
+using regcache_up = std::unique_ptr<regcache>;
 
 class readonly_detached_regcache : public readable_regcache
 {

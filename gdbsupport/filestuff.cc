@@ -1,5 +1,5 @@
 /* Low-level file-handling.
-   Copyright (C) 2012-2020 Free Software Foundation, Inc.
+   Copyright (C) 2012-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -306,13 +306,13 @@ socket_mark_cloexec (int fd)
 
 /* See filestuff.h.  */
 
-int
+scoped_fd
 gdb_open_cloexec (const char *filename, int flags, unsigned long mode)
 {
-  int fd = open (filename, flags | O_CLOEXEC, mode);
+  scoped_fd fd (open (filename, flags | O_CLOEXEC, mode));
 
-  if (fd >= 0)
-    maybe_mark_cloexec (fd);
+  if (fd.get () >= 0)
+    maybe_mark_cloexec (fd.get ());
 
   return fd;
 }
@@ -483,15 +483,15 @@ mkdir_recursive (const char *dir)
 	component_end++;
 
       /* Temporarily replace the slash with a null terminator, so we can create
-         the directory up to this component.  */
+	 the directory up to this component.  */
       char saved_char = *component_end;
       *component_end = '\0';
 
       /* If we get EEXIST and the existing path is a directory, then we're
-         happy.  If it exists, but it's a regular file and this is not the last
-         component, we'll fail at the next component.  If this is the last
-         component, the caller will fail with ENOTDIR when trying to
-         open/create a file under that path.  */
+	 happy.  If it exists, but it's a regular file and this is not the last
+	 component, we'll fail at the next component.  If this is the last
+	 component, the caller will fail with ENOTDIR when trying to
+	 open/create a file under that path.  */
       if (mkdir (start, 0700) != 0)
 	if (errno != EEXIST)
 	  return false;

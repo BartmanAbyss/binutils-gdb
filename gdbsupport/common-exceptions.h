@@ -1,6 +1,6 @@
 /* Exception (throw catch) mechanism, for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2020 Free Software Foundation, Inc.
+   Copyright (C) 1986-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -165,6 +165,23 @@ struct gdb_exception
     return message->c_str ();
   }
 
+  /* Compare two exceptions.  */
+  bool operator== (const gdb_exception &other) const
+  {
+    const char *msg1 = message == nullptr ? "" : what ();
+    const char *msg2 = other.message == nullptr ? "" : other.what ();
+
+    return (reason == other.reason
+	    && error == other.error
+	    && strcmp (msg1, msg2) == 0);
+  }
+
+  /* Compare two exceptions.  */
+  bool operator!= (const gdb_exception &other) const
+  {
+    return !(*this == other);
+  }
+
   enum return_reason reason;
   enum errors error;
   std::shared_ptr<std::string> message;
@@ -197,9 +214,9 @@ extern int exceptions_state_mc_catch (struct gdb_exception *, int);
    CATCH_SJLJ (e, RETURN_MASK_ERROR)
      {
        switch (e.reason)
-         {
-           case RETURN_ERROR: ...
-         }
+	 {
+	   case RETURN_ERROR: ...
+	 }
      }
    END_CATCH_SJLJ
 

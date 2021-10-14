@@ -1,6 +1,6 @@
 /* TUI layout window management.
 
-   Copyright (C) 1998-2020 Free Software Foundation, Inc.
+   Copyright (C) 1998-2021 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -91,6 +91,9 @@ public:
      depth of this layout in the hierarchy (zero-based).  */
   virtual void specification (ui_file *output, int depth) = 0;
 
+  /* Add all windows to the WINDOWS vector.  */
+  virtual void get_windows (std::vector<tui_win_info *> *windows) = 0;
+
   /* The most recent space allocation.  */
   int x = 0;
   int y = 0;
@@ -141,6 +144,12 @@ public:
 
   void specification (ui_file *output, int depth) override;
 
+  /* See tui_layout_base::get_windows.  */
+  void get_windows (std::vector<tui_win_info *> *windows) override
+  {
+    windows->push_back (m_window);
+  }
+
 protected:
 
   void get_sizes (bool height, int *min_value, int *max_value) override;
@@ -152,7 +161,7 @@ private:
 
   /* When a layout is applied, this is updated to point to the window
      object.  */
-  tui_gen_win_info *m_window = nullptr;
+  tui_win_info *m_window = nullptr;
 };
 
 /* A TUI layout that holds other layouts.  */
@@ -194,6 +203,13 @@ public:
   void replace_window (const char *name, const char *new_window) override;
 
   void specification (ui_file *output, int depth) override;
+
+  /* See tui_layout_base::get_windows.  */
+  void get_windows (std::vector<tui_win_info *> *windows) override
+  {
+    for (auto &item : m_splits)
+      item.layout->get_windows (windows);
+  }
 
 protected:
 
@@ -251,7 +267,7 @@ extern void tui_adjust_window_height (struct tui_win_info *win,
 
 /* The type of a function that is used to create a TUI window.  */
 
-typedef std::function<tui_gen_win_info * (const char *name)> window_factory;
+typedef std::function<tui_win_info * (const char *name)> window_factory;
 
 /* Register a new TUI window type.  NAME is the name of the window
    type.  FACTORY is a function that can be called to instantiate the

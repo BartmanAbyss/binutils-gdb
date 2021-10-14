@@ -1,6 +1,6 @@
 /* Native-dependent code for GNU/Linux on MIPS processors.
 
-   Copyright (C) 2001-2020 Free Software Foundation, Inc.
+   Copyright (C) 2001-2021 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -187,7 +187,7 @@ mips64_linux_register_addr (struct gdbarch *gdbarch, int regno, int store)
 
 ps_err_e
 ps_get_thread_area (struct ps_prochandle *ph,
-                    lwpid_t lwpid, int idx, void **base)
+		    lwpid_t lwpid, int idx, void **base)
 {
   if (ptrace (PTRACE_GET_THREAD_AREA, lwpid, NULL, base) != 0)
     return PS_ERR;
@@ -632,12 +632,9 @@ mips_linux_nat_target::region_ok_for_hw_watchpoint (CORE_ADDR addr, int len)
 static int
 write_watchpoint_regs (void)
 {
-  struct lwp_info *lp;
-  int tid;
-
-  ALL_LWPS (lp)
+  for (const lwp_info *lp : all_lwps ())
     {
-      tid = lp->ptid.lwp ();
+      int tid = lp->ptid.lwp ();
       if (ptrace (PTRACE_SET_WATCH_REGS, tid, &watch_mirror, NULL) == -1)
 	perror_with_name (_("Couldn't write debug register"));
     }
