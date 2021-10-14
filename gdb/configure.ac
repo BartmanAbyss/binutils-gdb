@@ -684,6 +684,22 @@ else
   fi
 fi
 
+AC_ARG_WITH(gmp_include,
+   [  --with-gmp-include=DIR  GMP include directory ],
+   CPPFLAGS="$CPPFLAGS -I$withval")
+AC_ARG_WITH(gmp_lib,
+   [  --with-gmp-lib=DIR      GMP lib directory ],
+   LDFLAGS="$LDFLAGS -L$withval")
+AC_ARG_WITH(gmp,
+   [  --with-gmp=DIR          GMP install directory ], [
+   if test -z "$with_gmp_lib" && test -z "$with_gmp_include" ; then
+      CPPFLAGS="$CPPFLAGS -I$withval/include"
+      LDFLAGS="$LDFLAGS -L$withval/lib"
+   else
+      AC_MSG_FAILURE([Do not use --with-gmp and --with-gmp-include/--with-gmp-lib options simultaneously.])
+   fi
+  ])
+
 # Verify that we have a usable GMP library.
 AC_LIB_HAVE_LINKFLAGS([gmp], [], [#include <gmp.h>],
                       [mpz_t n;
@@ -691,6 +707,15 @@ AC_LIB_HAVE_LINKFLAGS([gmp], [], [#include <gmp.h>],
 if test "$HAVE_LIBGMP" != yes; then
   AC_MSG_ERROR([GMP is missing or unusable])
 fi
+
+AC_ARG_WITH([mpfr_include],
+            [AC_HELP_STRING([--with-mpfr-include=DIR],
+                            [MPFR include directory])],
+            [CPPFLAGS="-I$withval $CPPFLAGS"])
+AC_ARG_WITH([mpfr_lib],
+            [AC_HELP_STRING([--with-mpfr-lib=DIR],
+                            [MPFR lib directory])],
+            [LDFLAGS="-L$withval $LDFLAGS"])
 
 AC_ARG_WITH(mpfr,
   AS_HELP_STRING([--with-mpfr], [include MPFR support (auto/yes/no)]),

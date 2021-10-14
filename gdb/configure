@@ -901,8 +901,13 @@ with_jit_reader_dir
 with_expat
 with_libexpat_prefix
 with_libexpat_type
+with_gmp_include
+with_gmp_lib
+with_gmp
 with_libgmp_prefix
 with_libgmp_type
+with_mpfr_include
+with_mpfr_lib
 with_mpfr
 with_libmpfr_prefix
 with_libmpfr_type
@@ -1648,9 +1653,14 @@ Optional Packages:
   --with-libexpat-prefix[=DIR]  search for libexpat in DIR/include and DIR/lib
   --without-libexpat-prefix     don't search for libexpat in includedir and libdir
   --with-libexpat-type=TYPE     type of library to search for (auto/static/shared)
+  --with-gmp-include=DIR  GMP include directory
+  --with-gmp-lib=DIR      GMP lib directory
+  --with-gmp=DIR          GMP install directory
   --with-libgmp-prefix[=DIR]  search for libgmp in DIR/include and DIR/lib
   --without-libgmp-prefix     don't search for libgmp in includedir and libdir
   --with-libgmp-type=TYPE     type of library to search for (auto/static/shared)
+  --with-mpfr-include=DIR MPFR include directory
+  --with-mpfr-lib=DIR     MPFR lib directory
   --with-mpfr             include MPFR support (auto/yes/no)
   --with-libmpfr-prefix[=DIR]  search for libmpfr in DIR/include and DIR/lib
   --without-libmpfr-prefix     don't search for libmpfr in includedir and libdir
@@ -10017,6 +10027,35 @@ done
   fi
 fi
 
+
+# Check whether --with-gmp_include was given.
+if test "${with_gmp_include+set}" = set; then :
+  withval=$with_gmp_include; CPPFLAGS="$CPPFLAGS -I$withval"
+fi
+
+
+# Check whether --with-gmp_lib was given.
+if test "${with_gmp_lib+set}" = set; then :
+  withval=$with_gmp_lib; LDFLAGS="$LDFLAGS -L$withval"
+fi
+
+
+# Check whether --with-gmp was given.
+if test "${with_gmp+set}" = set; then :
+  withval=$with_gmp;
+   if test -z "$with_gmp_lib" && test -z "$with_gmp_include" ; then
+      CPPFLAGS="$CPPFLAGS -I$withval/include"
+      LDFLAGS="$LDFLAGS -L$withval/lib"
+   else
+      { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error $? "Do not use --with-gmp and --with-gmp-include/--with-gmp-lib options simultaneously.
+See \`config.log' for more details" "$LINENO" 5; }
+   fi
+
+fi
+
+
 # Verify that we have a usable GMP library.
 
 
@@ -10499,6 +10538,19 @@ $as_echo "$LIBGMP" >&6; }
 if test "$HAVE_LIBGMP" != yes; then
   as_fn_error $? "GMP is missing or unusable" "$LINENO" 5
 fi
+
+
+# Check whether --with-mpfr_include was given.
+if test "${with_mpfr_include+set}" = set; then :
+  withval=$with_mpfr_include; CPPFLAGS="-I$withval $CPPFLAGS"
+fi
+
+
+# Check whether --with-mpfr_lib was given.
+if test "${with_mpfr_lib+set}" = set; then :
+  withval=$with_mpfr_lib; LDFLAGS="-L$withval $LDFLAGS"
+fi
+
 
 
 # Check whether --with-mpfr was given.

@@ -29550,7 +29550,7 @@ configure-gdb:
 	  $$s/$$module_srcdir/configure \
 	  --srcdir=$${topdir}/$$module_srcdir \
 	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
-	  --target=${target_alias}  \
+	  --target=${target_alias} @extra_mpfr_configure_flags@ @extra_mpc_mpfr_configure_flags@ \
 	  || exit 1
 @endif gdb
 
@@ -52527,6 +52527,8 @@ configure-libcc1: maybe-configure-gcc
 all-libcc1: maybe-all-gcc
 all-utils: maybe-all-libiberty
 configure-gdb: maybe-all-intl
+configure-gdb: maybe-all-gmp
+configure-gdb: maybe-all-mpfr
 configure-gdb: maybe-all-bfd
 configure-gdb: maybe-all-libiconv
 all-gdb: maybe-all-libiberty
