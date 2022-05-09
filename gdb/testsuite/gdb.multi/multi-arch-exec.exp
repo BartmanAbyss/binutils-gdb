@@ -1,4 +1,4 @@
-# Copyright 2009-2021 Free Software Foundation, Inc.
+# Copyright 2009-2022 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -71,7 +71,9 @@ proc append_arch2_options {options_var} {
 	}
     }
 
-    if [istarget "s390*-*-*"] {
+    if [istarget "powerpc64*-*-*"] {
+	set march "-m64"
+    } elseif [istarget "s390*-*-*"] {
 	set march "-m31"
     } else {
 	set march "-m32"

@@ -1,5 +1,5 @@
 /* MI Command Set - environment commands.
-   Copyright (C) 2002-2021 Free Software Foundation, Inc.
+   Copyright (C) 2002-2022 Free Software Foundation, Inc.
 
    Contributed by Red Hat Inc.
 
@@ -48,7 +48,7 @@ env_execute_cli_command (const char *cmd, const char *args)
       gdb::unique_xmalloc_ptr<char> run;
 
       if (args != NULL)
-	run.reset (xstrprintf ("%s %s", cmd, args));
+	run = xstrprintf ("%s %s", cmd, args);
       else
 	run.reset (xstrdup (cmd));
       execute_command ( /*ui */ run.get (), 0 /*from_tty */ );

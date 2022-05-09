@@ -1,6 +1,6 @@
 # This testcase is part of GDB, the GNU debugger.
 
-# Copyright 1997-2021 Free Software Foundation, Inc.
+# Copyright 1997-2022 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -127,8 +127,10 @@ test_i "stepi into function" "stepi" \
 # Continue to step until we reach the function's body.  This makes it
 # more likely that we've actually completed the prologue, so "finish"
 # will work.
+set alphanum_re "\[a-zA-Z0-9\]"
+set pic_thunk_re  "__$alphanum_re*\\.get_pc_thunk\\.$alphanum_re* \\(\\)"
 test_i "stepi into function's first source line" "stepi" \
-	".*${decimal}.*int callee" \
+	"(${decimal}.*int callee|$pic_thunk_re)" \
 	".*${decimal}.*myglob.*; return 0;"
 
 # Have to be careful here, if the finish does not work, 

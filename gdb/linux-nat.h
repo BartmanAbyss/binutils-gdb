@@ -1,6 +1,6 @@
 /* Native debugging support for GNU/Linux (LWP layer).
 
-   Copyright (C) 2000-2021 Free Software Foundation, Inc.
+   Copyright (C) 2000-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -83,15 +83,11 @@ public:
   void thread_events (int) override;
 
   bool can_async_p () override;
-  bool is_async_p () override;
 
   bool supports_non_stop () override;
   bool always_non_stop_p () override;
 
-  int async_wait_fd () override;
   void async (int) override;
-
-  void close () override;
 
   void stop (ptid_t) override;
 
@@ -128,8 +124,6 @@ public:
 			      gdb::array_view<const int> syscall_counts) override;
 
   char *pid_to_exec_file (int pid) override;
-
-  void post_startup_inferior (ptid_t) override;
 
   void post_attach (int) override;
 
@@ -189,6 +183,10 @@ public:
   /* SIGTRAP-like breakpoint status events recognizer.  The default
      recognizes SIGTRAP only.  */
   virtual bool low_status_is_event (int status);
+
+protected:
+
+    void post_startup_inferior (ptid_t) override;
 };
 
 /* The final/concrete instance.  */
@@ -202,9 +200,7 @@ struct lwp_info : intrusive_list_node<lwp_info>
 {
   lwp_info (ptid_t ptid)
     : ptid (ptid)
-  {
-    waitstatus.kind = TARGET_WAITKIND_IGNORE;
-  }
+  {}
 
   ~lwp_info ();
 
@@ -212,7 +208,7 @@ struct lwp_info : intrusive_list_node<lwp_info>
 
   /* The process id of the LWP.  This is a combination of the LWP id
      and overall process id.  */
-  ptid_t ptid;
+  ptid_t ptid = null_ptid;
 
   /* If this flag is set, we need to set the event request flags the
      next time we see this LWP stop.  */

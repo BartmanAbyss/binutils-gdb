@@ -1,6 +1,6 @@
 /* Definitions for symbol file management in GDB.
 
-   Copyright (C) 1992-2021 Free Software Foundation, Inc.
+   Copyright (C) 1992-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,7 +21,7 @@
 #define OBJFILES_H
 
 #include "hashtab.h"
-#include "gdb_obstack.h"	/* For obstack internals.  */
+#include "gdbsupport/gdb_obstack.h"	/* For obstack internals.  */
 #include "objfile-flags.h"
 #include "symfile.h"
 #include "progspace.h"
@@ -903,9 +903,8 @@ extern scoped_restore_tmpl<int> inhibit_section_map_updates
     (struct program_space *pspace);
 
 extern void default_iterate_over_objfiles_in_search_order
-  (struct gdbarch *gdbarch,
-   iterate_over_objfiles_in_search_order_cb_ftype *cb,
-   void *cb_data, struct objfile *current_objfile);
+  (gdbarch *gdbarch, iterate_over_objfiles_in_search_order_cb_ftype cb,
+   objfile *current_objfile);
 
 /* Reset the per-BFD storage area on OBJ.  */
 
@@ -935,6 +934,11 @@ const char *objfile_flavour_name (struct objfile *objfile);
 
 extern void set_objfile_main_name (struct objfile *objfile,
 				   const char *name, enum language lang);
+
+/* Find an integer type SIZE_IN_BYTES bytes in size from OF and return it.
+   UNSIGNED_P controls if the integer is unsigned or not.  */
+extern struct type *objfile_int_type (struct objfile *of, int size_in_bytes,
+				      bool unsigned_p);
 
 extern void objfile_register_static_link
   (struct objfile *objfile,

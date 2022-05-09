@@ -1,5 +1,5 @@
 /* C preprocessor macro tables for GDB.
-   Copyright (C) 2002-2021 Free Software Foundation, Inc.
+   Copyright (C) 2002-2022 Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of GDB.
@@ -18,7 +18,8 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
-#include "gdb_obstack.h"
+#include "gdbsupport/gdb_obstack.h"
+#include "gdbsupport/pathstuff.h"
 #include "splay-tree.h"
 #include "filenames.h"
 #include "symtab.h"
@@ -893,7 +894,7 @@ fixup_definition (const char *filename, int line, struct macro_definition *def)
 	}
       else if (def->argc == macro_LINE)
 	{
-	  saved_expansion.reset (xstrprintf ("%d", line));
+	  saved_expansion = xstrprintf ("%d", line);
 	  def->replacement = saved_expansion.get ();
 	}
     }
@@ -1066,10 +1067,10 @@ macro_source_fullname (struct macro_source_file *file)
   const char *comp_dir = NULL;
 
   if (file->table->compunit_symtab != NULL)
-    comp_dir = COMPUNIT_DIRNAME (file->table->compunit_symtab);
+    comp_dir = file->table->compunit_symtab->dirname ();
 
   if (comp_dir == NULL || IS_ABSOLUTE_PATH (file->filename))
     return file->filename;
 
-  return std::string (comp_dir) + SLASH_STRING + file->filename;
+  return path_join (comp_dir, file->filename);
 }

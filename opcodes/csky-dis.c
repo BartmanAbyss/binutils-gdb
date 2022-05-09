@@ -1,5 +1,5 @@
 /* C-SKY disassembler.
-   Copyright (C) 1988-2021 Free Software Foundation, Inc.
+   Copyright (C) 1988-2022 Free Software Foundation, Inc.
    Contributed by C-SKY Microsystems and Mentor Graphics.
 
    This file is part of the GNU opcodes library.
@@ -239,7 +239,7 @@ csky_get_disassembler (bfd *abfd)
 {
   obj_attribute *attr;
   const char *sec_name = NULL;
-  if (!abfd)
+  if (!abfd || bfd_get_flavour (abfd) != bfd_target_elf_flavour)
     dis_info.isa = CSKY_DEFAULT_ISA;
   else
     {

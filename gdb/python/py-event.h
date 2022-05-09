@@ -1,6 +1,6 @@
 /* Python interface to inferior events.
 
-   Copyright (C) 2009-2021 Free Software Foundation, Inc.
+   Copyright (C) 2009-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -45,13 +45,13 @@ extern int emit_exited_event (const LONGEST *exit_code, struct inferior *inf);
 /* For inferior function call events, discriminate whether event is
    before or after the call. */
 
-typedef enum
+enum inferior_call_kind
 {
   /* Before the call */
   INFERIOR_CALL_PRE,
   /* after the call */
   INFERIOR_CALL_POST,
-} inferior_call_kind;
+};
 
 extern int emit_inferior_call_event (inferior_call_kind kind,
 				     ptid_t thread, CORE_ADDR addr);

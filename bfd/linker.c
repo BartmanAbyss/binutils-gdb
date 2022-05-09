@@ -1,5 +1,5 @@
 /* linker.c -- BFD linker routines
-   Copyright (C) 1993-2021 Free Software Foundation, Inc.
+   Copyright (C) 1993-2022 Free Software Foundation, Inc.
    Written by Steve Chamberlain and Ian Lance Taylor, Cygnus Support
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -599,6 +599,8 @@ bfd_wrapped_link_hash_lookup (bfd *abfd,
 	  n[1] = '\0';
 	  strcat (n, l + sizeof REAL - 1);
 	  h = bfd_link_hash_lookup (info->hash, n, create, true, follow);
+	  if (h != NULL)
+	    h->ref_real = 1;
 	  free (n);
 	  return h;
 	}
@@ -981,7 +983,8 @@ _bfd_generic_link_add_archive_symbols
 	  if (last_ar_offset != arsym->file_offset)
 	    {
 	      last_ar_offset = arsym->file_offset;
-	      element = _bfd_get_elt_at_filepos (abfd, last_ar_offset);
+	      element = _bfd_get_elt_at_filepos (abfd, last_ar_offset,
+						 info);
 	      if (element == NULL
 		  || !bfd_check_format (element, bfd_object))
 		goto error_return;
@@ -1420,6 +1423,7 @@ _bfd_generic_link_add_one_symbol (struct bfd_link_info *info,
     {
       row = COMMON_ROW;
       if (!bfd_link_relocatable (info)
+	  && name != NULL
 	  && name[0] == '_'
 	  && name[1] == '_'
 	  && strcmp (name + (name[2] == '_'), "__gnu_lto_slim") == 0)

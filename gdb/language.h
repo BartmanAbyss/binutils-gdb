@@ -1,6 +1,6 @@
 /* Source-language-related definitions for GDB.
 
-   Copyright (C) 1991-2021 Free Software Foundation, Inc.
+   Copyright (C) 1991-2022 Free Software Foundation, Inc.
 
    Contributed by the Department of Computer Science at the State University
    of New York at Buffalo.
@@ -749,20 +749,6 @@ extern void language_info ();
 
 extern enum language set_language (enum language);
 
-
-/* This page contains functions that return things that are
-   specific to languages.  Each of these functions is based on
-   the current setting of working_lang, which the user sets
-   with the "set language" command.  */
-
-#define LA_PRINT_TYPE(type,varstring,stream,show,level,flags)		\
-  (current_language->print_type(type,varstring,stream,show,level,flags))
-
-#define LA_PRINT_CHAR(ch, type, stream) \
-  (current_language->printchar (ch, type, stream))
-#define LA_PRINT_STRING(stream, elttype, string, length, encoding, force_ellipses, options) \
-  (current_language->printstr (stream, elttype, string, length, \
-			       encoding, force_ellipses,options))
 
 /* Test a character to decide whether it can be printed in literal form
    or needs to be printed in another representation.  For example,

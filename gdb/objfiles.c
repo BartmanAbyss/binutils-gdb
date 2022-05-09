@@ -1,6 +1,6 @@
 /* GDB routines for manipulating objfiles.
 
-   Copyright (C) 1992-2021 Free Software Foundation, Inc.
+   Copyright (C) 1992-2022 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support, using pieces from other GDB modules.
 
@@ -36,7 +36,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include "gdb_obstack.h"
+#include "gdbsupport/gdb_obstack.h"
 #include "hashtab.h"
 
 #include "breakpoint.h"
@@ -331,7 +331,7 @@ objfile::objfile (bfd *abfd, const char *name, objfile_flags flags_)
 
   objfile_alloc_data (this);
 
-  gdb::unique_xmalloc_ptr<char> name_holder;
+  std::string name_holder;
   if (name == NULL)
     {
       gdb_assert (abfd == NULL);
@@ -344,7 +344,7 @@ objfile::objfile (bfd *abfd, const char *name, objfile_flags flags_)
   else
     {
       name_holder = gdb_abspath (name);
-      expanded_name = name_holder.get ();
+      expanded_name = name_holder.c_str ();
     }
   original_name = obstack_strdup (&objfile_obstack, expanded_name);
 
@@ -591,7 +591,7 @@ objfile::~objfile ()
   {
     struct symtab_and_line cursal = get_current_source_symtab_and_line ();
 
-    if (cursal.symtab && SYMTAB_OBJFILE (cursal.symtab) == this)
+    if (cursal.symtab && cursal.symtab->compunit ()->objfile () == this)
       clear_current_source_symtab_and_line ();
   }
 
@@ -616,14 +616,11 @@ relocate_one_symbol (struct symbol *sym, struct objfile *objfile,
      any symbols in STRUCT_DOMAIN or UNDEF_DOMAIN.
      But I'm leaving out that test, on the theory that
      they can't possibly pass the tests below.  */
-  if ((SYMBOL_CLASS (sym) == LOC_LABEL
-       || SYMBOL_CLASS (sym) == LOC_STATIC)
+  if ((sym->aclass () == LOC_LABEL
+       || sym->aclass () == LOC_STATIC)
       && sym->section_index () >= 0)
-    {
-      SET_SYMBOL_VALUE_ADDRESS (sym,
-				SYMBOL_VALUE_ADDRESS (sym)
-				+ delta[sym->section_index ()]);
-    }
+    sym->set_value_address (sym->value_address ()
+			    + delta[sym->section_index ()]);
 }
 
 /* Relocate OBJFILE to NEW_OFFSETS.  There should be OBJFILE->NUM_SECTIONS
@@ -651,48 +648,45 @@ objfile_relocate1 (struct objfile *objfile,
   {
     for (compunit_symtab *cust : objfile->compunits ())
       {
-	for (symtab *s : compunit_filetabs (cust))
+	for (symtab *s : cust->filetabs ())
 	  {
 	    struct linetable *l;
 
 	    /* First the line table.  */
-	    l = SYMTAB_LINETABLE (s);
+	    l = s->linetable ();
 	    if (l)
 	      {
 		for (int i = 0; i < l->nitems; ++i)
-		  l->item[i].pc += delta[COMPUNIT_BLOCK_LINE_SECTION (cust)];
+		  l->item[i].pc += delta[cust->block_line_section ()];
 	      }
 	  }
       }
 
     for (compunit_symtab *cust : objfile->compunits ())
       {
-	const struct blockvector *bv = COMPUNIT_BLOCKVECTOR (cust);
-	int block_line_section = COMPUNIT_BLOCK_LINE_SECTION (cust);
+	struct blockvector *bv = cust->blockvector ();
+	int block_line_section = cust->block_line_section ();
 
-	if (BLOCKVECTOR_MAP (bv))
-	  addrmap_relocate (BLOCKVECTOR_MAP (bv), delta[block_line_section]);
+	if (bv->map () != nullptr)
+	  addrmap_relocate (bv->map (), delta[block_line_section]);
 
-	for (int i = 0; i < BLOCKVECTOR_NBLOCKS (bv); ++i)
+	for (block *b : bv->blocks ())
 	  {
-	    struct block *b;
 	    struct symbol *sym;
 	    struct mdict_iterator miter;
 
-	    b = BLOCKVECTOR_BLOCK (bv, i);
-	    BLOCK_START (b) += delta[block_line_section];
-	    BLOCK_END (b) += delta[block_line_section];
+	    b->set_start (b->start () + delta[block_line_section]);
+	    b->set_end (b->end () + delta[block_line_section]);
 
-	    if (BLOCK_RANGES (b) != nullptr)
-	      for (int j = 0; j < BLOCK_NRANGES (b); j++)
-		{
-		  BLOCK_RANGE_START (b, j) += delta[block_line_section];
-		  BLOCK_RANGE_END (b, j) += delta[block_line_section];
-		}
+	    for (blockrange &r : b->ranges ())
+	      {
+		r.set_start (r.start () + delta[block_line_section]);
+		r.set_end (r.end () + delta[block_line_section]);
+	      }
 
 	    /* We only want to iterate over the local symbols, not any
 	       symbols in included symtabs.  */
-	    ALL_DICT_SYMBOLS (BLOCK_MULTIDICT (b), miter, sym)
+	    ALL_DICT_SYMBOLS (b->multidict (), miter, sym)
 	      {
 		relocate_one_symbol (sym, objfile, delta);
 	      }
@@ -1321,18 +1315,12 @@ shared_objfile_contains_address_p (struct program_space *pspace,
 
 void
 default_iterate_over_objfiles_in_search_order
-  (struct gdbarch *gdbarch,
-   iterate_over_objfiles_in_search_order_cb_ftype *cb,
-   void *cb_data, struct objfile *current_objfile)
+  (gdbarch *gdbarch, iterate_over_objfiles_in_search_order_cb_ftype cb,
+   objfile *current_objfile)
 {
-  int stop = 0;
-
   for (objfile *objfile : current_program_space->objfiles ())
-    {
-       stop = cb (objfile, cb_data);
-       if (stop)
-	 return;
-    }
+    if (cb (objfile))
+	return;
 }
 
 /* See objfiles.h.  */
@@ -1373,4 +1361,30 @@ objfile_flavour_name (struct objfile *objfile)
   if (objfile->obfd != NULL)
     return bfd_flavour_name (bfd_get_flavour (objfile->obfd));
   return NULL;
+}
+
+/* See objfiles.h.  */
+
+struct type *
+objfile_int_type (struct objfile *of, int size_in_bytes, bool unsigned_p)
+{
+  struct type *int_type;
+
+  /* Helper macro to examine the various builtin types.  */
+#define TRY_TYPE(F)							\
+  int_type = (unsigned_p						\
+	      ? objfile_type (of)->builtin_unsigned_ ## F		\
+	      : objfile_type (of)->builtin_ ## F);			\
+  if (int_type != NULL && TYPE_LENGTH (int_type) == size_in_bytes)	\
+    return int_type
+
+  TRY_TYPE (char);
+  TRY_TYPE (short);
+  TRY_TYPE (int);
+  TRY_TYPE (long);
+  TRY_TYPE (long_long);
+
+#undef TRY_TYPE
+
+  gdb_assert_not_reached ("unable to find suitable integer type");
 }

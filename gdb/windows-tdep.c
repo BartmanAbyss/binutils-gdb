@@ -1,4 +1,4 @@
-/* Copyright (C) 2008-2021 Free Software Foundation, Inc.
+/* Copyright (C) 2008-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
 
 #include "defs.h"
 #include "windows-tdep.h"
-#include "gdb_obstack.h"
+#include "gdbsupport/gdb_obstack.h"
 #include "xml-support.h"
 #include "gdbarch.h"
 #include "target.h"
@@ -408,7 +408,7 @@ tlb_value_read (struct value *val)
 
   if (!target_get_tib_address (inferior_ptid, &tlb))
     error (_("Unable to read tlb"));
-  store_typed_address (value_contents_raw (val), type, tlb);
+  store_typed_address (value_contents_raw (val).data (), type, tlb);
 }
 
 /* This function implements the lval_computed support for writing a
@@ -481,24 +481,24 @@ display_one_tib (ptid_t ptid)
 
   if (target_get_tib_address (ptid, &thread_local_base) == 0)
     {
-      printf_filtered (_("Unable to get thread local base for %s\n"),
-		       target_pid_to_str (ptid).c_str ());
+      gdb_printf (_("Unable to get thread local base for %s\n"),
+		  target_pid_to_str (ptid).c_str ());
       return -1;
     }
 
   if (target_read (current_inferior ()->top_target (), TARGET_OBJECT_MEMORY,
 		   NULL, tib, thread_local_base, tib_size) != tib_size)
     {
-      printf_filtered (_("Unable to read thread information "
-			 "block for %s at address %s\n"),
-		       target_pid_to_str (ptid).c_str (), 
-		       paddress (target_gdbarch (), thread_local_base));
+      gdb_printf (_("Unable to read thread information "
+		    "block for %s at address %s\n"),
+		  target_pid_to_str (ptid).c_str (), 
+		  paddress (target_gdbarch (), thread_local_base));
       return -1;
     }
 
-  printf_filtered (_("Thread Information Block %s at %s\n"),
-		   target_pid_to_str (ptid).c_str (),
-		   paddress (target_gdbarch (), thread_local_base));
+  gdb_printf (_("Thread Information Block %s at %s\n"),
+	      target_pid_to_str (ptid).c_str (),
+	      paddress (target_gdbarch (), thread_local_base));
 
   index = (gdb_byte *) tib;
 
@@ -508,10 +508,10 @@ display_one_tib (ptid_t ptid)
     {
       val = extract_unsigned_integer (index, size, byte_order);
       if (i < max_name)
-	printf_filtered (_("%s is 0x%s\n"), TIB_NAME[i], phex (val, size));
+	gdb_printf (_("%s is 0x%s\n"), TIB_NAME[i], phex (val, size));
       else if (val != 0)
-	printf_filtered (_("TIB[0x%s] is 0x%s\n"), phex (i * size, 2),
-			 phex (val, size));
+	gdb_printf (_("TIB[0x%s] is 0x%s\n"), phex (i * size, 2),
+		    phex (val, size));
       index += size;
     } 
   return 1;  
@@ -573,36 +573,29 @@ windows_xfer_shared_library (const char* so_name, CORE_ADDR load_addr,
 
 static void
 windows_iterate_over_objfiles_in_search_order
-  (struct gdbarch *gdbarch,
-   iterate_over_objfiles_in_search_order_cb_ftype *cb,
-   void *cb_data, struct objfile *current_objfile)
+  (gdbarch *gdbarch, iterate_over_objfiles_in_search_order_cb_ftype cb,
+   objfile *current_objfile)
 {
-  int stop;
-
   if (current_objfile)
     {
-      stop = cb (current_objfile, cb_data);
-      if (stop)
+      if (cb (current_objfile))
 	return;
     }
 
   for (objfile *objfile : current_program_space->objfiles ())
-    {
-      if (objfile != current_objfile)
-	{
-	  stop = cb (objfile, cb_data);
-	  if (stop)
-	    return;
-	}
-    }
+    if (objfile != current_objfile)
+      {
+	if (cb (objfile))
+	  return;
+      }
 }
 
 static void
 show_maint_show_all_tib (struct ui_file *file, int from_tty,
 		struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Show all non-zero elements of "
-			    "Thread Information Block is %s.\n"), value);
+  gdb_printf (file, _("Show all non-zero elements of "
+		      "Thread Information Block is %s.\n"), value);
 }
 
 
@@ -970,7 +963,6 @@ static const struct internalvar_funcs tlb_funcs =
 {
   tlb_make_value,
   NULL,
-  NULL
 };
 
 /* Layout of an element of a PE's Import Directory Table.  Based on:
@@ -1112,54 +1104,50 @@ core_process_module_section (bfd *abfd, asection *sect, void *obj)
   size_t module_name_offset;
   CORE_ADDR base_addr;
 
-  gdb_byte *buf = NULL;
-
   if (!startswith (sect->name, ".module"))
     return;
 
-  buf = (gdb_byte *) xmalloc (bfd_section_size (sect) + 1);
-  if (!buf)
-    {
-      printf_unfiltered ("memory allocation failed for %s\n", sect->name);
-      goto out;
-    }
+  gdb::byte_vector buf (bfd_section_size (sect) + 1);
   if (!bfd_get_section_contents (abfd, sect,
-				 buf, 0, bfd_section_size (sect)))
-    goto out;
-
-
+				 buf.data (), 0, bfd_section_size (sect)))
+    return;
+  /* We're going to treat part of the buffer as a string, so make sure
+     it is NUL-terminated.  */
+  buf.back () = 0;
 
   /* A DWORD (data_type) followed by struct windows_core_module_info.  */
-  data_type = extract_unsigned_integer (buf, 4, byte_order);
+  if (bfd_section_size (sect) < 4)
+    return;
+  data_type = extract_unsigned_integer (buf.data (), 4, byte_order);
 
   if (data_type == NOTE_INFO_MODULE)
     {
-      base_addr = extract_unsigned_integer (buf + 4, 4, byte_order);
-      module_name_size = extract_unsigned_integer (buf + 8, 4, byte_order);
       module_name_offset = 12;
+      if (bfd_section_size (sect) < module_name_offset)
+	return;
+      base_addr = extract_unsigned_integer (&buf[4], 4, byte_order);
+      module_name_size = extract_unsigned_integer (&buf[8], 4, byte_order);
     }
   else if (data_type == NOTE_INFO_MODULE64)
     {
-      base_addr = extract_unsigned_integer (buf + 4, 8, byte_order);
-      module_name_size = extract_unsigned_integer (buf + 12, 4, byte_order);
       module_name_offset = 16;
+      if (bfd_section_size (sect) < module_name_offset)
+	return;
+      base_addr = extract_unsigned_integer (&buf[4], 8, byte_order);
+      module_name_size = extract_unsigned_integer (&buf[12], 4, byte_order);
     }
   else
-    goto out;
+    return;
 
   if (module_name_offset + module_name_size > bfd_section_size (sect))
-    goto out;
-  module_name = (char *) buf + module_name_offset;
+    return;
+  module_name = (char *) buf.data () + module_name_offset;
 
   /* The first module is the .exe itself.  */
   if (data->module_count != 0)
     windows_xfer_shared_library (module_name, base_addr,
 				 NULL, data->gdbarch, data->obstack);
   data->module_count++;
-
-out:
-  xfree (buf);
-  return;
 }
 
 ULONGEST

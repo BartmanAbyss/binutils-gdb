@@ -1,5 +1,5 @@
 /* BFD semi-generic back-end for a.out binaries.
-   Copyright (C) 1990-2021 Free Software Foundation, Inc.
+   Copyright (C) 1990-2022 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -1353,8 +1353,6 @@ aout_get_external_symbols (bfd *abfd)
 
 	  if (stringsize >= BYTES_IN_WORD)
 	    {
-	      /* Keep the string count in the buffer for convenience
-		 when indexing with e_strx.  */
 	      amt = stringsize - BYTES_IN_WORD;
 	      if (bfd_bread (strings + BYTES_IN_WORD, amt, abfd) != amt)
 		{
@@ -1364,7 +1362,8 @@ aout_get_external_symbols (bfd *abfd)
 	    }
 	}
       /* Ensure that a zero index yields an empty string.  */
-      memset (strings, 0, BYTES_IN_WORD);
+      if (stringsize >= BYTES_IN_WORD)
+	memset (strings, 0, BYTES_IN_WORD);
 
       /* Ensure that the string buffer is NUL terminated.  */
       strings[stringsize] = 0;
@@ -3965,7 +3964,7 @@ aout_link_reloc_link_order (struct aout_final_link_info *flaginfo,
 
 /* Get the section corresponding to a reloc index.  */
 
-static INLINE asection *
+static inline asection *
 aout_reloc_index_to_section (bfd *abfd, int indx)
 {
   switch (indx & N_TYPE)

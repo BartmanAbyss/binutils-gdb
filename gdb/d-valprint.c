@@ -1,6 +1,6 @@
 /* Support for printing D values for GDB, the GNU debugger.
 
-   Copyright (C) 2008-2021 Free Software Foundation, Inc.
+   Copyright (C) 2008-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -48,14 +48,14 @@ dynamic_array_type (struct type *type,
       struct type *ptr_type;
       struct value *ival;
       int length;
-      const gdb_byte *valaddr = value_contents_for_printing (val);
+      const gdb_byte *valaddr = value_contents_for_printing (val).data ();
 
       length = unpack_field_as_long (type, valaddr + embedded_offset, 0);
 
       ptr_type = type->field (1).type ();
       elttype = check_typedef (TYPE_TARGET_TYPE (ptr_type));
       addr = unpack_pointer (ptr_type,
-			     valaddr + TYPE_FIELD_BITPOS (type, 1) / 8
+			     valaddr + type->field (1).loc_bitpos () / 8
 			     + embedded_offset);
       true_type = check_typedef (elttype);
 

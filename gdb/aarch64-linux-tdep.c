@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux AArch64.
 
-   Copyright (C) 2009-2021 Free Software Foundation, Inc.
+   Copyright (C) 2009-2022 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GDB.
@@ -286,7 +286,7 @@ aarch64_linux_sigframe_init (const struct tramp_frame *self,
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  aarch64_gdbarch_tdep *tdep = (aarch64_gdbarch_tdep *) gdbarch_tdep (gdbarch);
   CORE_ADDR sp = get_frame_register_unsigned (this_frame, AARCH64_SP_REGNUM);
   CORE_ADDR sigcontext_addr = (sp + AARCH64_RT_SIGFRAME_UCONTEXT_OFFSET
 			       + AARCH64_UCONTEXT_SIGCONTEXT_OFFSET );
@@ -640,7 +640,8 @@ aarch64_linux_collect_sve_regset (const struct regset *regset,
   gdb_byte *header = (gdb_byte *) buf;
   struct gdbarch *gdbarch = regcache->arch ();
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  uint64_t vq = gdbarch_tdep (gdbarch)->vq;
+  aarch64_gdbarch_tdep *tdep = (aarch64_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  uint64_t vq = tdep->vq;
 
   gdb_assert (buf != NULL);
   gdb_assert (size > SVE_HEADER_SIZE);
@@ -675,7 +676,7 @@ aarch64_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
 					    void *cb_data,
 					    const struct regcache *regcache)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  aarch64_gdbarch_tdep *tdep = (aarch64_gdbarch_tdep *) gdbarch_tdep (gdbarch);
 
   cb (".reg", AARCH64_LINUX_SIZEOF_GREGSET, AARCH64_LINUX_SIZEOF_GREGSET,
       &aarch64_linux_gregset, NULL, cb_data);
@@ -748,6 +749,24 @@ aarch64_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
 	  AARCH64_LINUX_SIZEOF_MTE_REGSET, &aarch64_linux_mte_regset,
 	  "MTE registers", cb_data);
     }
+
+  if (tdep->has_tls ())
+    {
+      const struct regcache_map_entry tls_regmap[] =
+	{
+	  { 1, tdep->tls_regnum, 8 },
+	  { 0 }
+	};
+
+      const struct regset aarch64_linux_tls_regset =
+	{
+	  tls_regmap, regcache_supply_regset, regcache_collect_regset
+	};
+
+      cb (".reg-aarch-tls", AARCH64_LINUX_SIZEOF_TLSREGSET,
+	  AARCH64_LINUX_SIZEOF_TLSREGSET, &aarch64_linux_tls_regset,
+	  "TLS register", cb_data);
+    }
 }
 
 /* Implement the "core_read_description" gdbarch method.  */
@@ -756,13 +775,14 @@ static const struct target_desc *
 aarch64_linux_core_read_description (struct gdbarch *gdbarch,
 				     struct target_ops *target, bfd *abfd)
 {
+  asection *tls = bfd_get_section_by_name (abfd, ".reg-aarch-tls");
   CORE_ADDR hwcap = linux_get_hwcap (target);
   CORE_ADDR hwcap2 = linux_get_hwcap2 (target);
 
   bool pauth_p = hwcap & AARCH64_HWCAP_PACA;
   bool mte_p = hwcap2 & HWCAP2_MTE;
   return aarch64_read_description (aarch64_linux_core_read_vq (gdbarch, abfd),
-				   pauth_p, mte_p);
+				   pauth_p, mte_p, tls != nullptr);
 }
 
 /* Implementation of `gdbarch_stap_is_single_operand', as defined in
@@ -1488,9 +1508,10 @@ aarch64_linux_syscall_record (struct regcache *regcache,
 
   if (syscall_gdb < 0)
     {
-      printf_unfiltered (_("Process record and replay target doesn't "
-			   "support syscall number %s\n"),
-			 plongest (svc_number));
+      gdb_printf (gdb_stderr,
+		  _("Process record and replay target doesn't "
+		    "support syscall number %s\n"),
+		  plongest (svc_number));
       return -1;
     }
 
@@ -1621,7 +1642,7 @@ aarch64_linux_set_memtags (struct gdbarch *gdbarch, struct value *address,
 
       /* Update the value's content with the tag.  */
       enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-      gdb_byte *srcbuf = value_contents_raw (address);
+      gdb_byte *srcbuf = value_contents_raw (address).data ();
       store_unsigned_integer (srcbuf, sizeof (addr), byte_order, addr);
     }
   else
@@ -1719,7 +1740,7 @@ aarch64_linux_report_signal_info (struct gdbarch *gdbarch,
 				  struct ui_out *uiout,
 				  enum gdb_signal siggnal)
 {
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  aarch64_gdbarch_tdep *tdep = (aarch64_gdbarch_tdep *) gdbarch_tdep (gdbarch);
 
   if (!tdep->has_mte () || siggnal != GDB_SIGNAL_SEGV)
     return;
@@ -1788,7 +1809,7 @@ aarch64_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 								    NULL };
   static const char *const stap_register_indirection_suffixes[] = { "]",
 								    NULL };
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  aarch64_gdbarch_tdep *tdep = (aarch64_gdbarch_tdep *) gdbarch_tdep (gdbarch);
 
   tdep->lowest_pc = 0x8000;
 

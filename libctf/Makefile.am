@@ -1,6 +1,6 @@
 ## Process this file with automake to produce Makefile.in.
 #
-#   Copyright (C) 2019-2021 Free Software Foundation, Inc.
+#   Copyright (C) 2019-2022 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,7 +19,12 @@
 
 ACLOCAL_AMFLAGS = -I .. -I ../config -I ../bfd
 
-AUTOMAKE_OPTIONS = dejagnu foreign no-texinfo.tex
+AUTOMAKE_OPTIONS = dejagnu foreign info-in-builddir no-texinfo.tex
+
+# Variables that we might accumulate conditionally or in subdirs.
+info_TEXINFOS =
+DISTCLEANFILES =
+MAINTAINERCLEANFILES =
 
 # This is where we get zlib from.  zlibdir is -L../zlib and zlibinc is
 # -I../zlib, unless we were configured with --with-system-zlib, in which
@@ -98,7 +103,7 @@ check-DEJAGNU: site.exp development.exp
 	fi
 
 development.exp: $(BFDDIR)/development.sh
-	$(EGREP) "(development|experimental)=" $(BFDDIR)/development.sh  \
+	$(AM_V_GEN)$(EGREP) "(development|experimental)=" $(BFDDIR)/development.sh  \
 	  | $(AWK) -F= '{ print "set " $$1 " " $$2 }' > $@
 
 # development.sh is used to determine -Werror default.
@@ -106,5 +111,7 @@ CONFIG_STATUS_DEPENDENCIES = $(BFDDIR)/development.sh
 
 EXTRA_DEJAGNU_SITE_CONFIG = development.exp
 
-DISTCLEANFILES = site.exp development.exp
+DISTCLEANFILES += site.exp development.exp
 endif
+
+include doc/local.mk

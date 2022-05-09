@@ -1,7 +1,7 @@
 dnl                                            -*- Autoconf -*-
 dnl Process this file with autoconf to produce a configure script.
 dnl
-dnl   Copyright (C) 2019-2021 Free Software Foundation, Inc.
+dnl   Copyright (C) 2019-2022 Free Software Foundation, Inc.
 dnl
 dnl This file is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -29,6 +29,7 @@ AC_CANONICAL_HOST
 AC_CANONICAL_TARGET
 AC_USE_SYSTEM_EXTENSIONS
 AM_INIT_AUTOMAKE
+AM_SILENT_RULES([yes])
 
 # Checks for programs.
 AC_PROG_MAKE_SET
@@ -172,6 +173,30 @@ if test $ac_cv_libctf_macro_O_CLOEXEC = yes; then
   AC_DEFINE([HAVE_O_CLOEXEC], 1,
 	    [Whether the platform has a definition of O_CLOEXEC.])
 fi
+
+build_info=
+makeinfo_too_old=
+AC_CHECK_PROGS([MAKEINFO], makeinfo, [$MISSING makeinfo])
+case " $build_configdirs " in
+  *" texinfo "*) MAKEINFO='$$r/$(BUILD_SUBDIR)/texinfo/makeinfo/makeinfo' ;;
+esac
+changequote(,)
+    # We require texinfo to be 6.3 or later, for a working synindex
+    # and validatemenus: otherwise we fall back to /bin/true.
+    if ${MAKEINFO} --version \
+       | egrep 'texinfo[^0-9]*(6\.[3-9]|[7-9][0-9])' >/dev/null 2>&1; then
+      build_info=yes
+    else
+        build_info=
+        makeinfo_too_old=t
+    fi
+changequote([,])
+if test -n "$makeinfo_too_old"; then
+    AC_MSG_WARN([
+*** Makeinfo is too old. Info documentation will not be built.])
+fi
+AC_SUBST(MAKEINFO)
+AM_CONDITIONAL(BUILD_INFO, test "${build_info}" = yes)
 
 CTF_LIBADD="-L`pwd`/../libiberty -liberty"
 SHARED_LDFLAGS=

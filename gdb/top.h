@@ -1,6 +1,6 @@
 /* Top level stuff for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2021 Free Software Foundation, Inc.
+   Copyright (C) 1986-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,8 +24,6 @@
 #include "gdbsupport/event-loop.h"
 #include "gdbsupport/next-iterator.h"
 #include "value.h"
-
-struct tl_interp_info;
 
 /* Prompt state.  */
 

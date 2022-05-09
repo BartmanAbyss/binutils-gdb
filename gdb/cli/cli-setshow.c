@@ -1,6 +1,6 @@
 /* Handle set and show GDB commands.
 
-   Copyright (C) 2000-2021 Free Software Foundation, Inc.
+   Copyright (C) 2000-2022 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -37,11 +37,7 @@ notify_command_param_changed_p (bool param_changed, struct cmd_list_element *c)
   if (!param_changed)
     return false;
 
-  if (c->theclass == class_maintenance || c->theclass == class_deprecated
-      || c->theclass == class_obscure)
-    return false;
-
-  return true;
+  return c->theclass != class_maintenance && c->theclass != class_obscure;
 }
 
 
@@ -144,11 +140,11 @@ deprecated_show_value_hack (struct ui_file *ignore_file,
     case var_optional_filename:
     case var_filename:
     case var_enum:
-      printf_filtered ((" is \"%s\".\n"), value);
+      gdb_printf ((" is \"%s\".\n"), value);
       break;
 
     default:
-      printf_filtered ((" is %s.\n"), value);
+      gdb_printf ((" is %s.\n"), value);
       break;
     }
 }
@@ -379,14 +375,13 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	  {
 	    /* Clear trailing whitespace of filename.  */
 	    const char *ptr = arg + strlen (arg) - 1;
-	    char *copy;
 
 	    while (ptr >= arg && (*ptr == ' ' || *ptr == '\t'))
 	      ptr--;
-	    copy = xstrndup (arg, ptr + 1 - arg);
+	    gdb::unique_xmalloc_ptr<char> copy
+	      = make_unique_xstrndup (arg, ptr + 1 - arg);
 
-	    val = tilde_expand (copy);
-	    xfree (copy);
+	    val = tilde_expand (copy.get ());
 	  }
 	else
 	  val = xstrdup ("");
@@ -664,7 +659,7 @@ get_setshow_command_value_string (const setting &var)
       gdb_assert_not_reached ("bad var_type");
     }
 
-  return std::move (stb.string ());
+  return stb.release ();
 }
 
 

@@ -1,3 +1,27 @@
+2022-01-22  Nick Clifton  <nickc@redhat.com>
+
+	* 2.38 release branch created.
+
+2021-11-08  Nick Alcock  <nick.alcock@oracle.com>
+
+	* doc/ctf-spec.texi: New file.
+	* configure.ac (MAKEINFO): Add.
+	(BUILD_INFO): Likewise.
+	(AC_CONFIG_FILES) [doc/Makefile]: Add.
+	* Makefile.am [BUILD_INFO] (SUBDIRS): Add doc/.
+	* doc/Makefile.am: New file.
+	* doc/Makefile.in: Likewise.
+	* configure: Regenerated.
+	* Makefile.in: Likewise.
+
+2021-10-25  Nick Alcock  <nick.alcock@oracle.com>
+
+	* ctf-types.c (ctf_type_rvisit): Handle nonrepresentable types.
+
+2021-10-25  Nick Alcock  <nick.alcock@oracle.com>
+
+	* ctf-dump.c (ctf_dump_type): Do not abort on error.
+
 2021-09-27  Nick Alcock  <nick.alcock@oracle.com>
 
 	* ctf-lookup.c (ctf_lookup_by_name_internal): Fix pptrtab bounds.
@@ -831,7 +855,7 @@
 
 For older changes see ChangeLog-2020
 
-Copyright (C) 2021 Free Software Foundation, Inc.
+Copyright (C) 2021-2022 Free Software Foundation, Inc.
 
 Copying and distribution of this file, with or without modification,
 are permitted in any medium without royalty provided the copyright

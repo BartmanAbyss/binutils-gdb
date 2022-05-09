@@ -1,6 +1,6 @@
 /* Abstraction of GNU v2 abi.
 
-   Copyright (C) 2001-2021 Free Software Foundation, Inc.
+   Copyright (C) 2001-2022 Free Software Foundation, Inc.
 
    Contributed by Daniel Berlin <dberlin@redhat.com>
 
@@ -364,7 +364,7 @@ gnuv2_baseclass_offset (struct type *type, int index,
 	      CORE_ADDR addr;
 
 	      field_type = check_typedef (type->field (i).type ());
-	      field_offset = TYPE_FIELD_BITPOS (type, i) / 8;
+	      field_offset = type->field (i).loc_bitpos () / 8;
 	      field_length = TYPE_LENGTH (field_type);
 
 	      if (!value_bytes_available (val, embedded_offset + field_offset,

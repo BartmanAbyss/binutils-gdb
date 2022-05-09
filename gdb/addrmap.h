@@ -1,6 +1,6 @@
 /* addrmap.h --- interface to address map data structure.
 
-   Copyright (C) 2007-2021 Free Software Foundation, Inc.
+   Copyright (C) 2007-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -82,7 +82,7 @@ void addrmap_set_empty (struct addrmap *map,
 			void *obj);
 
 /* Return the object associated with ADDR in MAP.  */
-void *addrmap_find (struct addrmap *map, CORE_ADDR addr);
+void *addrmap_find (const addrmap *map, CORE_ADDR addr);
 
 /* Create a fixed address map which is a copy of the mutable address
    map ORIGINAL.  Allocate entries in OBSTACK.  */

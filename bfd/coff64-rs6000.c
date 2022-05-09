@@ -1,5 +1,5 @@
 /* BFD back-end for IBM RS/6000 "XCOFF64" files.
-   Copyright (C) 2000-2021 Free Software Foundation, Inc.
+   Copyright (C) 2000-2022 Free Software Foundation, Inc.
    Written Clinton Popetz.
    Contributed by Cygnus Support.
 
@@ -386,12 +386,13 @@ _bfd_xcoff64_swap_aux_in (bfd *abfd, void *ext1, int type ATTRIBUTE_UNUSED,
 
       if (ext->x_file.x_n.x_n.x_zeroes[0] == 0)
 	{
-	  in->x_file.x_n.x_zeroes = 0;
-	  in->x_file.x_n.x_offset =
+	  in->x_file.x_n.x_n.x_zeroes = 0;
+	  in->x_file.x_n.x_n.x_offset =
 	    H_GET_32 (abfd, ext->x_file.x_n.x_n.x_offset);
 	}
       else
-	memcpy (in->x_file.x_fname, ext->x_file.x_n.x_fname, FILNMLEN);
+	memcpy (in->x_file.x_n.x_fname, ext->x_file.x_n.x_fname, FILNMLEN);
+      in->x_file.x_ftype = H_GET_8 (abfd, ext->x_file.x_ftype);
       break;
 
       /* RS/6000 "csect" auxents.
@@ -410,11 +411,8 @@ _bfd_xcoff64_swap_aux_in (bfd *abfd, void *ext1, int type ATTRIBUTE_UNUSED,
 	  if (auxtype != _AUX_CSECT)
 	    goto error;
 
-	  bfd_signed_vma h = 0;
-	  bfd_vma l = 0;
-
-	  h = H_GET_S32 (abfd, ext->x_csect.x_scnlen_hi);
-	  l = H_GET_32 (abfd, ext->x_csect.x_scnlen_lo);
+	  bfd_vma h = H_GET_S32 (abfd, ext->x_csect.x_scnlen_hi);
+	  bfd_vma l = H_GET_32 (abfd, ext->x_csect.x_scnlen_lo);
 
 	  in->x_csect.x_scnlen.l = h << 32 | (l & 0xffffffff);
 
@@ -502,14 +500,15 @@ _bfd_xcoff64_swap_aux_out (bfd *abfd, void *inp, int type ATTRIBUTE_UNUSED,
       break;
 
     case C_FILE:
-      if (in->x_file.x_n.x_zeroes == 0)
+      if (in->x_file.x_n.x_n.x_zeroes == 0)
 	{
 	  H_PUT_32 (abfd, 0, ext->x_file.x_n.x_n.x_zeroes);
-	  H_PUT_32 (abfd, in->x_file.x_n.x_offset,
+	  H_PUT_32 (abfd, in->x_file.x_n.x_n.x_offset,
 		    ext->x_file.x_n.x_n.x_offset);
 	}
       else
-	memcpy (ext->x_file.x_n.x_fname, in->x_file.x_fname, FILNMLEN);
+	memcpy (ext->x_file.x_n.x_fname, in->x_file.x_n.x_fname, FILNMLEN);
+      H_PUT_8 (abfd, in->x_file.x_ftype, ext->x_file.x_ftype);
       H_PUT_8 (abfd, _AUX_FILE, ext->x_file.x_auxtype);
       break;
 
@@ -624,8 +623,8 @@ _bfd_xcoff64_put_ldsymbol_name (bfd *abfd ATTRIBUTE_UNUSED,
       ldinfo->strings = newstrings;
     }
 
-  bfd_put_16 (ldinfo->output_bfd, (bfd_vma) (len + 1),
-	      ldinfo->strings + ldinfo->string_size);
+  ldinfo->strings[ldinfo->string_size] = ((len + 1) >> 8) & 0xff;
+  ldinfo->strings[ldinfo->string_size + 1] = ((len + 1)) & 0xff;
   strcpy (ldinfo->strings + ldinfo->string_size + 2, name);
   ldsym->_l._l_l._l_zeroes = 0;
   ldsym->_l._l_l._l_offset = ldinfo->string_size + 2;
@@ -779,10 +778,13 @@ xcoff64_reloc_type_br (bfd *input_bfd,
 		       bfd_vma val,
 		       bfd_vma addend,
 		       bfd_vma *relocation,
-		       bfd_byte *contents)
+		       bfd_byte *contents,
+		       struct bfd_link_info *info)
 {
   struct xcoff_link_hash_entry *h;
   bfd_vma section_offset;
+  struct xcoff_stub_hash_entry *stub_entry = NULL;
+  enum xcoff_stub_type stub_type;
 
   if (0 > rel->r_symndx)
     return false;
@@ -832,6 +834,27 @@ xcoff64_reloc_type_br (bfd *input_bfd,
 	 truncated but no it not important.  For this case, disable the
 	 overflow checking. */
       howto->complain_on_overflow = complain_overflow_dont;
+    }
+
+  /* Check if a stub is needed.  */
+  stub_type = bfd_xcoff_type_of_stub (input_section, rel, val, h);
+  if (stub_type != xcoff_stub_none)
+    {
+      asection *stub_csect;
+
+      stub_entry = bfd_xcoff_get_stub_entry (input_section, h, info);
+      if (stub_entry == NULL)
+	{
+	  _bfd_error_handler (_("Unable to find the stub entry targeting %s"),
+			      h->root.root.string);
+	  bfd_set_error (bfd_error_bad_value);
+	  return false;
+	}
+
+      stub_csect = stub_entry->hcsect->root.u.def.section;
+      val = (stub_entry->stub_offset
+	     + stub_csect->output_section->vma
+	     + stub_csect->output_offset);
     }
 
   /* The original PC-relative relocation is biased by -r_vaddr, so adding
@@ -1351,7 +1374,7 @@ reloc_howto_type xcoff64_howto_table[] =
 	 0,			/* bitpos */
 	 complain_overflow_bitfield, /* complain_on_overflow */
 	 0,			/* special_function */
-	 "R_TLSM",		/* name */
+	 "R_TLSML",		/* name */
 	 true,			/* partial_inplace */
 	 MINUS_ONE,		/* src_mask */
 	 MINUS_ONE,		/* dst_mask */
@@ -1646,7 +1669,7 @@ xcoff64_ppc_relocate_section (bfd *output_bfd,
       if (rel->r_type >= XCOFF_MAX_CALCULATE_RELOCATION
 	  || !((*xcoff64_calculate_relocation[rel->r_type])
 	      (input_bfd, input_section, output_bfd, rel, sym, &howto, val,
-	       addend, &relocation, contents)))
+	       addend, &relocation, contents, info)))
 	return false;
 
       /* address */
@@ -2387,12 +2410,32 @@ HOWTO (0,			/* type */
        MINUS_ONE,		/* dst_mask */
        false);			/* pcrel_offset */
 
+/* Indirect call stub */
+static const unsigned long xcoff64_stub_indirect_call_code[4] =
+  {
+    0xe9820000,	/* ld r12,0(r2) */
+    0xe80c0000,	/* ld r0,0(r12) */
+    0x7c0903a6,	/* mtctr r0 */
+    0x4e800420,	/* bctr */
+  };
+
+/* Shared call stub */
+static const unsigned long xcoff64_stub_shared_call_code[6] =
+  {
+    0xe9820000,	/* ld r12,0(r2) */
+    0xf8410028,	/* std r2,40(r1) */
+    0xe80c0000,	/* ld r0,0(r12) */
+    0xe84c0008,	/* ld r2,8(r12) */
+    0x7c0903a6,	/* mtctr r0 */
+    0x4e800420,	/* bctr */
+  };
+
 static const unsigned long xcoff64_glink_code[10] =
 {
   0xe9820000,	/* ld r12,0(r2) */
   0xf8410028,	/* std r2,40(r1) */
   0xe80c0000,	/* ld r0,0(r12) */
-  0xe84c0008,	/* ld r0,8(r12) */
+  0xe84c0008,	/* ld r2,8(r12) */
   0x7c0903a6,	/* mtctr r0 */
   0x4e800420,	/* bctr */
   0x00000000,	/* start of traceback table */
@@ -2496,6 +2539,14 @@ static const struct xcoff_backend_data_rec bfd_xcoff_backend_data =
     /* rtinit.  */
     88,				/* _xcoff_rtinit_size */
     xcoff64_generate_rtinit,
+
+    /* Stub indirect call.  */
+    &xcoff64_stub_indirect_call_code[0],
+    16,				/* _xcoff_stub_indirect_call_size */
+
+    /* Stub shared call.  */
+    &xcoff64_stub_shared_call_code[0],
+    24,				/* _xcoff_stub_shared_call_size */
   };
 
 /* The transfer vector that leads the outside world to all of the above.  */
@@ -2760,6 +2811,14 @@ static const struct xcoff_backend_data_rec bfd_xcoff_aix5_backend_data =
     /* rtinit.  */
     88,				/* _xcoff_rtinit_size */
     xcoff64_generate_rtinit,
+
+    /* Stub indirect call.  */
+    &xcoff64_stub_indirect_call_code[0],
+    16,				/* _xcoff_stub_indirect_call_size */
+
+    /* Stub shared call.  */
+    &xcoff64_stub_shared_call_code[0],
+    24,				/* _xcoff_stub_shared_call_size */
   };
 
 /* The transfer vector that leads the outside world to all of the above.  */

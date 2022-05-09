@@ -1,5 +1,5 @@
 /* GNU/Linux on ARM native support.
-   Copyright (C) 1999-2021 Free Software Foundation, Inc.
+   Copyright (C) 1999-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -339,7 +339,7 @@ fetch_vfp_regs (struct regcache *regcache)
   gdb_byte regbuf[ARM_VFP3_REGS_SIZE];
   int ret, tid;
   struct gdbarch *gdbarch = regcache->arch ();
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  arm_gdbarch_tdep *tdep = (arm_gdbarch_tdep *) gdbarch_tdep (gdbarch);
 
   /* Get the thread id for the ptrace call.  */
   tid = regcache->ptid ().lwp ();
@@ -368,7 +368,7 @@ store_vfp_regs (const struct regcache *regcache)
   gdb_byte regbuf[ARM_VFP3_REGS_SIZE];
   int ret, tid;
   struct gdbarch *gdbarch = regcache->arch ();
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  arm_gdbarch_tdep *tdep = (arm_gdbarch_tdep *) gdbarch_tdep (gdbarch);
 
   /* Get the thread id for the ptrace call.  */
   tid = regcache->ptid ().lwp ();
@@ -413,7 +413,7 @@ void
 arm_linux_nat_target::fetch_registers (struct regcache *regcache, int regno)
 {
   struct gdbarch *gdbarch = regcache->arch ();
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  arm_gdbarch_tdep *tdep = (arm_gdbarch_tdep *) gdbarch_tdep (gdbarch);
 
   if (-1 == regno)
     {
@@ -450,7 +450,7 @@ void
 arm_linux_nat_target::store_registers (struct regcache *regcache, int regno)
 {
   struct gdbarch *gdbarch = regcache->arch ();
-  struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
+  arm_gdbarch_tdep *tdep = (arm_gdbarch_tdep *) gdbarch_tdep (gdbarch);
 
   if (-1 == regno)
     {
@@ -550,7 +550,7 @@ arm_linux_nat_target::read_description ()
     }
 
   if (arm_hwcap & HWCAP_IWMMXT)
-    return arm_read_description (ARM_FP_TYPE_IWMMXT);
+    return arm_read_description (ARM_FP_TYPE_IWMMXT, false);
 
   if (arm_hwcap & HWCAP_VFP)
     {
@@ -567,9 +567,9 @@ arm_linux_nat_target::read_description ()
       if (arm_hwcap & HWCAP_NEON)
 	return aarch32_read_description ();
       else if ((arm_hwcap & (HWCAP_VFPv3 | HWCAP_VFPv3D16)) == HWCAP_VFPv3)
-	return arm_read_description (ARM_FP_TYPE_VFPV3);
+	return arm_read_description (ARM_FP_TYPE_VFPV3, false);
 
-      return arm_read_description (ARM_FP_TYPE_VFPV2);
+      return arm_read_description (ARM_FP_TYPE_VFPV2, false);
     }
 
   return this->beneath ()->read_description ();

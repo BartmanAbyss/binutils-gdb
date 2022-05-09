@@ -1,6 +1,6 @@
 /* Scheme interface to types.
 
-   Copyright (C) 2008-2021 Free Software Foundation, Inc.
+   Copyright (C) 2008-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -108,8 +108,9 @@ tyscm_type_name (struct type *type)
     {
       string_file stb;
 
-      LA_PRINT_TYPE (type, "", &stb, -1, 0, &type_print_raw_options);
-      return std::move (stb.string ());
+      current_language->print_type (type, "", &stb, -1, 0,
+				    &type_print_raw_options);
+      return stb.release ();
     }
   catch (const gdb_exception &except)
     {
@@ -1166,7 +1167,7 @@ gdbscm_field_enumval (SCM self)
   SCM_ASSERT_TYPE (type->code () == TYPE_CODE_ENUM,
 		   self, SCM_ARG1, FUNC_NAME, _("enum type"));
 
-  return scm_from_long (FIELD_ENUMVAL (*field));
+  return scm_from_long (field->loc_enumval ());
 }
 
 /* (field-bitpos <gdb:field>) -> integer
@@ -1183,7 +1184,7 @@ gdbscm_field_bitpos (SCM self)
   SCM_ASSERT_TYPE (type->code () != TYPE_CODE_ENUM,
 		   self, SCM_ARG1, FUNC_NAME, _("non-enum type"));
 
-  return scm_from_long (FIELD_BITPOS (*field));
+  return scm_from_long (field->loc_bitpos ());
 }
 
 /* (field-bitsize <gdb:field>) -> integer
@@ -1196,7 +1197,7 @@ gdbscm_field_bitsize (SCM self)
     = tyscm_get_field_smob_arg_unsafe (self, SCM_ARG1, FUNC_NAME);
   struct field *field = tyscm_field_smob_to_field (f_smob);
 
-  return scm_from_long (FIELD_BITPOS (*field));
+  return scm_from_long (field->loc_bitpos ());
 }
 
 /* (field-artificial? <gdb:field>) -> boolean

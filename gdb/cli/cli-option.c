@@ -1,6 +1,6 @@
 /* CLI options framework, for GDB.
 
-   Copyright (C) 2017-2021 Free Software Foundation, Inc.
+   Copyright (C) 2017-2022 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -445,7 +445,7 @@ parse_option (gdb::array_view<const option_def_group> options_group,
 
     default:
       /* Not yet.  */
-      gdb_assert_not_reached (_("option type not supported"));
+      gdb_assert_not_reached ("option type not supported");
     }
 
   return {};
@@ -824,7 +824,7 @@ add_setshow_cmds_for_options (command_class cmd_class,
 				  set_list, show_list);
 	}
       else
-	gdb_assert_not_reached (_("option type not handled"));
+	gdb_assert_not_reached ("option type not handled");
     }
 }
 

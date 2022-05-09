@@ -1,5 +1,5 @@
 /* Select disassembly routine for specified architecture.
-   Copyright (C) 1994-2021 Free Software Foundation, Inc.
+   Copyright (C) 1994-2022 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -24,8 +24,19 @@
 #include "opintl.h"
 
 #ifdef ARCH_all
+#ifdef BFD64
 #define ARCH_aarch64
 #define ARCH_alpha
+#define ARCH_bpf
+#define ARCH_ia64
+#define ARCH_loongarch
+#define ARCH_mips
+#define ARCH_mmix
+#define ARCH_nfp
+#define ARCH_riscv
+#define ARCH_score
+#define ARCH_tilegx
+#endif
 #define ARCH_arc
 #define ARCH_arm
 #define ARCH_avr
@@ -37,7 +48,6 @@
 #define ARCH_d10v
 #define ARCH_d30v
 #define ARCH_dlx
-#define ARCH_bpf
 #define ARCH_epiphany
 #define ARCH_fr30
 #define ARCH_frv
@@ -45,7 +55,6 @@
 #define ARCH_h8300
 #define ARCH_hppa
 #define ARCH_i386
-#define ARCH_ia64
 #define ARCH_ip2k
 #define ARCH_iq2000
 #define ARCH_lm32
@@ -58,15 +67,12 @@
 #define ARCH_mep
 #define ARCH_metag
 #define ARCH_microblaze
-#define ARCH_mips
-#define ARCH_mmix
 #define ARCH_mn10200
 #define ARCH_mn10300
 #define ARCH_moxie
 #define ARCH_mt
 #define ARCH_msp430
 #define ARCH_nds32
-#define ARCH_nfp
 #define ARCH_nios2
 #define ARCH_ns32k
 #define ARCH_or1k
@@ -74,13 +80,11 @@
 #define ARCH_pj
 #define ARCH_powerpc
 #define ARCH_pru
-#define ARCH_riscv
 #define ARCH_rs6000
 #define ARCH_rl78
 #define ARCH_rx
 #define ARCH_s12z
 #define ARCH_s390
-#define ARCH_score
 #define ARCH_sh
 #define ARCH_sparc
 #define ARCH_spu
@@ -88,7 +92,6 @@
 #define ARCH_tic4x
 #define ARCH_tic54x
 #define ARCH_tic6x
-#define ARCH_tilegx
 #define ARCH_tilepro
 #define ARCH_v850
 #define ARCH_vax
@@ -226,8 +229,6 @@ disassembler (enum bfd_architecture a,
 #ifdef ARCH_i386
     case bfd_arch_i386:
     case bfd_arch_iamcu:
-    case bfd_arch_l1om:
-    case bfd_arch_k1om:
       disassemble = print_insn_i386;
       break;
 #endif
@@ -552,6 +553,11 @@ disassembler (enum bfd_architecture a,
       disassemble = print_insn_tilepro;
       break;
 #endif
+#ifdef ARCH_loongarch
+    case bfd_arch_loongarch:
+      disassemble = print_insn_loongarch;
+      break;
+#endif
     default:
       return 0;
     }
@@ -591,6 +597,9 @@ disassembler_usage (FILE *stream ATTRIBUTE_UNUSED)
 #ifdef ARCH_wasm32
   print_wasm32_disassembler_options (stream);
 #endif
+#ifdef ARCH_loongarch
+  print_loongarch_disassembler_options (stream);
+#endif
 
   return;
 }
@@ -621,7 +630,12 @@ disassemble_init_for_target (struct disassemble_info * info)
       info->disassembler_needs_relocs = true;
       break;
 #endif
-
+#ifdef ARCH_i386
+    case bfd_arch_i386:
+    case bfd_arch_iamcu:
+      info->created_styled_output = true;
+      break;
+#endif
 #ifdef ARCH_ia64
     case bfd_arch_ia64:
       info->skip_zeroes = 16;
@@ -697,6 +711,7 @@ disassemble_init_for_target (struct disassemble_info * info)
 #ifdef ARCH_riscv
     case bfd_arch_riscv:
       info->symbol_is_valid = riscv_symbol_is_valid;
+      info->created_styled_output = true;
       break;
 #endif
 #ifdef ARCH_wasm32
@@ -848,4 +863,17 @@ opcodes_assert (const char *file, int line)
   opcodes_error_handler (_("assertion fail %s:%d"), file, line);
   opcodes_error_handler (_("Please report this bug"));
   abort ();
+}
+
+/* Set the stream, and the styled and unstyled printf functions within
+   INFO.  */
+
+void
+disassemble_set_printf (struct disassemble_info *info, void *stream,
+			fprintf_ftype unstyled_printf,
+			fprintf_styled_ftype styled_printf)
+{
+  info->stream = stream;
+  info->fprintf_func = unstyled_printf;
+  info->fprintf_styled_func = styled_printf;
 }

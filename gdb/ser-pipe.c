@@ -1,5 +1,5 @@
 /* Serial interface for a pipe to a separate program
-   Copyright (C) 1999-2021 Free Software Foundation, Inc.
+   Copyright (C) 1999-2022 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions.
 
@@ -61,6 +61,12 @@ pipe_open (struct serial *scb, const char *name)
   int pdes[2];
   int err_pdes[2];
   int pid;
+
+  if (*name == '|')
+    {
+      name++;
+      name = skip_spaces (name);
+    }
 
   if (gdb_socketpair_cloexec (AF_UNIX, SOCK_STREAM, 0, pdes) < 0)
     return -1;
