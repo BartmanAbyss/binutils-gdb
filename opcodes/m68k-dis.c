@@ -29,12 +29,6 @@
 #define MOTOROLA 1
 #define TARGET_AMIGA 1
 
-#ifdef MOTOROLA
-/* print as signed decimal. */
-#undef sprintf_vma
-#define sprintf_vma(b,n) sprintf(b,"%d",(int)n)
-#endif
-
 #ifdef TARGET_AMIGA
 /* Extra info to pass to the disassembler address printing function.  */
 struct objdump_disasm_info
@@ -594,8 +588,7 @@ print_base (int regno, bfd_vma disp, disassemble_info *info)
 	}
       else
 	{
-	  sprintf_vma (buf, disp);
-          (*info->fprintf_func) (info->stream, "%s", buf);
+      (*info->fprintf_func) (info->stream, "%" PRId64, (uint64_t) disp);
 	}
 #endif
 #ifdef MOTOROLA
@@ -731,7 +724,7 @@ print_indexed (int basereg,
   (*info->fprintf_func) (info->stream, "]");
   if (buf[0] != '\0')
     (*info->fprintf_func) (info->stream, ",%s", buf);
-  (*info->fprintf_func) (info->stream, ",%" PRIx64, (uint64_t) outer_disp);
+  (*info->fprintf_func) (info->stream, ",%" PRId64, (uint64_t) outer_disp);
   (*info->fprintf_func) (info->stream, ")");
 #else
   (*info->fprintf_func) (info->stream, ")@(%" PRIx64, (uint64_t) outer_disp);
