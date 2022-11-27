@@ -727,7 +727,7 @@ print_indexed (int basereg,
       (*info->fprintf_func) (info->stream, ",%s", buf);
       buf[0] = '\0';
     }
-  (*info->fprintf_func) (info->stream, ")@(%" PRIx64, (uint64_t) outer_disp);  (*info->fprintf_func) (info->stream, ")@(%s", vmabuf);
+  (*info->fprintf_func) (info->stream, ")@(%" PRIx64, (uint64_t) outer_disp);
 #ifdef MOTOROLA
   (*info->fprintf_func) (info->stream, "]");
   if (buf[0] != '\0')
