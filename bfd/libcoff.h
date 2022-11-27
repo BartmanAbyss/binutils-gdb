@@ -329,8 +329,8 @@ extern void coff_mangle_symbols
 extern bool coff_write_symbols
   (bfd *);
 extern bool coff_write_alien_symbol
-  (bfd *, asymbol *, struct internal_syment *, union internal_auxent *,
-   bfd_vma *, bfd_size_type *, asection **, bfd_size_type *);
+  (bfd *, asymbol *, struct internal_syment *, bfd_vma *,
+   struct bfd_strtab_hash *, bool, asection **, bfd_size_type *);
 extern bool coff_write_linenumbers
   (bfd *);
 extern alent *coff_get_lineno
@@ -362,6 +362,8 @@ extern asymbol *coff_bfd_make_debug_symbol
 extern bool coff_find_nearest_line
   (bfd *, asymbol **, asection *, bfd_vma,
    const char **, const char **, unsigned int *, unsigned int *);
+#define coff_find_nearest_line_with_alt \
+  _bfd_nosymbols_find_nearest_line_with_alt
 #define coff_find_line _bfd_nosymbols_find_line
 struct dwarf_debug_section;
 extern bool coff_find_nearest_line_with_names

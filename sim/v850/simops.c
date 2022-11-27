@@ -39,7 +39,7 @@ int type2_regs[16] = { 3, 2, 1, 0, 27, 26, 25, 24, 31, 30, 29, 28, 23, 22, 20, 2
    that order in a push/pop instruction.  */
 int type3_regs[15] = { 2, 1, 0, 27, 26, 25, 24, 31, 30, 29, 28, 23, 22, 20, 21};
 
-#ifdef DEBUG
+#if WITH_TRACE_ANY_P
 #ifndef SIZE_INSTRUCTION
 #define SIZE_INSTRUCTION 18
 #endif
@@ -398,7 +398,7 @@ fetch_str (SIM_DESC sd, address_word addr)
     nr++;
 
   buf = NZALLOC (char, nr + 1);
-  sim_read (simulator, addr, (unsigned char *) buf, nr);
+  sim_read (simulator, addr, buf, nr);
 
   return buf;
 }
@@ -1692,7 +1692,7 @@ OP_10007E0 (void)
 	  {
 	    char *buf = zalloc (PARM3);
 	    RETVAL = sim_io_read (simulator, PARM1, buf, PARM3);
-	    sim_write (simulator, PARM2, (unsigned char *) buf, PARM3);
+	    sim_write (simulator, PARM2, buf, PARM3);
 	    free (buf);
 	    if ((int) RETVAL < 0)
 	      RETERR = sim_io_get_errno (simulator);
@@ -1702,7 +1702,7 @@ OP_10007E0 (void)
 	case TARGET_NEWLIB_V850_SYS_write:
 	  {
 	    char *buf = zalloc (PARM3);
-	    sim_read (simulator, PARM2, (unsigned char *) buf, PARM3);
+	    sim_read (simulator, PARM2, buf, PARM3);
 	    if (PARM1 == 1)
 	      RETVAL = sim_io_write_stdout (simulator, buf, PARM3);
 	    else

@@ -243,14 +243,18 @@ set_parameter_value (parmpy_object *self, PyObject *value)
 	long l;
 	int ok;
 
-	if (!PyLong_Check (value))
+	if (value == Py_None
+	    && (self->type == var_uinteger || self->type == var_integer))
+	  l = 0;
+	else if (value == Py_None && self->type == var_zuinteger_unlimited)
+	  l = -1;
+	else if (!PyLong_Check (value))
 	  {
 	    PyErr_SetString (PyExc_RuntimeError,
 			     _("The value must be integer."));
 	    return -1;
 	  }
-
-	if (! gdb_py_int_as_long (value, &l))
+	else if (! gdb_py_int_as_long (value, &l))
 	  return -1;
 
 	switch (self->type)
@@ -385,6 +389,8 @@ get_doc_string (PyObject *object, enum doc_string_type doc_type,
 	  result = python_string_to_host_string (ds_obj.get ());
 	  if (result == NULL)
 	    gdbpy_print_stack ();
+	  else if (doc_type == doc_string_description)
+	    result = gdbpy_fix_doc_string_indentation (std::move (result));
 	}
     }
 

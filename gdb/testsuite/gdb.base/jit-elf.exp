@@ -18,11 +18,6 @@ if {[skip_shlib_tests]} {
     return -1
 }
 
-if {[get_compiler_info]} {
-    untested "could not get compiler info"
-    return 1
-}
-
 load_lib jit-elf-helpers.exp
 
 # Increase this to see more detail.
@@ -59,7 +54,7 @@ proc clean_reattach {} {
     clean_restart ${main_binfile}
 
     if { ![gdb_attach $testpid \
-	      -pattern "main.*at .*$::main_srcfile:.*"] } {
+	      -pattern "main.*at .*$::main_basename.c:.*"] } {
 	return 0
     }
 

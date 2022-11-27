@@ -20,6 +20,7 @@
    MA 02110-1301, USA.  */
 
 #include "sysdep.h"
+#include "libiberty.h"
 #include "bfd.h"
 #include "libbfd.h"
 #include "fnmatch.h"
@@ -226,9 +227,9 @@ DESCRIPTION
 .  {* Entries for byte swapping for data. These are different from the
 .     other entry points, since they don't take a BFD as the first argument.
 .     Certain other handlers could do the same.  *}
-.  bfd_uint64_t	  (*bfd_getx64) (const void *);
-.  bfd_int64_t	  (*bfd_getx_signed_64) (const void *);
-.  void		  (*bfd_putx64) (bfd_uint64_t, void *);
+.  uint64_t	  (*bfd_getx64) (const void *);
+.  int64_t	  (*bfd_getx_signed_64) (const void *);
+.  void		  (*bfd_putx64) (uint64_t, void *);
 .  bfd_vma	  (*bfd_getx32) (const void *);
 .  bfd_signed_vma (*bfd_getx_signed_32) (const void *);
 .  void		  (*bfd_putx32) (bfd_vma, void *);
@@ -237,9 +238,9 @@ DESCRIPTION
 .  void		  (*bfd_putx16) (bfd_vma, void *);
 .
 .  {* Byte swapping for the headers.  *}
-.  bfd_uint64_t	  (*bfd_h_getx64) (const void *);
-.  bfd_int64_t	  (*bfd_h_getx_signed_64) (const void *);
-.  void		  (*bfd_h_putx64) (bfd_uint64_t, void *);
+.  uint64_t	  (*bfd_h_getx64) (const void *);
+.  int64_t	  (*bfd_h_getx_signed_64) (const void *);
+.  void		  (*bfd_h_putx64) (uint64_t, void *);
 .  bfd_vma	  (*bfd_h_getx32) (const void *);
 .  bfd_signed_vma (*bfd_h_getx_signed_32) (const void *);
 .  void		  (*bfd_h_putx32) (bfd_vma, void *);
@@ -377,6 +378,7 @@ BFD_JUMP_TABLE macros.
 .  NAME##_bfd_is_target_special_symbol, \
 .  NAME##_get_lineno, \
 .  NAME##_find_nearest_line, \
+.  NAME##_find_nearest_line_with_alt, \
 .  NAME##_find_line, \
 .  NAME##_find_inliner_info, \
 .  NAME##_bfd_make_debug_symbol, \
@@ -407,6 +409,11 @@ BFD_JUMP_TABLE macros.
 .				   struct bfd_section *, bfd_vma,
 .				   const char **, const char **,
 .				   unsigned int *, unsigned int *);
+.  bool (*_bfd_find_nearest_line_with_alt) (bfd *, const char *,
+.					    struct bfd_symbol **,
+.					    struct bfd_section *, bfd_vma,
+.					    const char **, const char **,
+.					    unsigned int *, unsigned int *);
 .  bool (*_bfd_find_line) (bfd *, struct bfd_symbol **,
 .			   struct bfd_symbol *, const char **,
 .			   unsigned int *);
@@ -679,7 +686,8 @@ extern const bfd_target aarch64_elf64_be_cloudabi_vec;
 extern const bfd_target aarch64_elf64_le_vec;
 extern const bfd_target aarch64_elf64_le_cloudabi_vec;
 extern const bfd_target aarch64_mach_o_vec;
-extern const bfd_target aarch64_pei_vec;
+extern const bfd_target aarch64_pei_le_vec;
+extern const bfd_target aarch64_pe_le_vec;
 extern const bfd_target alpha_ecoff_le_vec;
 extern const bfd_target alpha_elf64_vec;
 extern const bfd_target alpha_elf64_fbsd_vec;
@@ -768,6 +776,7 @@ extern const bfd_target lm32_elf32_vec;
 extern const bfd_target lm32_elf32_fdpic_vec;
 extern const bfd_target loongarch_elf64_vec;
 extern const bfd_target loongarch_elf32_vec;
+extern const bfd_target loongarch64_pei_vec;
 extern const bfd_target m32c_elf32_vec;
 extern const bfd_target m32r_elf32_vec;
 extern const bfd_target m32r_elf32_le_vec;
@@ -833,6 +842,7 @@ extern const bfd_target nios2_elf32_le_vec;
 extern const bfd_target ns32k_aout_pc532mach_vec;
 extern const bfd_target ns32k_aout_pc532nbsd_vec;
 extern const bfd_target or1k_elf32_vec;
+extern const bfd_target pdb_vec;
 extern const bfd_target pdp11_aout_vec;
 extern const bfd_target pef_vec;
 extern const bfd_target pef_xlib_vec;
@@ -933,7 +943,6 @@ extern const bfd_target x86_64_mach_o_vec;
 extern const bfd_target x86_64_pe_vec;
 extern const bfd_target x86_64_pe_big_vec;
 extern const bfd_target x86_64_pei_vec;
-extern const bfd_target xc16x_elf32_vec;
 extern const bfd_target xgate_elf32_vec;
 extern const bfd_target xstormy16_elf32_vec;
 extern const bfd_target xtensa_elf32_be_vec;
@@ -991,7 +1000,8 @@ static const bfd_target * const _bfd_target_vector[] =
 	&aarch64_elf64_le_vec,
 	&aarch64_elf64_le_cloudabi_vec,
 	&aarch64_mach_o_vec,
-	&aarch64_pei_vec,
+	&aarch64_pe_le_vec,
+	&aarch64_pei_le_vec,
 #endif
 
 #ifdef BFD64
@@ -1215,6 +1225,8 @@ static const bfd_target * const _bfd_target_vector[] =
 
 	&or1k_elf32_vec,
 
+	&pdb_vec,
+
 	&pdp11_aout_vec,
 
 	&pef_vec,
@@ -1344,8 +1356,6 @@ static const bfd_target * const _bfd_target_vector[] =
 	&x86_64_pei_vec,
 #endif
 
-	&xc16x_elf32_vec,
-
 	&xgate_elf32_vec,
 
 	&xstormy16_elf32_vec,
@@ -1361,6 +1371,7 @@ static const bfd_target * const _bfd_target_vector[] =
 #ifdef BFD64
 	&loongarch_elf32_vec,
 	&loongarch_elf64_vec,
+	&loongarch64_pei_vec,
 #endif
 
 #endif /* not SELECT_VECS */
@@ -1446,7 +1457,10 @@ const bfd_target *const *const bfd_associated_vector = _bfd_associated_vector;
 /* When there is an ambiguous match, bfd_check_format_matches puts the
    names of the matching targets in an array.  This variable is the maximum
    number of entries that the array could possibly need.  */
-const size_t _bfd_target_vector_entries = sizeof (_bfd_target_vector)/sizeof (*_bfd_target_vector);
+const size_t _bfd_target_vector_entries = ARRAY_SIZE (_bfd_target_vector);
+
+/* A place to stash a warning from _bfd_check_format.  */
+static const char *per_xvec_warn[ARRAY_SIZE (_bfd_target_vector) + 1];
 
 /* This array maps configuration triplets onto BFD vectors.  */
 
@@ -1465,6 +1479,29 @@ static const struct targmatch bfd_target_match[] = {
 #include "targmatch.h"
   { NULL, NULL }
 };
+
+/*
+INTERNAL_FUNCTION
+	_bfd_per_xvec_warn
+
+SYNOPSIS
+	const char **_bfd_per_xvec_warn (const bfd_target *);
+
+DESCRIPTION
+	Return a location for the given target xvec to use for
+	warnings specific to that target.
+*/
+
+const char **
+_bfd_per_xvec_warn (const bfd_target *targ)
+{
+  size_t idx;
+
+  for (idx = 0; idx < ARRAY_SIZE (_bfd_target_vector); idx++)
+    if (_bfd_target_vector[idx] == targ)
+      break;
+  return per_xvec_warn + idx;
+}
 
 /* Find a target vector, given a name or configuration triplet.  */
 

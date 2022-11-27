@@ -98,7 +98,6 @@
 #define ARCH_visium
 #define ARCH_wasm32
 #define ARCH_xstormy16
-#define ARCH_xc16x
 #define ARCH_xgate
 #define ARCH_xtensa
 #define ARCH_z80
@@ -490,11 +489,6 @@ disassembler (enum bfd_architecture a,
       disassemble = print_insn_xstormy16;
       break;
 #endif
-#ifdef ARCH_xc16x
-    case bfd_arch_xc16x:
-      disassemble = print_insn_xc16x;
-      break;
-#endif
 #ifdef ARCH_xtensa
     case bfd_arch_xtensa:
       disassemble = print_insn_xtensa;
@@ -616,12 +610,24 @@ disassemble_init_for_target (struct disassemble_info * info)
     case bfd_arch_aarch64:
       info->symbol_is_valid = aarch64_symbol_is_valid;
       info->disassembler_needs_relocs = true;
+      info->created_styled_output = true;
+      break;
+#endif
+#ifdef ARCH_arc
+    case bfd_arch_arc:
+      info->created_styled_output = true;
       break;
 #endif
 #ifdef ARCH_arm
     case bfd_arch_arm:
       info->symbol_is_valid = arm_symbol_is_valid;
       info->disassembler_needs_relocs = true;
+      info->created_styled_output = true;
+      break;
+#endif
+#ifdef ARCH_avr
+    case bfd_arch_avr:
+      info->created_styled_output = true;
       break;
 #endif
 #ifdef ARCH_csky
@@ -706,6 +712,7 @@ disassemble_init_for_target (struct disassemble_info * info)
 #endif
 #if defined (ARCH_powerpc) || defined (ARCH_rs6000)
       disassemble_init_powerpc (info);
+      info->created_styled_output = true;
       break;
 #endif
 #ifdef ARCH_riscv
@@ -722,6 +729,7 @@ disassemble_init_for_target (struct disassemble_info * info)
 #ifdef ARCH_s390
     case bfd_arch_s390:
       disassemble_init_s390 (info);
+      info->created_styled_output = true;
       break;
 #endif
 #ifdef ARCH_nds32

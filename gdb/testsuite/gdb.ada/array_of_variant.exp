@@ -20,9 +20,6 @@ if { [skip_ada_tests] } { return -1 }
 
 standard_ada_testfile p
 
-if [get_compiler_info] {
-    return -1
-}
 set old_gcc [expr [test_compiler_info {gcc-[0-7]-*}]]
 
 proc gdb_test_with_xfail { cmd re re_xfail msg } {
@@ -46,11 +43,11 @@ proc gdb_test_with_xfail { cmd re re_xfail msg } {
 foreach_with_prefix scenario {all minimal} {
     set flags [list debug additional_flags=-fgnat-encodings=$scenario]
 
-    if {[gdb_compile_ada "${srcfile}" "${binfile}" executable $flags] != ""} {
+    if {[gdb_compile_ada "${srcfile}" "${binfile}-${scenario}" executable $flags] != ""} {
 	return -1
     }
 
-    clean_restart ${testfile}
+    clean_restart ${testfile}-${scenario}
 
     set bp_location [gdb_get_line_number "START" ${testdir}/p.adb]
     runto "p.adb:$bp_location"

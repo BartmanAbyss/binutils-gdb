@@ -342,9 +342,7 @@ static ada_choices_component *
 choice_component ()
 {
   ada_component *last = components.back ().get ();
-  ada_choices_component *result = dynamic_cast<ada_choices_component *> (last);
-  gdb_assert (result != nullptr);
-  return result;
+  return gdb::checked_static_cast<ada_choices_component *> (last);
 }
 
 /* Pop the most recent component from the global stack, and return
@@ -875,7 +873,7 @@ primary :	primary TICK_ACCESS
 			  if (!ada_is_modular_type (type_arg))
 			    error (_("'modulus must be applied to modular type"));
 			  write_int (pstate, ada_modulus (type_arg),
-				     TYPE_TARGET_TYPE (type_arg));
+				     type_arg->target_type ());
 			}
 	;
 
@@ -1661,8 +1659,7 @@ write_var_or_type (struct parser_state *par_state,
 	      write_selectors (par_state, encoded_name + tail_index);
 	      return NULL;
 	    default:
-	      internal_error (__FILE__, __LINE__,
-			      _("impossible value from ada_parse_renaming"));
+	      internal_error (_("impossible value from ada_parse_renaming"));
 	    }
 
 	  if (type_sym != NULL)
@@ -1700,8 +1697,12 @@ write_var_or_type (struct parser_state *par_state,
 	    }
 	  else if (syms.empty ())
 	    {
+	      struct objfile *objfile = nullptr;
+	      if (block != nullptr)
+		objfile = block_objfile (block);
+
 	      struct bound_minimal_symbol msym
-		= ada_lookup_simple_minsym (decoded_name.c_str ());
+		= ada_lookup_simple_minsym (decoded_name.c_str (), objfile);
 	      if (msym.minsym != NULL)
 		{
 		  par_state->push_new<ada_var_msym_value_operation> (msym);

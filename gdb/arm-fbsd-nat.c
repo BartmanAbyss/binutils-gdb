@@ -55,24 +55,11 @@ arm_fbsd_nat_target::fetch_registers (struct regcache *regcache, int regnum)
 #endif
 #ifdef PT_GETREGSET
   gdbarch *gdbarch = regcache->arch ();
-  arm_gdbarch_tdep *tdep = (arm_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  arm_gdbarch_tdep *tdep = gdbarch_tdep<arm_gdbarch_tdep> (gdbarch);
 
   if (tdep->tls_regnum > 0)
-    {
-      const struct regcache_map_entry arm_fbsd_tlsregmap[] =
-	{
-	  { 1, tdep->tls_regnum, 4 },
-	  { 0 }
-	};
-
-      const struct regset arm_fbsd_tlsregset =
-	{
-	  arm_fbsd_tlsregmap,
-	  regcache_supply_regset, regcache_collect_regset
-	};
-
-      fetch_regset<uint32_t> (regcache, regnum, NT_ARM_TLS, &arm_fbsd_tlsregset);
-    }
+    fetch_regset<uint32_t> (regcache, regnum, NT_ARM_TLS, &arm_fbsd_tls_regset,
+			    tdep->tls_regnum);
 #endif
 }
 
@@ -90,24 +77,11 @@ arm_fbsd_nat_target::store_registers (struct regcache *regcache, int regnum)
 #endif
 #ifdef PT_GETREGSET
   gdbarch *gdbarch = regcache->arch ();
-  arm_gdbarch_tdep *tdep = (arm_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  arm_gdbarch_tdep *tdep = gdbarch_tdep<arm_gdbarch_tdep> (gdbarch);
 
   if (tdep->tls_regnum > 0)
-    {
-      const struct regcache_map_entry arm_fbsd_tlsregmap[] =
-	{
-	  { 1, tdep->tls_regnum, 4 },
-	  { 0 }
-	};
-
-      const struct regset arm_fbsd_tlsregset =
-	{
-	  arm_fbsd_tlsregmap,
-	  regcache_supply_regset, regcache_collect_regset
-	};
-
-      store_regset<uint32_t> (regcache, regnum, NT_ARM_TLS, &arm_fbsd_tlsregset);
-    }
+    store_regset<uint32_t> (regcache, regnum, NT_ARM_TLS, &arm_fbsd_tls_regset,
+			    tdep->tls_regnum);
 #endif
 }
 
@@ -122,7 +96,7 @@ arm_fbsd_nat_target::read_description ()
 #ifdef PT_GETREGSET
   tls = have_regset (inferior_ptid, NT_ARM_TLS) != 0;
 #endif
-  desc = arm_fbsd_read_description_auxv (this, tls);
+  desc = arm_fbsd_read_description_auxv (tls);
   if (desc == NULL)
     desc = this->beneath ()->read_description ();
   return desc;

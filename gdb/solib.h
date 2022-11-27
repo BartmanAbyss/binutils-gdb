@@ -48,7 +48,7 @@ extern void solib_create_inferior_hook (int from_tty);
 
 /* If ADDR lies in a shared library, return its name.  */
 
-extern char *solib_name_from_address (struct program_space *, CORE_ADDR);
+extern const char *solib_name_from_address (struct program_space *, CORE_ADDR);
 
 /* Return true if ADDR lies within SOLIB.  */
 
@@ -70,11 +70,6 @@ extern bool in_solib_dynsym_resolve_code (CORE_ADDR);
 /* Discard symbols that were auto-loaded from shared libraries.  */
 
 extern void no_shared_libraries (const char *ignored, int from_tty);
-
-/* Set the solib operations for GDBARCH to NEW_OPS.  */
-
-extern void set_solib_ops (struct gdbarch *gdbarch,
-			   const struct target_so_ops *new_ops);
 
 /* Synchronize GDB's shared object list with inferior's.
 

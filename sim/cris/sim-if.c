@@ -257,16 +257,18 @@ cris_load_elf_file (SIM_DESC sd, struct bfd *abfd, sim_write_fn do_write)
 
       if (verbose)
 	sim_io_printf (sd,
-		       "Loading segment at 0x%" BFD_VMA_FMT "x, size 0x%lx\n",
-		       lma, phdr[i].p_filesz);
+		       "Loading segment at 0x%" PRIx64 ", "
+		       "size 0x%" PRIx64 "\n",
+		       (uint64_t) lma, (uint64_t) phdr[i].p_filesz);
 
       if (bfd_seek (abfd, phdr[i].p_offset, SEEK_SET) != 0
 	  || (bfd_bread (buf, phdr[i].p_filesz, abfd) != phdr[i].p_filesz))
 	{
 	  sim_io_eprintf (sd,
-			  "%s: could not read segment at 0x%" BFD_VMA_FMT "x, "
-			  "size 0x%lx\n",
-			  STATE_MY_NAME (sd), lma, phdr[i].p_filesz);
+			  "%s: could not read segment at 0x%" PRIx64 ", "
+			  "size 0x%" PRIx64 "\n",
+			  STATE_MY_NAME (sd), (uint64_t) lma,
+			  (uint64_t) phdr[i].p_filesz);
 	  free (buf);
 	  return FALSE;
 	}
@@ -274,9 +276,10 @@ cris_load_elf_file (SIM_DESC sd, struct bfd *abfd, sim_write_fn do_write)
       if (do_write (sd, lma, buf, phdr[i].p_filesz) != phdr[i].p_filesz)
 	{
 	  sim_io_eprintf (sd,
-			  "%s: could not load segment at 0x%" BFD_VMA_FMT "x, "
-			  "size 0x%lx\n",
-			  STATE_MY_NAME (sd), lma, phdr[i].p_filesz);
+			  "%s: could not load segment at 0x%" PRIx64 ", "
+			  "size 0x%" PRIx64 "\n",
+			  STATE_MY_NAME (sd), (uint64_t) lma,
+			  (uint64_t) phdr[i].p_filesz);
 	  free (buf);
 	  return FALSE;
 	}
@@ -483,7 +486,7 @@ aux_ent_entry (struct bfd *ebfd)
    interp_load_addr offset.  */
 
 static int
-cris_write_interp (SIM_DESC sd, SIM_ADDR mem, const unsigned char *buf, int length)
+cris_write_interp (SIM_DESC sd, SIM_ADDR mem, const void *buf, int length)
 {
   return sim_write (sd, mem + interp_load_addr, buf, length);
 }
@@ -572,8 +575,8 @@ cris_handle_interpreter (SIM_DESC sd, struct bfd *abfd)
 	 memory area, so we go via a temporary area.  Luckily, the
 	 interpreter is supposed to be small, less than 0x40000
 	 bytes.  */
-      sim_do_commandf (sd, "memory region 0x%" BFD_VMA_FMT "x,0x%lx",
-		       interp_load_addr, interpsiz);
+      sim_do_commandf (sd, "memory region 0x%" PRIx64 ",0x%" PRIx64,
+		       (uint64_t) interp_load_addr, (uint64_t) interpsiz);
 
       /* Now that memory for the interpreter is defined, load it.  */
       if (!cris_load_elf_file (sd, ibfd, cris_write_interp))
@@ -930,7 +933,7 @@ sim_open (SIM_OPEN_KIND kind, host_callback *callback, struct bfd *abfd,
 	CPU_CRIS_MISC_PROFILE (cpu)->flags = STATE_TRACE_FLAGS (sd)[0];
 
 	/* Set SP to the stack we allocated above.  */
-	(* CPU_REG_STORE (cpu)) (cpu, H_GR_SP, (unsigned char *) sp_init, 4);
+	(* CPU_REG_STORE (cpu)) (cpu, H_GR_SP, (const unsigned char *) sp_init, 4);
 
 	/* Set the simulator environment data.  */
 	cpu->highest_mmapped_page = NULL;
@@ -1022,7 +1025,7 @@ cris_disassemble_insn (SIM_CPU *cpu,
   disasm_info.endian = BFD_ENDIAN_LITTLE;
   disasm_info.read_memory_func = sim_disasm_read_memory;
   disasm_info.memory_error_func = sim_disasm_perror_memory;
-  disasm_info.application_data = (PTR) cpu;
+  disasm_info.application_data = cpu;
   pinsn = cris_get_disassembler (STATE_PROG_BFD (sd));
   (*pinsn) (pc, &disasm_info);
 }

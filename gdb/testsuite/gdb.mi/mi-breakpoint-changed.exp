@@ -97,7 +97,7 @@ proc test_insert_delete_modify { } {
 	$test
     set test "dprintf marker, \"arg\" \""
     mi_gdb_test $test \
-	{.*=breakpoint-created,bkpt=\{number="6",type="dprintf".*,script=\{\"printf \\\"arg\\\" \\\"\"\}.*\}\r\n\^done} \
+	{.*=breakpoint-created,bkpt=\{number="6",type="dprintf".*,script=\[\"printf \\\"arg\\\" \\\"\"\].*\}\r\n\^done} \
 	$test
 
     # 2. when modifying condition
@@ -169,7 +169,7 @@ proc test_pending_resolved { } {
 
 	gdb_exit
 	if [mi_gdb_start] {
-	    continue
+	    return
 	}
 	mi_gdb_reinitialize_dir $srcdir/$subdir
 	mi_gdb_load ${binfile}

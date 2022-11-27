@@ -412,7 +412,7 @@ internal_vproblem (struct internal_problem *problem,
   else if (problem->should_quit == internal_problem_no)
     quit_p = 0;
   else
-    internal_error (__FILE__, __LINE__, _("bad switch"));
+    internal_error (_("bad switch"));
 
   gdb_puts (_("\nThis is a bug, please report it."), gdb_stderr);
   if (REPORT_BUGS_TO[0])
@@ -442,7 +442,7 @@ internal_vproblem (struct internal_problem *problem,
   else if (problem->should_dump_core == internal_problem_no)
     dump_core_p = 0;
   else
-    internal_error (__FILE__, __LINE__, _("bad switch"));
+    internal_error (_("bad switch"));
 
   if (quit_p)
     {
@@ -623,7 +623,7 @@ perror_string (const char *prefix)
    as the file name for which the error was encountered.  Use ERRCODE
    for the thrown exception.  Then return to command level.  */
 
-void
+static void ATTRIBUTE_NORETURN
 throw_perror_with_name (enum errors errcode, const char *string)
 {
   std::string combined = perror_string (string);
@@ -714,13 +714,12 @@ malloc_failure (long size)
 {
   if (size > 0)
     {
-      internal_error (__FILE__, __LINE__,
-		      _("virtual memory exhausted: can't allocate %ld bytes."),
+      internal_error (_("virtual memory exhausted: can't allocate %ld bytes."),
 		      size);
     }
   else
     {
-      internal_error (__FILE__, __LINE__, _("virtual memory exhausted."));
+      internal_error (_("virtual memory exhausted."));
     }
 }
 
@@ -799,7 +798,7 @@ public:
       m_ui (NULL)
   {
     target_terminal::ours ();
-    ui_register_input_event_handler (current_ui);
+    current_ui->register_file_handler ();
     if (current_ui->prompt_state == PROMPT_BLOCKED)
       m_ui = current_ui;
   }
@@ -807,7 +806,7 @@ public:
   ~scoped_input_handler ()
   {
     if (m_ui != NULL)
-      ui_unregister_input_event_handler (m_ui);
+      m_ui->unregister_file_handler ();
   }
 
   DISABLE_COPY_AND_ASSIGN (scoped_input_handler);
@@ -880,7 +879,7 @@ defaulted_query (const char *ctlstr, const char defchar, va_list args)
      way, important error messages don't get lost when talking to GDB
      over a pipe.  */
   if (current_ui->instream != current_ui->stdin_stream
-      || !input_interactive_p (current_ui)
+      || !current_ui->input_interactive_p ()
       /* Restrict queries to the main UI.  */
       || current_ui != main_ui)
     {

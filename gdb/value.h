@@ -550,7 +550,7 @@ extern void mark_value_bits_unavailable (struct value *value,
    example, to compare a complete object value with itself, including
    its enclosing type chunk, you'd do:
 
-     int len = TYPE_LENGTH (check_typedef (value_enclosing_type (val)));
+     int len = check_typedef (value_enclosing_type (val))->length ();
      value_contents_eq (val, 0, val, 0, len);
 
    Returns true iff the set of available/valid contents match.
@@ -599,6 +599,12 @@ extern bool value_contents_eq (const struct value *val1, LONGEST offset1,
 			       const struct value *val2, LONGEST offset2,
 			       LONGEST length);
 
+/* An overload of value_contents_eq that compares the entirety of both
+   values.  */
+
+extern bool value_contents_eq (const struct value *val1,
+			       const struct value *val2);
+
 /* Read LENGTH addressable memory units starting at MEMADDR into BUFFER,
    which is (or will be copied to) VAL's contents buffer offset by
    BIT_OFFSET bits.  Marks value contents ranges as unavailable if
@@ -621,7 +627,7 @@ struct value *value_vector_widen (struct value *scalar_value,
 #include "gdbtypes.h"
 #include "expression.h"
 
-struct frame_info;
+class frame_info_ptr;
 struct fn_field;
 
 extern int print_address_demangle (const struct value_print_options *,
@@ -687,6 +693,21 @@ extern struct value *value_from_history_ref (const char *, const char **);
 extern struct value *value_from_component (struct value *, struct type *,
 					   LONGEST);
 
+
+/* Create a new value by extracting it from WHOLE.  TYPE is the type
+   of the new value.  BIT_OFFSET and BIT_LENGTH describe the offset
+   and field width of the value to extract from WHOLE -- BIT_LENGTH
+   may differ from TYPE's length in the case where WHOLE's type is
+   packed.
+
+   When the value does come from a non-byte-aligned offset or field
+   width, it will be marked non_lval.  */
+
+extern struct value *value_from_component_bitsize (struct value *whole,
+						   struct type *type,
+						   LONGEST bit_offset,
+						   LONGEST bit_length);
+
 extern struct value *value_at (struct type *type, CORE_ADDR addr);
 extern struct value *value_at_lazy (struct type *type, CORE_ADDR addr);
 
@@ -703,13 +724,13 @@ extern struct value *default_value_from_register (struct gdbarch *gdbarch,
 						  struct frame_id frame_id);
 
 extern void read_frame_register_value (struct value *value,
-				       struct frame_info *frame);
+				       frame_info_ptr frame);
 
 extern struct value *value_from_register (struct type *type, int regnum,
-					  struct frame_info *frame);
+					  frame_info_ptr frame);
 
 extern CORE_ADDR address_from_register (int regnum,
-					struct frame_info *frame);
+					frame_info_ptr frame);
 
 extern struct value *value_of_variable (struct symbol *var,
 					const struct block *b);
@@ -717,9 +738,9 @@ extern struct value *value_of_variable (struct symbol *var,
 extern struct value *address_of_variable (struct symbol *var,
 					  const struct block *b);
 
-extern struct value *value_of_register (int regnum, struct frame_info *frame);
+extern struct value *value_of_register (int regnum, frame_info_ptr frame);
 
-struct value *value_of_register_lazy (struct frame_info *frame, int regnum);
+struct value *value_of_register_lazy (frame_info_ptr frame, int regnum);
 
 /* Return the symbol's reading requirement.  */
 
@@ -732,7 +753,7 @@ extern int symbol_read_needs_frame (struct symbol *);
 
 extern struct value *read_var_value (struct symbol *var,
 				     const struct block *var_block,
-				     struct frame_info *frame);
+				     frame_info_ptr frame);
 
 extern struct value *allocate_value (struct type *type);
 extern struct value *allocate_value_lazy (struct type *type);
@@ -1110,7 +1131,7 @@ extern int val_print_string (struct type *elttype, const char *encoding,
 
 extern void print_variable_and_value (const char *name,
 				      struct symbol *var,
-				      struct frame_info *frame,
+				      frame_info_ptr frame,
 				      struct ui_file *stream,
 				      int indent);
 

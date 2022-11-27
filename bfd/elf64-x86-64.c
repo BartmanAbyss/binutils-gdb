@@ -22,6 +22,7 @@
 #include "elfxx-x86.h"
 #include "dwarf2.h"
 #include "libiberty.h"
+#include "sframe.h"
 
 #include "opcode/i386.h"
 
@@ -43,130 +44,130 @@
    special_function, name, partial_inplace, src_mask, dst_mask, pcrel_offset.  */
 static reloc_howto_type x86_64_elf_howto_table[] =
 {
-  HOWTO(R_X86_64_NONE, 0, 3, 0, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_NONE, 0, 0, 0, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_NONE",	false, 0, 0x00000000,
 	false),
-  HOWTO(R_X86_64_64, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_64, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_PC32, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_PC32, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_PC32", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_GOT32, 0, 2, 32, false, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOT32, 0, 4, 32, false, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOT32", false, 0, 0xffffffff,
 	false),
-  HOWTO(R_X86_64_PLT32, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_PLT32, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_PLT32", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_COPY, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO(R_X86_64_COPY, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	bfd_elf_generic_reloc, "R_X86_64_COPY", false, 0, 0xffffffff,
 	false),
-  HOWTO(R_X86_64_GLOB_DAT, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_GLOB_DAT, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_GLOB_DAT", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_JUMP_SLOT, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_JUMP_SLOT, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_JUMP_SLOT", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_RELATIVE, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_RELATIVE, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_RELATIVE", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_GOTPCREL, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOTPCREL, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOTPCREL", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_32, 0, 2, 32, false, 0, complain_overflow_unsigned,
+  HOWTO(R_X86_64_32, 0, 4, 32, false, 0, complain_overflow_unsigned,
 	bfd_elf_generic_reloc, "R_X86_64_32", false, 0, 0xffffffff,
 	false),
-  HOWTO(R_X86_64_32S, 0, 2, 32, false, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_32S, 0, 4, 32, false, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_32S", false, 0, 0xffffffff,
 	false),
-  HOWTO(R_X86_64_16, 0, 1, 16, false, 0, complain_overflow_bitfield,
+  HOWTO(R_X86_64_16, 0, 2, 16, false, 0, complain_overflow_bitfield,
 	bfd_elf_generic_reloc, "R_X86_64_16", false, 0, 0xffff, false),
-  HOWTO(R_X86_64_PC16, 0, 1, 16, true, 0, complain_overflow_bitfield,
+  HOWTO(R_X86_64_PC16, 0, 2, 16, true, 0, complain_overflow_bitfield,
 	bfd_elf_generic_reloc, "R_X86_64_PC16", false, 0, 0xffff, true),
-  HOWTO(R_X86_64_8, 0, 0, 8, false, 0, complain_overflow_bitfield,
+  HOWTO(R_X86_64_8, 0, 1, 8, false, 0, complain_overflow_bitfield,
 	bfd_elf_generic_reloc, "R_X86_64_8", false, 0, 0xff, false),
-  HOWTO(R_X86_64_PC8, 0, 0, 8, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_PC8, 0, 1, 8, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_PC8", false, 0, 0xff, true),
-  HOWTO(R_X86_64_DTPMOD64, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_DTPMOD64, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_DTPMOD64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_DTPOFF64, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_DTPOFF64, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_DTPOFF64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_TPOFF64, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_TPOFF64, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_TPOFF64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_TLSGD, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_TLSGD, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_TLSGD", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_TLSLD, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_TLSLD, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_TLSLD", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_DTPOFF32, 0, 2, 32, false, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_DTPOFF32, 0, 4, 32, false, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_DTPOFF32", false, 0, 0xffffffff,
 	false),
-  HOWTO(R_X86_64_GOTTPOFF, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOTTPOFF, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOTTPOFF", false, 0, 	0xffffffff,
 	true),
-  HOWTO(R_X86_64_TPOFF32, 0, 2, 32, false, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_TPOFF32, 0, 4, 32, false, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_TPOFF32", false, 0, 0xffffffff,
 	false),
-  HOWTO(R_X86_64_PC64, 0, 4, 64, true, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_PC64, 0, 8, 64, true, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_PC64", false, 0, MINUS_ONE,
 	true),
-  HOWTO(R_X86_64_GOTOFF64, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_GOTOFF64, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_GOTOFF64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_GOTPC32, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOTPC32, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOTPC32", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_GOT64, 0, 4, 64, false, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOT64, 0, 8, 64, false, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOT64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_GOTPCREL64, 0, 4, 64, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOTPCREL64, 0, 8, 64, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOTPCREL64", false, 0, MINUS_ONE,
 	true),
-  HOWTO(R_X86_64_GOTPC64, 0, 4, 64, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOTPC64, 0, 8, 64, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOTPC64", false, 0, MINUS_ONE,
 	true),
-  HOWTO(R_X86_64_GOTPLT64, 0, 4, 64, false, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOTPLT64, 0, 8, 64, false, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOTPLT64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_PLTOFF64, 0, 4, 64, false, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_PLTOFF64, 0, 8, 64, false, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_PLTOFF64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_SIZE32, 0, 2, 32, false, 0, complain_overflow_unsigned,
+  HOWTO(R_X86_64_SIZE32, 0, 4, 32, false, 0, complain_overflow_unsigned,
 	bfd_elf_generic_reloc, "R_X86_64_SIZE32", false, 0, 0xffffffff,
 	false),
-  HOWTO(R_X86_64_SIZE64, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_SIZE64, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_SIZE64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_GOTPC32_TLSDESC, 0, 2, 32, true, 0,
+  HOWTO(R_X86_64_GOTPC32_TLSDESC, 0, 4, 32, true, 0,
 	complain_overflow_bitfield, bfd_elf_generic_reloc,
 	"R_X86_64_GOTPC32_TLSDESC", false, 0, 0xffffffff, true),
-  HOWTO(R_X86_64_TLSDESC_CALL, 0, 3, 0, false, 0,
+  HOWTO(R_X86_64_TLSDESC_CALL, 0, 0, 0, false, 0,
 	complain_overflow_dont, bfd_elf_generic_reloc,
 	"R_X86_64_TLSDESC_CALL",
 	false, 0, 0, false),
-  HOWTO(R_X86_64_TLSDESC, 0, 4, 64, false, 0,
+  HOWTO(R_X86_64_TLSDESC, 0, 8, 64, false, 0,
 	complain_overflow_dont, bfd_elf_generic_reloc,
 	"R_X86_64_TLSDESC", false, 0, MINUS_ONE, false),
-  HOWTO(R_X86_64_IRELATIVE, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_IRELATIVE, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_IRELATIVE", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_RELATIVE64, 0, 4, 64, false, 0, complain_overflow_dont,
+  HOWTO(R_X86_64_RELATIVE64, 0, 8, 64, false, 0, complain_overflow_dont,
 	bfd_elf_generic_reloc, "R_X86_64_RELATIVE64", false, 0, MINUS_ONE,
 	false),
-  HOWTO(R_X86_64_PC32_BND, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_PC32_BND, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_PC32_BND", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_PLT32_BND, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_PLT32_BND, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_PLT32_BND", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_GOTPCRELX, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_GOTPCRELX, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_GOTPCRELX", false, 0, 0xffffffff,
 	true),
-  HOWTO(R_X86_64_REX_GOTPCRELX, 0, 2, 32, true, 0, complain_overflow_signed,
+  HOWTO(R_X86_64_REX_GOTPCRELX, 0, 4, 32, true, 0, complain_overflow_signed,
 	bfd_elf_generic_reloc, "R_X86_64_REX_GOTPCRELX", false, 0, 0xffffffff,
 	true),
 
@@ -178,16 +179,16 @@ static reloc_howto_type x86_64_elf_howto_table[] =
 #define R_X86_64_vt_offset (R_X86_64_GNU_VTINHERIT - R_X86_64_standard)
 
 /* GNU extension to record C++ vtable hierarchy.  */
-  HOWTO (R_X86_64_GNU_VTINHERIT, 0, 4, 0, false, 0, complain_overflow_dont,
+  HOWTO (R_X86_64_GNU_VTINHERIT, 0, 8, 0, false, 0, complain_overflow_dont,
 	 NULL, "R_X86_64_GNU_VTINHERIT", false, 0, 0, false),
 
 /* GNU extension to record C++ vtable member usage.  */
-  HOWTO (R_X86_64_GNU_VTENTRY, 0, 4, 0, false, 0, complain_overflow_dont,
+  HOWTO (R_X86_64_GNU_VTENTRY, 0, 8, 0, false, 0, complain_overflow_dont,
 	 _bfd_elf_rel_vtable_reloc_fn, "R_X86_64_GNU_VTENTRY", false, 0, 0,
 	 false),
 
 /* Use complain_overflow_bitfield on R_X86_64_32 for x32.  */
-  HOWTO(R_X86_64_32, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO(R_X86_64_32, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	bfd_elf_generic_reloc, "R_X86_64_32", false, 0, 0xffffffff,
 	false)
 };
@@ -818,6 +819,87 @@ static const bfd_byte elf_x86_64_eh_frame_non_lazy_plt[] =
   DW_CFA_nop, DW_CFA_nop, DW_CFA_nop
 };
 
+static const sframe_frame_row_entry elf_x86_64_sframe_null_fre =
+{
+  0,
+  SFRAME_V1_FRE_INFO (SFRAME_BASE_REG_SP, 1, SFRAME_FRE_OFFSET_1B), /* FRE info.  */
+  {16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} /* 12 bytes.  */
+};
+
+/* .sframe FRE covering the .plt section entry.  */
+static const sframe_frame_row_entry elf_x86_64_sframe_plt0_fre1 =
+{
+  0, /* SFrame FRE start address.  */
+  SFRAME_V1_FRE_INFO (SFRAME_BASE_REG_SP, 1, SFRAME_FRE_OFFSET_1B), /* FRE info.  */
+  {16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} /* 12 bytes.  */
+};
+
+/* .sframe FRE covering the .plt section entry.  */
+static const sframe_frame_row_entry elf_x86_64_sframe_plt0_fre2 =
+{
+  6, /* SFrame FRE start address.  */
+  SFRAME_V1_FRE_INFO (SFRAME_BASE_REG_SP, 1, SFRAME_FRE_OFFSET_1B), /* FRE info.  */
+  {24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} /* 12 bytes.  */
+};
+
+/* .sframe FRE covering the .plt section entry.  */
+static const sframe_frame_row_entry elf_x86_64_sframe_pltn_fre1 =
+{
+  0, /* SFrame FRE start address.  */
+  SFRAME_V1_FRE_INFO (SFRAME_BASE_REG_SP, 1, SFRAME_FRE_OFFSET_1B), /* FRE info.  */
+  {8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} /* 12 bytes.  */
+};
+
+/* .sframe FRE covering the .plt section entry.  */
+static const sframe_frame_row_entry elf_x86_64_sframe_pltn_fre2 =
+{
+  11, /* SFrame FRE start address.  */
+  SFRAME_V1_FRE_INFO (SFRAME_BASE_REG_SP, 1, SFRAME_FRE_OFFSET_1B), /* FRE info.  */
+  {16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} /* 12 bytes.  */
+};
+
+/* .sframe FRE covering the second .plt section entry.  */
+static const sframe_frame_row_entry elf_x86_64_sframe_sec_pltn_fre1 =
+{
+  0, /* SFrame FRE start address.  */
+  SFRAME_V1_FRE_INFO (SFRAME_BASE_REG_SP, 1, SFRAME_FRE_OFFSET_1B), /* FRE info.  */
+  {8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} /* 12 bytes.  */
+};
+
+/* SFrame helper object for non-lazy PLT.  Also used for IBT enabled PLT.  */
+static const struct elf_x86_sframe_plt elf_x86_64_sframe_non_lazy_plt =
+{
+  LAZY_PLT_ENTRY_SIZE,
+  2, /* Number of FREs for PLT0.  */
+  /* Array of SFrame FREs for plt0.  */
+  { &elf_x86_64_sframe_plt0_fre1, &elf_x86_64_sframe_plt0_fre2 },
+  LAZY_PLT_ENTRY_SIZE,
+  1, /* Number of FREs for PLTn.  */
+  /* Array of SFrame FREs for plt.  */
+  { &elf_x86_64_sframe_sec_pltn_fre1, &elf_x86_64_sframe_null_fre },
+  0,
+  0, /* There is no second PLT necessary.  */
+  { &elf_x86_64_sframe_null_fre }
+};
+
+/* SFrame helper object for lazy PLT.  Also used for IBT enabled PLT.  */
+static const struct elf_x86_sframe_plt elf_x86_64_sframe_plt =
+{
+  LAZY_PLT_ENTRY_SIZE,
+  2, /* Number of FREs for PLT0.  */
+  /* Array of SFrame FREs for plt0.  */
+  { &elf_x86_64_sframe_plt0_fre1, &elf_x86_64_sframe_plt0_fre2 },
+  LAZY_PLT_ENTRY_SIZE,
+  2, /* Number of FREs for PLTn.  */
+  /* Array of SFrame FREs for plt.  */
+  { &elf_x86_64_sframe_pltn_fre1, &elf_x86_64_sframe_pltn_fre2 },
+  NON_LAZY_PLT_ENTRY_SIZE,
+  1, /* Number of FREs for PLTn for second PLT.  */
+  /* FREs for second plt ( unwind info for .plt.got is
+     identical).  Used when IBT or non-lazy PLT is in effect.  */
+  { &elf_x86_64_sframe_sec_pltn_fre1 }
+};
+
 /* These are the standard parameters.  */
 static const struct elf_x86_lazy_plt_layout elf_x86_64_lazy_plt =
   {
@@ -970,7 +1052,6 @@ static const struct elf_x86_non_lazy_plt_layout elf_x32_non_lazy_ibt_plt =
     elf_x86_64_eh_frame_non_lazy_plt,	/* eh_frame_plt */
     sizeof (elf_x86_64_eh_frame_non_lazy_plt) /* eh_frame_plt_size */
   };
-
 
 static bool
 elf64_x86_64_elf_object_p (bfd *abfd)
@@ -2221,7 +2302,13 @@ elf_x86_64_scan_relocs (bfd *abfd, struct bfd_link_info *info,
 			      && (r_type == R_X86_64_32
 				  || r_type == R_X86_64_32S))))
 		    func_pointer_ref = true;
-		  else
+
+		  /* IFUNC symbol needs pointer equality in PDE so that
+		     function pointer reference will be resolved to its
+		     PLT entry directly.  */
+		  if (!func_pointer_ref
+		      || (bfd_link_pde (info)
+			  && h->type == STT_GNU_IFUNC))
 		    h->pointer_equality_needed = 1;
 		}
 
@@ -2245,10 +2332,12 @@ elf_x86_64_scan_relocs (bfd *abfd, struct bfd_link_info *info,
 		      || (sec->flags & (SEC_CODE | SEC_READONLY)) != 0)
 		    h->plt.refcount = 1;
 
-		  if (h->pointer_equality_needed
+		  if (htab->elf.target_os != is_solaris
+		      && h->pointer_equality_needed
 		      && h->type == STT_FUNC
 		      && eh->def_protected
-		      && elf_has_indirect_extern_access (h->root.u.def.section->owner))
+		      && !SYMBOL_DEFINED_NON_SHARED_P (h)
+		      && h->def_dynamic)
 		    {
 		      /* Disallow non-canonical reference to canonical
 			 protected function.  */
@@ -3148,8 +3237,7 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 	       || (h != NULL
 		   && !h->root.linker_def
 		   && !h->root.ldscript_def
-		   && eh->def_protected
-		   && elf_has_no_copy_on_protected (h->root.u.def.section->owner)));
+		   && eh->def_protected));
 
 	  if ((input_section->flags & SEC_ALLOC) != 0
 	      && (input_section->flags & SEC_READONLY) != 0
@@ -4089,9 +4177,7 @@ elf_x86_64_relocate_section (bfd *output_bfd,
 	    {
 	    case R_X86_64_32S:
 	      sec = h->root.u.def.section;
-	      if ((info->nocopyreloc
-		   || (eh->def_protected
-		       && elf_has_no_copy_on_protected (h->root.u.def.section->owner)))
+	      if ((info->nocopyreloc || eh->def_protected)
 		  && !(h->root.u.def.section->flags & SEC_CODE))
 		return elf_x86_64_need_pic (info, input_bfd, input_section,
 					    h, NULL, NULL, howto);
@@ -5225,6 +5311,20 @@ elf_x86_64_link_setup_gnu_properties (struct bfd_link_info *info)
 
   if (ABI_64_P (info->output_bfd))
     {
+      init_table.sframe_lazy_plt = &elf_x86_64_sframe_plt;
+      init_table.sframe_non_lazy_plt = &elf_x86_64_sframe_non_lazy_plt;
+      init_table.sframe_lazy_ibt_plt = &elf_x86_64_sframe_plt;
+      init_table.sframe_non_lazy_ibt_plt = &elf_x86_64_sframe_non_lazy_plt;
+    }
+  else
+    {
+      /* SFrame is not supported for non AMD64.  */
+      init_table.sframe_lazy_plt = NULL;
+      init_table.sframe_non_lazy_plt = NULL;
+    }
+
+  if (ABI_64_P (info->output_bfd))
+    {
       init_table.r_info = elf64_r_info;
       init_table.r_sym = elf64_r_sym;
     }
@@ -5254,11 +5354,7 @@ elf_x86_64_special_sections[]=
 #define ELF_ARCH			    bfd_arch_i386
 #define ELF_TARGET_ID			    X86_64_ELF_DATA
 #define ELF_MACHINE_CODE		    EM_X86_64
-#if DEFAULT_LD_Z_SEPARATE_CODE
-# define ELF_MAXPAGESIZE		    0x1000
-#else
-# define ELF_MAXPAGESIZE		    0x200000
-#endif
+#define ELF_MAXPAGESIZE			    0x1000
 #define ELF_COMMONPAGESIZE		    0x1000
 
 #define elf_backend_can_gc_sections	    1
@@ -5269,7 +5365,6 @@ elf_x86_64_special_sections[]=
 #define elf_backend_got_header_size	    (GOT_ENTRY_SIZE*3)
 #define elf_backend_rela_normal		    1
 #define elf_backend_plt_alignment	    4
-#define elf_backend_extern_protected_data   1
 #define elf_backend_caches_rawsize	    1
 #define elf_backend_dtrel_excludes_plt	    1
 #define elf_backend_want_dynrelro	    1

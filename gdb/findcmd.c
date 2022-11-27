@@ -30,7 +30,7 @@
 /* Copied from bfd_put_bits.  */
 
 static void
-put_bits (bfd_uint64_t data, gdb::byte_vector &buf, int bits, bfd_boolean big_p)
+put_bits (uint64_t data, gdb::byte_vector &buf, int bits, bfd_boolean big_p)
 {
   int i;
   int bytes;
@@ -187,7 +187,7 @@ parse_find_args (const char *args, ULONGEST *max_countp,
 	{
 	  const gdb_byte *contents = value_contents (v).data ();
 	  pattern_buf.insert (pattern_buf.end (), contents,
-			      contents + TYPE_LENGTH (t));
+			      contents + t->length ());
 	}
 
       if (*s == ',')

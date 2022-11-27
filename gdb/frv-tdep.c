@@ -68,7 +68,7 @@ struct frv_unwind_cache		/* was struct frame_extra_info */
    of structures, each of which gives all the necessary info for one
    register.  Don't stick parallel arrays in here --- that's so
    Fortran.  */
-struct frv_gdbarch_tdep : gdbarch_tdep
+struct frv_gdbarch_tdep : gdbarch_tdep_base
 {
   /* Which ABI is in use?  */
   enum frv_abi frv_abi {};
@@ -93,7 +93,7 @@ struct frv_gdbarch_tdep : gdbarch_tdep
 enum frv_abi
 frv_abi (struct gdbarch *gdbarch)
 {
-  frv_gdbarch_tdep *tdep = (frv_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  frv_gdbarch_tdep *tdep = gdbarch_tdep<frv_gdbarch_tdep> (gdbarch);
   return tdep->frv_abi;
 }
 
@@ -269,13 +269,7 @@ set_variant_scratch_registers (frv_gdbarch_tdep *var)
 static const char *
 frv_register_name (struct gdbarch *gdbarch, int reg)
 {
-  if (reg < 0)
-    return "?toosmall?";
-
-  if (reg >= frv_num_regs + frv_num_pseudo_regs)
-    return "?toolarge?";
-
-  frv_gdbarch_tdep *tdep = (frv_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  frv_gdbarch_tdep *tdep = gdbarch_tdep<frv_gdbarch_tdep> (gdbarch);
   return tdep->register_names[reg];
 }
 
@@ -416,7 +410,7 @@ frv_register_sim_regno (struct gdbarch *gdbarch, int reg)
 	return SIM_FRV_SPR0_REGNUM + spr_reg_offset;
     }
 
-  internal_error (__FILE__, __LINE__, _("Bad register number %d"), reg);
+  internal_error (_("Bad register number %d"), reg);
 }
 
 constexpr gdb_byte frv_break_insn[] = {0xc0, 0x70, 0x00, 0x01};
@@ -510,7 +504,7 @@ is_argument_reg (int reg)
    prologue analysis.  */
 static CORE_ADDR
 frv_analyze_prologue (struct gdbarch *gdbarch, CORE_ADDR pc,
-		      struct frame_info *this_frame,
+		      frame_info_ptr this_frame,
 		      struct frv_unwind_cache *info)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -1084,7 +1078,7 @@ frv_skip_main_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 
 
 static struct frv_unwind_cache *
-frv_frame_unwind_cache (struct frame_info *this_frame,
+frv_frame_unwind_cache (frame_info_ptr this_frame,
 			 void **this_prologue_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
@@ -1110,7 +1104,7 @@ frv_extract_return_value (struct type *type, struct regcache *regcache,
 {
   struct gdbarch *gdbarch = regcache->arch ();
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  int len = TYPE_LENGTH (type);
+  int len = type->length ();
 
   if (len <= 4)
     {
@@ -1128,8 +1122,7 @@ frv_extract_return_value (struct type *type, struct regcache *regcache,
       store_unsigned_integer ((bfd_byte *) valbuf + 4, 4, byte_order, regval);
     }
   else
-    internal_error (__FILE__, __LINE__,
-		    _("Illegal return value length: %d"), len);
+    internal_error (_("Illegal return value length: %d"), len);
 }
 
 static CORE_ADDR
@@ -1216,7 +1209,7 @@ frv_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
   stack_space = 0;
   for (argnum = 0; argnum < nargs; ++argnum)
-    stack_space += align_up (TYPE_LENGTH (value_type (args[argnum])), 4);
+    stack_space += align_up (value_type (args[argnum])->length (), 4);
 
   stack_space -= (6 * 4);
   if (stack_space > 0)
@@ -1237,7 +1230,7 @@ frv_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
     {
       arg = args[argnum];
       arg_type = check_typedef (value_type (arg));
-      len = TYPE_LENGTH (arg_type);
+      len = arg_type->length ();
       typecode = arg_type->code ();
 
       if (typecode == TYPE_CODE_STRUCT || typecode == TYPE_CODE_UNION)
@@ -1251,7 +1244,7 @@ frv_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       else if (abi == FRV_ABI_FDPIC
 	       && len == 4
 	       && typecode == TYPE_CODE_PTR
-	       && TYPE_TARGET_TYPE (arg_type)->code () == TYPE_CODE_FUNC)
+	       && arg_type->target_type ()->code () == TYPE_CODE_FUNC)
 	{
 	  /* The FDPIC ABI requires function descriptors to be passed instead
 	     of entry points.  */
@@ -1319,7 +1312,7 @@ static void
 frv_store_return_value (struct type *type, struct regcache *regcache,
 			const gdb_byte *valbuf)
 {
-  int len = TYPE_LENGTH (type);
+  int len = type->length ();
 
   if (len <= 4)
     {
@@ -1334,8 +1327,7 @@ frv_store_return_value (struct type *type, struct regcache *regcache,
       regcache->cooked_write (9, (bfd_byte *) valbuf + 4);
     }
   else
-    internal_error (__FILE__, __LINE__,
-		    _("Don't know how to return a %d-byte value."), len);
+    internal_error (_("Don't know how to return a %d-byte value."), len);
 }
 
 static enum return_value_convention
@@ -1369,7 +1361,7 @@ frv_return_value (struct gdbarch *gdbarch, struct value *function,
    frame.  This will be used to create a new GDB frame struct.  */
 
 static void
-frv_frame_this_id (struct frame_info *this_frame,
+frv_frame_this_id (frame_info_ptr this_frame,
 		    void **this_prologue_cache, struct frame_id *this_id)
 {
   struct frv_unwind_cache *info
@@ -1399,7 +1391,7 @@ frv_frame_this_id (struct frame_info *this_frame,
 }
 
 static struct value *
-frv_frame_prev_register (struct frame_info *this_frame,
+frv_frame_prev_register (frame_info_ptr this_frame,
 			 void **this_prologue_cache, int regnum)
 {
   struct frv_unwind_cache *info
@@ -1418,7 +1410,7 @@ static const struct frame_unwind frv_frame_unwind = {
 };
 
 static CORE_ADDR
-frv_frame_base_address (struct frame_info *this_frame, void **this_cache)
+frv_frame_base_address (frame_info_ptr this_frame, void **this_cache)
 {
   struct frv_unwind_cache *info
     = frv_frame_unwind_cache (this_frame, this_cache);
@@ -1556,7 +1548,7 @@ frv_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     set_gdbarch_convert_from_func_ptr_addr (gdbarch,
 					    frv_convert_from_func_ptr_addr);
 
-  set_solib_ops (gdbarch, &frv_so_ops);
+  set_gdbarch_so_ops (gdbarch, &frv_so_ops);
 
   /* Hook in ABI-specific overrides, if they have been registered.  */
   gdbarch_init_osabi (info, gdbarch);
@@ -1575,5 +1567,5 @@ void _initialize_frv_tdep ();
 void
 _initialize_frv_tdep ()
 {
-  register_gdbarch_init (bfd_arch_frv, frv_gdbarch_init);
+  gdbarch_register (bfd_arch_frv, frv_gdbarch_init);
 }

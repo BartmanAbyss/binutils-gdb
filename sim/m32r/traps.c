@@ -237,8 +237,8 @@ m32r_trap (SIM_CPU *current_cpu, PCADDR pc, int num)
 	s.arg6 = arg6;
 	s.arg7 = arg7;
 
-	s.p1 = (PTR) sd;
-	s.p2 = (PTR) current_cpu;
+	s.p1 = sd;
+	s.p2 = current_cpu;
 	s.read_mem = sim_syscall_read_mem;
 	s.write_mem = sim_syscall_write_mem;
 
@@ -547,7 +547,7 @@ m32r_trap (SIM_CPU *current_cpu, PCADDR pc, int num)
 	  case TARGET_LINUX_SYS_getgroups32:
 	  case TARGET_LINUX_SYS_getgroups:
 	    {
-	      gid_t *list;
+	      gid_t *list = NULL;
 
 	      if (arg1 > 0)
 		list = (gid_t *) malloc (arg1 * sizeof(gid_t));

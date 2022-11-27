@@ -109,7 +109,7 @@ convert_one_symbol (compile_cplus_instance *instance,
 		 sym.symbol->print_name ());
 
 	case LOC_UNDEF:
-	  internal_error (__FILE__, __LINE__, _("LOC_UNDEF found for \"%s\"."),
+	  internal_error (_("LOC_UNDEF found for \"%s\"."),
 			  sym.symbol->print_name ());
 
 	case LOC_COMMON_BLOCK:
@@ -138,7 +138,7 @@ convert_one_symbol (compile_cplus_instance *instance,
 	     by their name.  */
 	  {
 	    struct value *val;
-	    struct frame_info *frame = nullptr;
+	    frame_info_ptr frame = nullptr;
 
 	    if (symbol_read_needs_frame (sym.symbol))
 	      {

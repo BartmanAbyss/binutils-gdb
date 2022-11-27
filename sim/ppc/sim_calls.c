@@ -125,7 +125,7 @@ sim_load (SIM_DESC sd, const char *prog, bfd *abfd, int from_tty)
 
 
 int
-sim_read (SIM_DESC sd, SIM_ADDR mem, unsigned char *buf, int length)
+sim_read (SIM_DESC sd, SIM_ADDR mem, void *buf, int length)
 {
   int result = psim_read_memory(simulator, MAX_NR_PROCESSORS,
 				buf, mem, length);
@@ -136,7 +136,7 @@ sim_read (SIM_DESC sd, SIM_ADDR mem, unsigned char *buf, int length)
 
 
 int
-sim_write (SIM_DESC sd, SIM_ADDR mem, const unsigned char *buf, int length)
+sim_write (SIM_DESC sd, SIM_ADDR mem, const void *buf, int length)
 {
   int result = psim_write_memory(simulator, MAX_NR_PROCESSORS,
 				 buf, mem, length,
@@ -161,8 +161,6 @@ sim_create_inferior (SIM_DESC sd,
 		     char * const *envp)
 {
   unsigned_word entry_point;
-  TRACE(trace_gdb, ("sim_create_inferior(start_address=0x%x, ...)\n",
-		    entry_point));
 
   if (simulator == NULL)
     error ("No program loaded");
@@ -171,6 +169,9 @@ sim_create_inferior (SIM_DESC sd,
     entry_point = bfd_get_start_address (abfd);
   else
     entry_point = 0xfff00000; /* ??? */
+
+  TRACE(trace_gdb, ("sim_create_inferior(start_address=0x%x, ...)\n",
+		    entry_point));
 
   psim_init(simulator);
   psim_stack(simulator, argv, envp);
@@ -388,7 +389,7 @@ sim_io_error (SIM_DESC sd, const char *fmt, ...)
 
 /****/
 
-void ATTRIBUTE_NORETURN
+void
 error (const char *msg, ...)
 {
   va_list ap;

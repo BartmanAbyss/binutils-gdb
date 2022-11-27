@@ -266,8 +266,9 @@ struct module
 
 struct vms_private_data_struct
 {
-  /* If true, relocs have been read.  */
-  bool reloc_done;
+  /* If 1, relocs have been read successfully, if 0 they have yet to be
+     read, if -1 reading relocs failed.  */
+  int reloc_done;
 
   /* Record input buffer.  */
   struct vms_rec_rd recrd;
@@ -522,7 +523,7 @@ _bfd_vms_slurp_eisd (bfd *abfd, unsigned int offset)
       struct vms_eisd *eisd;
       unsigned int rec_size;
       unsigned int size;
-      bfd_uint64_t vaddr;
+      uint64_t vaddr;
       unsigned int flags;
       unsigned int vbn;
       char *name = NULL;
@@ -1570,6 +1571,8 @@ dst_define_location (bfd *abfd, unsigned int loc)
 			       (loc + 1) * sizeof (unsigned int));
       if (PRIV (dst_ptr_offsets) == NULL)
 	return false;
+      memset (PRIV (dst_ptr_offsets) + PRIV (dst_ptr_offsets_count), 0,
+	      (loc - PRIV (dst_ptr_offsets_count)) * sizeof (unsigned int));
       PRIV (dst_ptr_offsets_count) = loc + 1;
     }
 
@@ -3378,7 +3381,8 @@ alpha_vms_write_exec (bfd *abfd)
   /* Place sections.  */
   for (sec = abfd->sections; sec; sec = sec->next)
     {
-      if (!(sec->flags & SEC_HAS_CONTENTS))
+      if (!(sec->flags & SEC_HAS_CONTENTS)
+	  || sec->contents == NULL)
 	continue;
 
       eisd = vms_section_data (sec)->eisd;
@@ -3458,7 +3462,8 @@ alpha_vms_write_exec (bfd *abfd)
       unsigned char blk[VMS_BLOCK_SIZE];
       bfd_size_type len;
 
-      if (sec->size == 0 || !(sec->flags & SEC_HAS_CONTENTS))
+      if (sec->size == 0 || !(sec->flags & SEC_HAS_CONTENTS)
+	  || sec->contents == NULL)
 	continue;
       if (bfd_bwrite (sec->contents, sec->size, abfd) != sec->size)
 	return false;
@@ -5120,15 +5125,14 @@ alpha_vms_slurp_relocs (bfd *abfd)
   vms_debug2 ((3, "alpha_vms_slurp_relocs\n"));
 
   /* We slurp relocs only once, for all sections.  */
-  if (PRIV (reloc_done))
-      return true;
-  PRIV (reloc_done) = true;
+  if (PRIV (reloc_done) != 0)
+    return PRIV (reloc_done) == 1;
 
   if (alpha_vms_canonicalize_symtab (abfd, NULL) < 0)
-    return false;
+    goto fail;
 
   if (bfd_seek (abfd, 0, SEEK_SET) != 0)
-    return false;
+    goto fail;
 
   while (1)
     {
@@ -5149,6 +5153,8 @@ alpha_vms_slurp_relocs (bfd *abfd)
 
       /* Skip non-ETIR records.  */
       type = _bfd_vms_get_object_record (abfd);
+      if (type < 0)
+	goto fail;
       if (type == EOBJ__C_EEOM)
 	break;
       if (type != EOBJ__C_ETIR)
@@ -5190,7 +5196,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 		    /* xgettext:c-format */
 		    (_("unknown reloc %s + %s"), _bfd_vms_etir_name (prev_cmd),
 		     _bfd_vms_etir_name (cmd));
-		  return false;
+		  goto fail;
 		}
 	      cur_psect = cur_psidx;
 	      vaddr = cur_addend;
@@ -5208,7 +5214,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 			/* xgettext:c-format */
 			(_("unknown reloc %s + %s"), _bfd_vms_etir_name (cmd),
 			 _bfd_vms_etir_name (ETIR__C_STA_LW));
-		      return false;
+		      goto fail;
 		    }
 		}
 	      cur_addend = bfd_getl32 (ptr + 4);
@@ -5223,7 +5229,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 		    /* xgettext:c-format */
 		    (_("unknown reloc %s + %s"), _bfd_vms_etir_name (cmd),
 		     _bfd_vms_etir_name (ETIR__C_STA_QW));
-		  return false;
+		  goto fail;
 		}
 	      cur_addend = bfd_getl64 (ptr + 4);
 	      prev_cmd = cmd;
@@ -5240,7 +5246,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 		  _bfd_error_handler (_("unknown reloc %s + %s"),
 				      _bfd_vms_etir_name (prev_cmd),
 				      _bfd_vms_etir_name (ETIR__C_STO_LW));
-		  return false;
+		  goto fail;
 		}
 	      reloc_code = BFD_RELOC_32;
 	      break;
@@ -5253,7 +5259,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 		  _bfd_error_handler (_("unknown reloc %s + %s"),
 				      _bfd_vms_etir_name (prev_cmd),
 				      _bfd_vms_etir_name (ETIR__C_STO_QW));
-		  return false;
+		  goto fail;
 		}
 	      reloc_code = BFD_RELOC_64;
 	      break;
@@ -5265,7 +5271,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 		  _bfd_error_handler (_("unknown reloc %s + %s"),
 				      _bfd_vms_etir_name (prev_cmd),
 				      _bfd_vms_etir_name (ETIR__C_STO_OFF));
-		  return false;
+		  goto fail;
 		}
 	      reloc_code = BFD_RELOC_64;
 	      break;
@@ -5278,7 +5284,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 		  _bfd_error_handler (_("unknown reloc %s + %s"),
 				      _bfd_vms_etir_name (prev_cmd),
 				      _bfd_vms_etir_name (ETIR__C_OPR_ADD));
-		  return false;
+		  goto fail;
 		}
 	      prev_cmd = ETIR__C_OPR_ADD;
 	      continue;
@@ -5332,7 +5338,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 	    default:
 	      _bfd_error_handler (_("unknown reloc %s"),
 				  _bfd_vms_etir_name (cmd));
-	      return false;
+	      goto fail;
 	    }
 
 	  {
@@ -5345,16 +5351,16 @@ alpha_vms_slurp_relocs (bfd *abfd)
 	    if (cur_psect < 0 || cur_psect > (int)PRIV (section_count))
 	      {
 		_bfd_error_handler (_("invalid section index in ETIR"));
-		return false;
+		goto fail;
 	      }
 
 	    if (PRIV (sections) == NULL)
-	      return false;
+	      goto fail;
 	    sec = PRIV (sections)[cur_psect];
 	    if (sec == bfd_abs_section_ptr)
 	      {
 		_bfd_error_handler (_("relocation for non-REL psect"));
-		return false;
+		goto fail;
 	      }
 
 	    vms_sec = vms_section_data (sec);
@@ -5374,7 +5380,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 		    sec->relocation = bfd_realloc_or_free
 		      (sec->relocation, vms_sec->reloc_max * sizeof (arelent));
 		    if (sec->relocation == NULL)
-		      return false;
+		      goto fail;
 		  }
 	      }
 	    reloc = &sec->relocation[sec->reloc_count];
@@ -5412,7 +5418,7 @@ alpha_vms_slurp_relocs (bfd *abfd)
 	    else if (cur_psidx >= 0)
 	      {
 		if (PRIV (sections) == NULL || cur_psidx >= (int) PRIV (section_count))
-		  return false;
+		  goto fail;
 		reloc->sym_ptr_ptr =
 		  PRIV (sections)[cur_psidx]->symbol_ptr_ptr;
 	      }
@@ -5436,8 +5442,12 @@ alpha_vms_slurp_relocs (bfd *abfd)
 	}
     }
   vms_debug2 ((3, "alpha_vms_slurp_relocs: result = true\n"));
-
+  PRIV (reloc_done) = 1;
   return true;
+
+fail:
+  PRIV (reloc_done) = -1;
+  return false;
 }
 
 /* Return the number of bytes required to store the relocation
@@ -5446,7 +5456,8 @@ alpha_vms_slurp_relocs (bfd *abfd)
 static long
 alpha_vms_get_reloc_upper_bound (bfd *abfd ATTRIBUTE_UNUSED, asection *section)
 {
-  alpha_vms_slurp_relocs (abfd);
+  if (!alpha_vms_slurp_relocs (abfd))
+    return -1;
 
   return (section->reloc_count + 1L) * sizeof (arelent *);
 }
@@ -5515,7 +5526,7 @@ static reloc_howto_type alpha_howto_table[] =
 {
   HOWTO (ALPHA_R_IGNORE,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 0,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 1,			/* Size.  */
 	 8,			/* Bitsize.  */
 	 true,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5530,7 +5541,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* A 64 bit reference to a symbol.  */
   HOWTO (ALPHA_R_REFQUAD,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 4,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 8,			/* Size.  */
 	 64,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5547,7 +5558,7 @@ static reloc_howto_type alpha_howto_table[] =
      relative offset in the instruction.  */
   HOWTO (ALPHA_R_BRADDR,	/* Type.  */
 	 2,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 21,			/* Bitsize.  */
 	 true,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5562,7 +5573,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* A hint for a jump to a register.  */
   HOWTO (ALPHA_R_HINT,		/* Type.  */
 	 2,			/* Rightshift.  */
-	 1,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,			/* Size.  */
 	 14,			/* Bitsize.  */
 	 true,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5577,7 +5588,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* 16 bit PC relative offset.  */
   HOWTO (ALPHA_R_SREL16,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 1,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 2,			/* Size.  */
 	 16,			/* Bitsize.  */
 	 true,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5592,7 +5603,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* 32 bit PC relative offset.  */
   HOWTO (ALPHA_R_SREL32,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 32,			/* Bitsize.  */
 	 true,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5607,7 +5618,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* A 64 bit PC relative offset.  */
   HOWTO (ALPHA_R_SREL64,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 4,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 8,			/* Size.  */
 	 64,			/* Bitsize.  */
 	 true,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5622,7 +5633,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* Push a value on the reloc evaluation stack.  */
   HOWTO (ALPHA_R_OP_PUSH,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 0,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 0,			/* Size.  */
 	 0,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5638,7 +5649,7 @@ static reloc_howto_type alpha_howto_table[] =
      a bitfield of size r_size starting at bit position r_offset.  */
   HOWTO (ALPHA_R_OP_STORE,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 4,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 8,			/* Size.  */
 	 64,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5654,7 +5665,7 @@ static reloc_howto_type alpha_howto_table[] =
      relocation stack.  */
   HOWTO (ALPHA_R_OP_PSUB,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 0,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 0,			/* Size.  */
 	 0,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5670,7 +5681,7 @@ static reloc_howto_type alpha_howto_table[] =
      given value.  */
   HOWTO (ALPHA_R_OP_PRSHIFT,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 0,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 0,			/* Size.  */
 	 0,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5685,7 +5696,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* Hack. Linkage is done by linker.  */
   HOWTO (ALPHA_R_LINKAGE,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 0,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 0,			/* Size.  */
 	 0,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5700,7 +5711,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* A 32 bit reference to a symbol.  */
   HOWTO (ALPHA_R_REFLONG,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 2,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 4,			/* Size.  */
 	 32,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5715,7 +5726,7 @@ static reloc_howto_type alpha_howto_table[] =
   /* A 64 bit reference to a procedure, written as 32 bit value.  */
   HOWTO (ALPHA_R_CODEADDR,	/* Type.  */
 	 0,			/* Rightshift.  */
-	 4,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 8,			/* Size.  */
 	 64,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5729,7 +5740,7 @@ static reloc_howto_type alpha_howto_table[] =
 
   HOWTO (ALPHA_R_NOP,		/* Type.  */
 	 0,			/* Rightshift.  */
-	 3,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 0,			/* Size.  */
 	 0,			/* Bitsize.  */
 	 /* The following value must match that of ALPHA_R_BSR/ALPHA_R_BOH
 	    because the calculations for the 3 relocations are the same.
@@ -5746,7 +5757,7 @@ static reloc_howto_type alpha_howto_table[] =
 
   HOWTO (ALPHA_R_BSR,		/* Type.  */
 	 0,			/* Rightshift.  */
-	 3,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 0,			/* Size.  */
 	 0,			/* Bitsize.  */
 	 true,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5760,7 +5771,7 @@ static reloc_howto_type alpha_howto_table[] =
 
   HOWTO (ALPHA_R_LDA,		/* Type.  */
 	 0,			/* Rightshift.  */
-	 3,			/* Size (0 = byte, 1 = short, 2 = long).  */
+	 0,			/* Size.  */
 	 0,			/* Bitsize.  */
 	 false,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -5774,7 +5785,7 @@ static reloc_howto_type alpha_howto_table[] =
 
   HOWTO (ALPHA_R_BOH,		/* Type.  */
 	 0,			/* Rightshift.  */
-	 3,			/* Size (0 = byte, 1 = short, 2 = long, 3 = nil).  */
+	 0,			/* Size.  */
 	 0,			/* Bitsize.  */
 	 true,			/* PC relative.  */
 	 0,			/* Bitpos.  */
@@ -9992,6 +10003,8 @@ bfd_vms_get_data (bfd *abfd)
 #define alpha_vms_find_inliner_info	   _bfd_nosymbols_find_inliner_info
 #define alpha_vms_bfd_make_debug_symbol	   _bfd_nosymbols_bfd_make_debug_symbol
 #define alpha_vms_find_nearest_line	   _bfd_vms_find_nearest_line
+#define alpha_vms_find_nearest_line_with_alt \
+   _bfd_nosymbols_find_nearest_line_with_alt
 #define alpha_vms_find_line		   _bfd_nosymbols_find_line
 #define alpha_vms_bfd_is_local_label_name  vms_bfd_is_local_label_name
 

@@ -20,20 +20,21 @@ if [skip_ctf_tests] {
     return 0
 }
 
+# Some tests require GCC.
+set gcc_compiled [is_c_compiler_gcc]
+
 standard_testfile .c
 
 # Using `-gctf` generates full-fledged CTF debug information.
-set opts "additional_flags=-gctf"
+set opts {}
+lappend opts additional_flags=-gctf
+lappend opts ldflags=-Wl,--strip-debug
+lappend opts ldflags=-Wl,--ctf-variables
+lappend opts nowarnings
 
 if { [prepare_for_testing "failed to prepare" ${testfile} \
-	  [list $srcfile] [list $opts nowarnings]] } {
+	  [list $srcfile] $opts] } {
     return 0
-}
-
-# Create and source the file that provides information about the compiler
-# used to compile the test case.
-if [get_compiler_info] {
-    return -1
 }
 
 # Test ptype of unnamed enumeration members before any action causes
@@ -281,7 +282,7 @@ if [runto_main] then {
 
   if [target_info exists gdb,cannot_call_functions] {
     unsupported "this target can not call functions"
-    continue
+    return
   }
 
   # We need to up this because this can be really slow on some boards.

@@ -76,7 +76,7 @@ maintenance_dump_me (const char *args, int from_tty)
 static void
 maintenance_internal_error (const char *args, int from_tty)
 {
-  internal_error (__FILE__, __LINE__, "%s", (args == NULL ? "" : args));
+  internal_error ("%s", (args == NULL ? "" : args));
 }
 
 /* Stimulate the internal error mechanism that GDB uses when an
@@ -87,7 +87,7 @@ maintenance_internal_error (const char *args, int from_tty)
 static void
 maintenance_internal_warning (const char *args, int from_tty)
 {
-  internal_warning (__FILE__, __LINE__, "%s", (args == NULL ? "" : args));
+  internal_warning ("%s", (args == NULL ? "" : args));
 }
 
 /* Stimulate the internal error mechanism that GDB uses when an
@@ -452,9 +452,11 @@ maintenance_info_sections (const char *arg, int from_tty)
   for (objfile *ofile : current_program_space->objfiles ())
     {
       if (ofile->obfd == current_program_space->exec_bfd ())
-	maint_print_all_sections (_("Exec file: "), ofile->obfd, ofile, arg);
+	maint_print_all_sections (_("Exec file: "), ofile->obfd.get (),
+				  ofile, arg);
       else if (opts.all_objects)
-	maint_print_all_sections (_("Object file: "), ofile->obfd, ofile, arg);
+	maint_print_all_sections (_("Object file: "), ofile->obfd.get (),
+				  ofile, arg);
     }
 
   if (core_bfd)
@@ -799,7 +801,7 @@ mcleanup_wrapper (void)
 }
 
 EXTERN_C void monstartup (unsigned long, unsigned long);
-extern int main ();
+extern int main (int, char **);
 
 static void
 maintenance_set_profile_cmd (const char *args, int from_tty,

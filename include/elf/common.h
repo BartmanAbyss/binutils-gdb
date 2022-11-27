@@ -489,6 +489,7 @@
 #define PT_GNU_STACK	(PT_LOOS + 0x474e551) /* Stack flags */
 #define PT_GNU_RELRO	(PT_LOOS + 0x474e552) /* Read-only after relocation */
 #define PT_GNU_PROPERTY	(PT_LOOS + 0x474e553) /* GNU property */
+#define PT_GNU_SFRAME	(PT_LOOS + 0x474e554) /* SFrame unwind information */
 
 /* OpenBSD segment types.  */
 #define PT_OPENBSD_RANDOMIZE (PT_LOOS + 0x5a3dbe6)  /* Fill with random data.  */
@@ -588,6 +589,8 @@
 
 /* Compression types.  */
 #define ELFCOMPRESS_ZLIB   1		/* Compressed with zlib.  */
+#define ELFCOMPRESS_ZSTD   2		/* Compressed with zstd  */
+					/* (see http://www.zstandard.org). */
 #define ELFCOMPRESS_LOOS   0x60000000	/* OS-specific semantics, lo */
 #define ELFCOMPRESS_HIOS   0x6FFFFFFF	/* OS-specific semantics, hi */
 #define ELFCOMPRESS_LOPROC 0x70000000	/* Processor-specific semantics, lo */
@@ -1403,6 +1406,8 @@
 #define AT_FREEBSD_PS_STRINGS   32      /* struct ps_strings. */
 #define AT_FREEBSD_FXRNG        33      /* Pointer to root RNG seed version. */
 #define AT_FREEBSD_KPRELOAD     34      /* Base of vdso. */
+#define AT_FREEBSD_USRSTACKBASE 35      /* Top of user stack. */
+#define AT_FREEBSD_USRSTACKLIM  36      /* Grow limit of user stack. */
 
 #define AT_SUN_UID      2000    /* Effective user ID.  */
 #define AT_SUN_RUID     2001    /* Real user ID.  */

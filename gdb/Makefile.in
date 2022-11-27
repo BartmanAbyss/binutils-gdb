@@ -143,10 +143,12 @@ MAKEINFO_CMD = $(MAKEINFO) $(MAKEINFOFLAGS) $(MAKEINFO_EXTRA_FLAGS)
 MAKEHTML = $(MAKEINFO_CMD) --html
 MAKEHTMLFLAGS =
 
+LIBTOOL = @LIBTOOL@
+
 # Set this up with gcc if you have gnu ld and the loader will print out
 # line numbers for undefined references.
 #CC_LD = g++ -static
-CC_LD = $(CXX) $(CXX_DIALECT)
+CC_LD = $(LIBTOOL) $(SILENT_FLAG) --mode=link $(CXX) $(CXX_DIALECT)
 
 # Where is our "include" directory?  Typically $(srcdir)/../include.
 # This is essentially the header file directory for the library
@@ -163,7 +165,7 @@ CTF_DEPS = @CTF_DEPS@
 
 # Where is the BFD library?  Typically in ../bfd.
 BFD_DIR = ../bfd
-BFD = $(BFD_DIR)/libbfd.a
+BFD = $(BFD_DIR)/libbfd.la
 BFD_SRC = $(srcdir)/$(BFD_DIR)
 BFD_CFLAGS = -I$(BFD_DIR) -I$(BFD_SRC)
 
@@ -172,6 +174,9 @@ BFD_CFLAGS = -I$(BFD_DIR) -I$(BFD_SRC)
 # case both are empty.
 ZLIB = @zlibdir@ -lz
 ZLIBINC = @zlibinc@
+
+ZSTD_CFLAGS = @ZSTD_CFLAGS@
+ZSTD_LIBS = @ZSTD_LIBS@
 
 # Where is the decnumber library?  Typically in ../libdecnumber.
 LIBDECNUMBER_DIR = ../libdecnumber
@@ -393,6 +398,7 @@ SUBDIR_PYTHON_SRCS = \
 	python/py-cmd.c \
 	python/py-connection.c \
 	python/py-continueevent.c \
+	python/py-disasm.c \
 	python/py-event.c \
 	python/py-evtregistry.c \
 	python/py-evts.c \
@@ -463,6 +469,7 @@ SELFTESTS_SRCS = \
 	unittests/offset-type-selftests.c \
 	unittests/observable-selftests.c \
 	unittests/optional-selftests.c \
+	unittests/packed-selftests.c \
 	unittests/parallel-for-selftests.c \
 	unittests/parse-connection-spec-selftests.c \
 	unittests/path-join-selftests.c \
@@ -499,7 +506,7 @@ SUBDIR_TARGET_OBS = $(patsubst %.c,%.o,$(SUBDIR_TARGET_SRCS))
 # disassemblers?
 OPCODES_DIR = ../opcodes
 OPCODES_SRC = $(srcdir)/$(OPCODES_DIR)
-OPCODES = $(OPCODES_DIR)/libopcodes.a
+OPCODES = $(OPCODES_DIR)/libopcodes.la
 # Where are the other opcode tables which only have header file
 # versions?
 OP_INCLUDE = $(INCLUDE_DIR)/opcode
@@ -623,7 +630,7 @@ INTERNAL_CPPFLAGS = $(CPPFLAGS) @GUILE_CPPFLAGS@ @PYTHON_CPPFLAGS@ \
 INTERNAL_CFLAGS_BASE = \
 	$(GLOBAL_CFLAGS) $(PROFILE_CFLAGS) \
 	$(GDB_CFLAGS) $(OPCODES_CFLAGS) $(READLINE_CFLAGS) $(ZLIBINC) \
-	$(BFD_CFLAGS) $(INCLUDE_CFLAGS) $(LIBDECNUMBER_CFLAGS) \
+	$(ZSTD_CFLAGS) $(BFD_CFLAGS) $(INCLUDE_CFLAGS) $(LIBDECNUMBER_CFLAGS) \
 	$(INTL_CFLAGS) $(INCGNU) $(INCSUPPORT) $(LIBBACKTRACE_INC) \
 	$(ENABLE_CFLAGS) $(INTERNAL_CPPFLAGS) $(SRCHIGH_CFLAGS) \
 	$(TOP_CFLAGS) $(PTHREAD_CFLAGS) $(DEBUGINFOD_CFLAGS)
@@ -645,7 +652,7 @@ INTERNAL_LDFLAGS = \
 # Libraries and corresponding dependencies for compiling gdb.
 # XM_CLIBS, defined in *config files, have host-dependent libs.
 # LIBIBERTY appears twice on purpose.
-CLIBS = $(SIM) $(READLINE) $(OPCODES) $(LIBCTF) $(BFD) $(ZLIB) \
+CLIBS = $(SIM) $(READLINE) $(OPCODES) $(LIBCTF) $(BFD) $(ZLIB) $(ZSTD_LIBS) \
         $(LIBSUPPORT) $(INTL) $(LIBIBERTY) $(LIBDECNUMBER) \
 	$(XM_CLIBS) $(GDBTKLIBS)  $(LIBBACKTRACE_LIB) \
 	@LIBS@ @GUILE_LIBS@ @PYTHON_LIBS@ \
@@ -715,9 +722,12 @@ ALL_64_TARGET_OBS = \
 	arch/aarch64-mte-linux.o \
 	arch/amd64.o \
 	arch/riscv.o \
+	bpf-tdep.o \
 	ia64-linux-tdep.o \
 	ia64-tdep.o \
 	ia64-vms-tdep.o \
+	loongarch-linux-tdep.o \
+	loongarch-tdep.o \
 	mips-fbsd-tdep.o \
 	mips-linux-tdep.o \
 	mips-netbsd-tdep.o \
@@ -734,7 +744,10 @@ ALL_64_TARGET_OBS = \
 	sparc64-netbsd-tdep.o \
 	sparc64-obsd-tdep.o \
 	sparc64-sol2-tdep.o \
-	sparc64-tdep.o
+	sparc64-tdep.o \
+	tilegx-linux-tdep.o \
+	tilegx-tdep.o
+
 
 # All other target-dependent objects files (used with --enable-targets=all).
 ALL_TARGET_OBS = \
@@ -762,7 +775,6 @@ ALL_TARGET_OBS = \
 	avr-tdep.o \
 	bfin-linux-tdep.o \
 	bfin-tdep.o \
-	bpf-tdep.o \
 	bsd-uthread.o \
 	cris-linux-tdep.o \
 	cris-tdep.o \
@@ -798,8 +810,6 @@ ALL_TARGET_OBS = \
 	linux-record.o \
 	linux-tdep.o \
 	lm32-tdep.o \
-	loongarch-linux-tdep.o \
-	loongarch-tdep.o \
 	m32c-tdep.o \
 	m32r-linux-tdep.o \
 	m32r-tdep.o \
@@ -856,8 +866,6 @@ ALL_TARGET_OBS = \
 	symfile-mem.o \
 	tic6x-linux-tdep.o \
 	tic6x-tdep.o \
-	tilegx-linux-tdep.o \
-	tilegx-tdep.o \
 	v850-tdep.o \
 	vax-netbsd-tdep.o \
 	vax-tdep.o \
@@ -1080,6 +1088,7 @@ COMMON_SFILES = \
 	findvar.c \
 	frame.c \
 	frame-base.c \
+	frame-info.c \
 	frame-unwind.c \
 	gcore.c \
 	gdb-demangle.c \
@@ -1120,6 +1129,7 @@ COMMON_SFILES = \
 	memattr.c \
 	memory-map.c \
 	memrange.c \
+	memtag.c \
 	minidebug.c \
 	minsyms.c \
 	mipsread.c \
@@ -1148,7 +1158,6 @@ COMMON_SFILES = \
 	regcache.c \
 	regcache-dump.c \
 	reggroups.c \
-	registry.c \
 	remote.c \
 	remote-fileio.c \
 	remote-notif.c \
@@ -2011,7 +2020,8 @@ install-only: $(CONFIG_INSTALL)
 		  true ; \
 		fi ; \
 		$(SHELL) $(srcdir)/../mkinstalldirs $(DESTDIR)$(bindir) ; \
-		$(INSTALL_PROGRAM_ENV) $(INSTALL_PROGRAM) gdb$(EXEEXT) \
+		$(LIBTOOL) --mode=install $(INSTALL_PROGRAM_ENV) $(INSTALL_PROGRAM) \
+			gdb$(EXEEXT) \
 			$(DESTDIR)$(bindir)/$$transformed_name$(EXEEXT) ; \
 		$(SHELL) $(srcdir)/../mkinstalldirs $(DESTDIR)$(includedir)/gdb ; \
 		$(INSTALL_DATA) jit-reader.h $(DESTDIR)$(includedir)/gdb/jit-reader.h
@@ -2295,6 +2305,7 @@ aclocal_m4_deps = \
 	../config/lcmessage.m4 \
 	../config/codeset.m4 \
 	../config/zlib.m4 \
+	../config/zstd.m4 \
 	../config/ax_pthread.m4
 
 $(srcdir)/aclocal.m4: @MAINTAINER_MODE_TRUE@ $(aclocal_m4_deps)
@@ -2522,7 +2533,8 @@ install-gdbtk:
 	  true ; \
 	fi ; \
 	$(SHELL) $(srcdir)/../mkinstalldirs $(DESTDIR)$(bindir); \
-	$(INSTALL_PROGRAM_ENV) $(INSTALL_PROGRAM) insight$(EXEEXT) \
+	$(LIBTOOL) --mode=install $(INSTALL_PROGRAM_ENV) $(INSTALL_PROGRAM) \
+		insight$(EXEEXT) \
 		$(DESTDIR)$(bindir)/$$transformed_name$(EXEEXT) ; \
 	$(SHELL) $(srcdir)/../mkinstalldirs \
 		$(DESTDIR)$(GDBTK_LIBRARY) ; \

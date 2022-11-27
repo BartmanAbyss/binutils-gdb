@@ -76,7 +76,7 @@ static void filter_sals (std::vector<symtab_and_line> &);
 
 
 /* See cli-cmds.h. */
-unsigned int max_user_call_depth;
+unsigned int max_user_call_depth = 1024;
 
 /* Define all cmd_list_elements.  */
 
@@ -488,7 +488,20 @@ quit_command (const char *args, int from_tty)
   if (!quit_confirm ())
     error (_("Not confirmed."));
 
-  query_if_trace_running (from_tty);
+  try
+    {
+      query_if_trace_running (from_tty);
+    }
+  catch (const gdb_exception_error &ex)
+    {
+      if (ex.error == TARGET_CLOSE_ERROR)
+	/* We don't care about this since we're quitting anyway, so keep
+	   quitting.  */
+	exception_print (gdb_stderr, ex);
+      else
+	/* Rethrow, to properly handle error (_("Not confirmed.")).  */
+	throw;
+    }
 
   quit_force (args ? &exit_code : NULL, from_tty);
 }
@@ -970,13 +983,13 @@ edit_command (const char *arg, int from_tty)
 
       /* Now should only be one argument -- decode it in SAL.  */
       arg1 = arg;
-      event_location_up location = string_to_event_location (&arg1,
-							     current_language);
+      location_spec_up locspec = string_to_location_spec (&arg1,
+							  current_language);
 
       if (*arg1)
 	error (_("Junk at end of line specification."));
 
-      std::vector<symtab_and_line> sals = decode_line_1 (location.get (),
+      std::vector<symtab_and_line> sals = decode_line_1 (locspec.get (),
 							 DECODE_LINE_LIST_MODE,
 							 NULL, NULL, 0);
 
@@ -1241,18 +1254,18 @@ list_command (const char *arg, int from_tty)
     dummy_beg = 1;
   else
     {
-      event_location_up location = string_to_event_location (&arg1,
-							     current_language);
+      location_spec_up locspec
+	= string_to_location_spec (&arg1, current_language);
 
-      /* We know that the ARG string is not empty, yet the attempt to parse
-	 a location from the string consumed no characters.  This most
-	 likely means that the first thing in ARG looks like a location
-	 condition, and so the string_to_event_location call stopped
-	 parsing.  */
+      /* We know that the ARG string is not empty, yet the attempt to
+	 parse a location spec from the string consumed no characters.
+	 This most likely means that the first thing in ARG looks like
+	 a location spec condition, and so the string_to_location_spec
+	 call stopped parsing.  */
       if (arg1 == arg)
 	error (_("Junk at end of line specification."));
 
-      sals = decode_line_1 (location.get (), DECODE_LINE_LIST_MODE,
+      sals = decode_line_1 (locspec.get (), DECODE_LINE_LIST_MODE,
 			    NULL, NULL, 0);
       filter_sals (sals);
       if (sals.empty ())
@@ -1297,17 +1310,17 @@ list_command (const char *arg, int from_tty)
 	     know it was ambiguous.  */
 	  const char *end_arg = arg1;
 
-	  event_location_up location
-	    = string_to_event_location (&arg1, current_language);
+	  location_spec_up locspec
+	    = string_to_location_spec (&arg1, current_language);
 
 	  if (*arg1)
 	    error (_("Junk at end of line specification."));
 
 	  std::vector<symtab_and_line> sals_end
 	    = (dummy_beg
-	       ? decode_line_1 (location.get (), DECODE_LINE_LIST_MODE,
+	       ? decode_line_1 (locspec.get (), DECODE_LINE_LIST_MODE,
 				NULL, NULL, 0)
-	       : decode_line_1 (location.get (), DECODE_LINE_LIST_MODE,
+	       : decode_line_1 (locspec.get (), DECODE_LINE_LIST_MODE,
 				NULL, sal.symtab, sal.line));
 
 	  filter_sals (sals_end);
@@ -1466,7 +1479,7 @@ print_disassembly (struct gdbarch *gdbarch, const char *name,
 static void
 disassemble_current_function (gdb_disassembly_flags flags)
 {
-  struct frame_info *frame;
+  frame_info_ptr frame;
   struct gdbarch *gdbarch;
   CORE_ADDR low, high, pc;
   const char *name;
@@ -1508,6 +1521,9 @@ disassemble_current_function (gdb_disassembly_flags flags)
 
    A /r modifier will include raw instructions in hex with the assembly.
 
+   A /b modifier is similar to /r except the instruction bytes are printed
+   as separate bytes with no grouping, or endian switching.
+
    A /s modifier will include source code with the assembly, like /m, with
    two important differences:
    1) The output is still in pc address order.
@@ -1545,6 +1561,9 @@ disassemble_command (const char *arg, int from_tty)
 	      break;
 	    case 'r':
 	      flags |= DISASSEMBLY_RAW_INSN;
+	      break;
+	    case 'b':
+	      flags |= DISASSEMBLY_RAW_BYTES;
 	      break;
 	    case 's':
 	      flags |= DISASSEMBLY_SOURCE;
@@ -2103,12 +2122,6 @@ filter_sals (std::vector<symtab_and_line> &sals)
     { return cmp_symtabs (sala, salb) == 0; });
 
   sals.erase (from, sals.end ());
-}
-
-void
-init_cmd_lists (void)
-{
-  max_user_call_depth = 1024;
 }
 
 static void

@@ -23,6 +23,7 @@
 #include "buildsym.h"
 #include "dwarf2/comp-unit-head.h"
 #include "gdbsupport/gdb_optional.h"
+#include "language.h"
 
 /* Type used for delaying computation of method physnames.
    See comments for compute_delayed_physnames.  */
@@ -104,6 +105,12 @@ struct dwarf2_cu
 
   /* The language we are debugging.  */
   const struct language_defn *language_defn = nullptr;
+
+  enum language lang () const
+  {
+    gdb_assert (language_defn != language_def (language_unknown));
+    return language_defn->la_language;
+  }
 
   const char *producer = nullptr;
 
@@ -257,6 +264,7 @@ public:
   bool producer_is_icc : 1;
   bool producer_is_icc_lt_14 : 1;
   bool producer_is_codewarrior : 1;
+  bool producer_is_clang : 1;
 
   /* When true, the file that we're processing is known to have
      debugging info for C++ namespaces.  GCC 3.3.x did not produce
@@ -269,8 +277,6 @@ public:
      we think are interesting.  It gets set if we look for a DIE in the
      hash table and don't find it.  */
   bool load_all_dies : 1;
-
-  struct partial_die_info *find_partial_die (sect_offset sect_off);
 
   /* Get the buildsym_compunit for this CU.  */
   buildsym_compunit *get_builder ();

@@ -834,6 +834,10 @@ set_running_thread (struct thread_info *tp, bool running)
     started = true;
   tp->state = running ? THREAD_RUNNING : THREAD_STOPPED;
 
+  threads_debug_printf ("thread: %s, running? %d%s",
+			tp->ptid.to_string ().c_str (), running,
+			(started ? " (started)" : ""));
+
   if (!running)
     {
       /* If the thread is now marked stopped, remove it from
@@ -1298,6 +1302,9 @@ info_threads_command_completer (struct cmd_list_element *ignore,
 void
 switch_to_thread_no_regs (struct thread_info *thread)
 {
+  gdb_assert (thread != nullptr);
+  threads_debug_printf ("thread = %s", thread->ptid.to_string ().c_str ());
+
   struct inferior *inf = thread->inf;
 
   set_current_program_space (inf->pspace);
@@ -1314,6 +1321,8 @@ switch_to_no_thread ()
 {
   if (current_thread_ == nullptr)
     return;
+
+  threads_debug_printf ("thread = NONE");
 
   current_thread_ = nullptr;
   inferior_ptid = null_ptid;
@@ -2114,6 +2123,22 @@ global_thread_id_make_value (struct gdbarch *gdbarch, struct internalvar *var,
   return thread_num_make_value_helper (gdbarch, 1);
 }
 
+/* Return a new value for the number of non-exited threads in the current
+   inferior.  If there are no threads in the current inferior return a
+   value of 0.  */
+
+static struct value *
+inferior_thread_count_make_value (struct gdbarch *gdbarch,
+				  struct internalvar *var, void *ignore)
+{
+  int int_val = 0;
+
+  if (inferior_ptid != null_ptid)
+    int_val = current_inferior ()->non_exited_threads ().size ();
+
+  return value_from_longest (builtin_type (gdbarch)->builtin_int, int_val);
+}
+
 /* Commands with a prefix of `thread'.  */
 struct cmd_list_element *thread_cmd_list = NULL;
 
@@ -2130,6 +2155,14 @@ static const struct internalvar_funcs thread_funcs =
 static const struct internalvar_funcs gthread_funcs =
 {
   global_thread_id_make_value,
+  NULL,
+};
+
+/* Implementation of `_inferior_thread_count` convenience variable.  */
+
+static const struct internalvar_funcs inferior_thread_count_funcs =
+{
+  inferior_thread_count_make_value,
   NULL,
 };
 
@@ -2249,4 +2282,6 @@ When on messages about thread creation and deletion are printed."),
 
   create_internalvar_type_lazy ("_thread", &thread_funcs, NULL);
   create_internalvar_type_lazy ("_gthread", &gthread_funcs, NULL);
+  create_internalvar_type_lazy ("_inferior_thread_count",
+				&inferior_thread_count_funcs, NULL);
 }

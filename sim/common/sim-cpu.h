@@ -30,8 +30,8 @@ typedef const char * (CPU_INSN_NAME_FN) (sim_cpu *, int);
 
 /* Types for register access functions.
    These routines implement the sim_{fetch,store}_register interface.  */
-typedef int (CPUREG_FETCH_FN) (sim_cpu *, int, unsigned char *, int);
-typedef int (CPUREG_STORE_FN) (sim_cpu *, int, unsigned char *, int);
+typedef int (CPUREG_FETCH_FN) (sim_cpu *, int, void *, int);
+typedef int (CPUREG_STORE_FN) (sim_cpu *, int, const void *, int);
 
 /* Types for PC access functions.
    Some simulators require a functional interface to access the program
@@ -137,7 +137,8 @@ extern sim_cpu *sim_cpu_lookup (SIM_DESC, const char *);
 /* Return prefix to use in cpu specific messages.  */
 extern const char *sim_cpu_msg_prefix (sim_cpu *);
 /* Cover fn to sim_io_eprintf.  */
-extern void sim_io_eprintf_cpu (sim_cpu *, const char *, ...);
+extern void sim_io_eprintf_cpu (sim_cpu *, const char *, ...)
+  ATTRIBUTE_PRINTF (2, 3);
 
 /* Get/set a pc value.  */
 #define CPU_PC_GET(cpu) ((* CPU_PC_FETCH (cpu)) (cpu))

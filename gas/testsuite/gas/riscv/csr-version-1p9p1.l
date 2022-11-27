@@ -406,61 +406,393 @@
 .*Warning: invalid CSR `mhpmcounter31h', needs rv32i extension
 .*Warning: invalid CSR `mcountinhibit' for the privileged spec `1.9.1'
 .*Warning: invalid CSR `mcountinhibit' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hstatus' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hstatus' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hedeleg' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hedeleg' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hideleg' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hideleg' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hie' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hie' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hcounteren' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hcounteren' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hgeie' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hgeie' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `htval' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `htval' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hip' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hip' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hvip' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hvip' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `htinst' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `htinst' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hgeip' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hgeip' for the privileged spec `1.9.1'
+.*Warning: invalid CSR `hstatus', needs `h' extension
+.*Warning: invalid CSR `hstatus', needs `h' extension
+.*Warning: invalid CSR `hedeleg', needs `h' extension
+.*Warning: invalid CSR `hedeleg', needs `h' extension
+.*Warning: invalid CSR `hideleg', needs `h' extension
+.*Warning: invalid CSR `hideleg', needs `h' extension
+.*Warning: invalid CSR `hie', needs `h' extension
+.*Warning: invalid CSR `hie', needs `h' extension
+.*Warning: invalid CSR `hcounteren', needs `h' extension
+.*Warning: invalid CSR `hcounteren', needs `h' extension
+.*Warning: invalid CSR `hgeie', needs `h' extension
+.*Warning: invalid CSR `hgeie', needs `h' extension
+.*Warning: invalid CSR `htval', needs `h' extension
+.*Warning: invalid CSR `htval', needs `h' extension
+.*Warning: invalid CSR `hip', needs `h' extension
+.*Warning: invalid CSR `hip', needs `h' extension
+.*Warning: invalid CSR `hvip', needs `h' extension
+.*Warning: invalid CSR `hvip', needs `h' extension
+.*Warning: invalid CSR `htinst', needs `h' extension
+.*Warning: invalid CSR `htinst', needs `h' extension
+.*Warning: invalid CSR `hgeip', needs `h' extension
+.*Warning: invalid CSR `hgeip', needs `h' extension
 .*Warning: read-only CSR is written `csrw hgeip,a1'
-.*Warning: invalid CSR `henvcfg' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `henvcfg' for the privileged spec `1.9.1'
+.*Warning: invalid CSR `henvcfg', needs `h' extension
+.*Warning: invalid CSR `henvcfg', needs `h' extension
 .*Warning: invalid CSR `henvcfgh', needs rv32i extension
-.*Warning: invalid CSR `henvcfgh' for the privileged spec `1.9.1'
+.*Warning: invalid CSR `henvcfgh', needs `h' extension
 .*Warning: invalid CSR `henvcfgh', needs rv32i extension
-.*Warning: invalid CSR `henvcfgh' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hgatp' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `hgatp' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `htimedelta' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `htimedelta' for the privileged spec `1.9.1'
+.*Warning: invalid CSR `henvcfgh', needs `h' extension
+.*Warning: invalid CSR `hgatp', needs `h' extension
+.*Warning: invalid CSR `hgatp', needs `h' extension
+.*Warning: invalid CSR `htimedelta', needs `h' extension
+.*Warning: invalid CSR `htimedelta', needs `h' extension
 .*Warning: invalid CSR `htimedeltah', needs rv32i extension
-.*Warning: invalid CSR `htimedeltah' for the privileged spec `1.9.1'
+.*Warning: invalid CSR `htimedeltah', needs `h' extension
 .*Warning: invalid CSR `htimedeltah', needs rv32i extension
-.*Warning: invalid CSR `htimedeltah' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsstatus' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsstatus' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsie' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsie' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vstvec' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vstvec' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsscratch' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsscratch' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsepc' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsepc' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vscause' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vscause' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vstval' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vstval' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsip' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsip' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsatp' for the privileged spec `1.9.1'
-.*Warning: invalid CSR `vsatp' for the privileged spec `1.9.1'
+.*Warning: invalid CSR `htimedeltah', needs `h' extension
+.*Warning: invalid CSR `vsstatus', needs `h' extension
+.*Warning: invalid CSR `vsstatus', needs `h' extension
+.*Warning: invalid CSR `vsie', needs `h' extension
+.*Warning: invalid CSR `vsie', needs `h' extension
+.*Warning: invalid CSR `vstvec', needs `h' extension
+.*Warning: invalid CSR `vstvec', needs `h' extension
+.*Warning: invalid CSR `vsscratch', needs `h' extension
+.*Warning: invalid CSR `vsscratch', needs `h' extension
+.*Warning: invalid CSR `vsepc', needs `h' extension
+.*Warning: invalid CSR `vsepc', needs `h' extension
+.*Warning: invalid CSR `vscause', needs `h' extension
+.*Warning: invalid CSR `vscause', needs `h' extension
+.*Warning: invalid CSR `vstval', needs `h' extension
+.*Warning: invalid CSR `vstval', needs `h' extension
+.*Warning: invalid CSR `vsip', needs `h' extension
+.*Warning: invalid CSR `vsip', needs `h' extension
+.*Warning: invalid CSR `vsatp', needs `h' extension
+.*Warning: invalid CSR `vsatp', needs `h' extension
+.*Warning: invalid CSR `miselect', needs `smaia' extension
+.*Warning: invalid CSR `miselect', needs `smaia' extension
+.*Warning: invalid CSR `mireg', needs `smaia' extension
+.*Warning: invalid CSR `mireg', needs `smaia' extension
+.*Warning: invalid CSR `mtopei', needs `smaia' extension
+.*Warning: invalid CSR `mtopei', needs `smaia' extension
+.*Warning: invalid CSR `mtopi', needs `smaia' extension
+.*Warning: invalid CSR `mtopi', needs `smaia' extension
+.*Warning: read-only CSR is written `csrw mtopi,a1'
+.*Warning: invalid CSR `mvien', needs `smaia' extension
+.*Warning: invalid CSR `mvien', needs `smaia' extension
+.*Warning: invalid CSR `mvip', needs `smaia' extension
+.*Warning: invalid CSR `mvip', needs `smaia' extension
+.*Warning: invalid CSR `midelegh', needs rv32i extension
+.*Warning: invalid CSR `midelegh', needs `smaia' extension
+.*Warning: invalid CSR `midelegh', needs rv32i extension
+.*Warning: invalid CSR `midelegh', needs `smaia' extension
+.*Warning: invalid CSR `mieh', needs rv32i extension
+.*Warning: invalid CSR `mieh', needs `smaia' extension
+.*Warning: invalid CSR `mieh', needs rv32i extension
+.*Warning: invalid CSR `mieh', needs `smaia' extension
+.*Warning: invalid CSR `mvienh', needs rv32i extension
+.*Warning: invalid CSR `mvienh', needs `smaia' extension
+.*Warning: invalid CSR `mvienh', needs rv32i extension
+.*Warning: invalid CSR `mvienh', needs `smaia' extension
+.*Warning: invalid CSR `mviph', needs rv32i extension
+.*Warning: invalid CSR `mviph', needs `smaia' extension
+.*Warning: invalid CSR `mviph', needs rv32i extension
+.*Warning: invalid CSR `mviph', needs `smaia' extension
+.*Warning: invalid CSR `miph', needs rv32i extension
+.*Warning: invalid CSR `miph', needs `smaia' extension
+.*Warning: invalid CSR `miph', needs rv32i extension
+.*Warning: invalid CSR `miph', needs `smaia' extension
+.*Warning: invalid CSR `mstateen0', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen0', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen1', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen1', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen2', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen2', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen3', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen3', needs `smstateen' extension
+.*Warning: invalid CSR `sstateen0', needs `ssstateen' extension
+.*Warning: invalid CSR `sstateen0', needs `ssstateen' extension
+.*Warning: invalid CSR `sstateen1', needs `ssstateen' extension
+.*Warning: invalid CSR `sstateen1', needs `ssstateen' extension
+.*Warning: invalid CSR `sstateen2', needs `ssstateen' extension
+.*Warning: invalid CSR `sstateen2', needs `ssstateen' extension
+.*Warning: invalid CSR `sstateen3', needs `ssstateen' extension
+.*Warning: invalid CSR `sstateen3', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen0', needs `h' extension
+.*Warning: invalid CSR `hstateen0', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen0', needs `h' extension
+.*Warning: invalid CSR `hstateen0', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen1', needs `h' extension
+.*Warning: invalid CSR `hstateen1', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen1', needs `h' extension
+.*Warning: invalid CSR `hstateen1', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen2', needs `h' extension
+.*Warning: invalid CSR `hstateen2', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen2', needs `h' extension
+.*Warning: invalid CSR `hstateen2', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen3', needs `h' extension
+.*Warning: invalid CSR `hstateen3', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen3', needs `h' extension
+.*Warning: invalid CSR `hstateen3', needs `ssstateen' extension
+.*Warning: invalid CSR `mstateen0h', needs rv32i extension
+.*Warning: invalid CSR `mstateen0h', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen0h', needs rv32i extension
+.*Warning: invalid CSR `mstateen0h', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen1h', needs rv32i extension
+.*Warning: invalid CSR `mstateen1h', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen1h', needs rv32i extension
+.*Warning: invalid CSR `mstateen1h', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen2h', needs rv32i extension
+.*Warning: invalid CSR `mstateen2h', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen2h', needs rv32i extension
+.*Warning: invalid CSR `mstateen2h', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen3h', needs rv32i extension
+.*Warning: invalid CSR `mstateen3h', needs `smstateen' extension
+.*Warning: invalid CSR `mstateen3h', needs rv32i extension
+.*Warning: invalid CSR `mstateen3h', needs `smstateen' extension
+.*Warning: invalid CSR `hstateen0h', needs rv32i extension
+.*Warning: invalid CSR `hstateen0h', needs `h' extension
+.*Warning: invalid CSR `hstateen0h', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen0h', needs rv32i extension
+.*Warning: invalid CSR `hstateen0h', needs `h' extension
+.*Warning: invalid CSR `hstateen0h', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen1h', needs rv32i extension
+.*Warning: invalid CSR `hstateen1h', needs `h' extension
+.*Warning: invalid CSR `hstateen1h', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen1h', needs rv32i extension
+.*Warning: invalid CSR `hstateen1h', needs `h' extension
+.*Warning: invalid CSR `hstateen1h', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen2h', needs rv32i extension
+.*Warning: invalid CSR `hstateen2h', needs `h' extension
+.*Warning: invalid CSR `hstateen2h', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen2h', needs rv32i extension
+.*Warning: invalid CSR `hstateen2h', needs `h' extension
+.*Warning: invalid CSR `hstateen2h', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen3h', needs rv32i extension
+.*Warning: invalid CSR `hstateen3h', needs `h' extension
+.*Warning: invalid CSR `hstateen3h', needs `ssstateen' extension
+.*Warning: invalid CSR `hstateen3h', needs rv32i extension
+.*Warning: invalid CSR `hstateen3h', needs `h' extension
+.*Warning: invalid CSR `hstateen3h', needs `ssstateen' extension
+.*Warning: invalid CSR `siselect', needs `ssaia' extension
+.*Warning: invalid CSR `siselect', needs `ssaia' extension
+.*Warning: invalid CSR `sireg', needs `ssaia' extension
+.*Warning: invalid CSR `sireg', needs `ssaia' extension
+.*Warning: invalid CSR `stopei', needs `ssaia' extension
+.*Warning: invalid CSR `stopei', needs `ssaia' extension
+.*Warning: invalid CSR `stopi', needs `ssaia' extension
+.*Warning: invalid CSR `stopi', needs `ssaia' extension
+.*Warning: read-only CSR is written `csrw stopi,a1'
+.*Warning: invalid CSR `sieh', needs rv32i extension
+.*Warning: invalid CSR `sieh', needs `ssaia' extension
+.*Warning: invalid CSR `sieh', needs rv32i extension
+.*Warning: invalid CSR `sieh', needs `ssaia' extension
+.*Warning: invalid CSR `siph', needs rv32i extension
+.*Warning: invalid CSR `siph', needs `ssaia' extension
+.*Warning: invalid CSR `siph', needs rv32i extension
+.*Warning: invalid CSR `siph', needs `ssaia' extension
+.*Warning: invalid CSR `hvien', needs `h' extension
+.*Warning: invalid CSR `hvien', needs `ssaia' extension
+.*Warning: invalid CSR `hvien', needs `h' extension
+.*Warning: invalid CSR `hvien', needs `ssaia' extension
+.*Warning: invalid CSR `hvictl', needs `h' extension
+.*Warning: invalid CSR `hvictl', needs `ssaia' extension
+.*Warning: invalid CSR `hvictl', needs `h' extension
+.*Warning: invalid CSR `hvictl', needs `ssaia' extension
+.*Warning: invalid CSR `hviprio1', needs `h' extension
+.*Warning: invalid CSR `hviprio1', needs `ssaia' extension
+.*Warning: invalid CSR `hviprio1', needs `h' extension
+.*Warning: invalid CSR `hviprio1', needs `ssaia' extension
+.*Warning: invalid CSR `hviprio2', needs `h' extension
+.*Warning: invalid CSR `hviprio2', needs `ssaia' extension
+.*Warning: invalid CSR `hviprio2', needs `h' extension
+.*Warning: invalid CSR `hviprio2', needs `ssaia' extension
+.*Warning: invalid CSR `vsiselect', needs `h' extension
+.*Warning: invalid CSR `vsiselect', needs `ssaia' extension
+.*Warning: invalid CSR `vsiselect', needs `h' extension
+.*Warning: invalid CSR `vsiselect', needs `ssaia' extension
+.*Warning: invalid CSR `vsireg', needs `h' extension
+.*Warning: invalid CSR `vsireg', needs `ssaia' extension
+.*Warning: invalid CSR `vsireg', needs `h' extension
+.*Warning: invalid CSR `vsireg', needs `ssaia' extension
+.*Warning: invalid CSR `vstopei', needs `h' extension
+.*Warning: invalid CSR `vstopei', needs `ssaia' extension
+.*Warning: invalid CSR `vstopei', needs `h' extension
+.*Warning: invalid CSR `vstopei', needs `ssaia' extension
+.*Warning: invalid CSR `vstopi', needs `h' extension
+.*Warning: invalid CSR `vstopi', needs `ssaia' extension
+.*Warning: invalid CSR `vstopi', needs `h' extension
+.*Warning: invalid CSR `vstopi', needs `ssaia' extension
+.*Warning: read-only CSR is written `csrw vstopi,a1'
+.*Warning: invalid CSR `hidelegh', needs rv32i extension
+.*Warning: invalid CSR `hidelegh', needs `h' extension
+.*Warning: invalid CSR `hidelegh', needs `ssaia' extension
+.*Warning: invalid CSR `hidelegh', needs rv32i extension
+.*Warning: invalid CSR `hidelegh', needs `h' extension
+.*Warning: invalid CSR `hidelegh', needs `ssaia' extension
+.*Warning: invalid CSR `hvienh', needs rv32i extension
+.*Warning: invalid CSR `hvienh', needs `h' extension
+.*Warning: invalid CSR `hvienh', needs `ssaia' extension
+.*Warning: invalid CSR `hvienh', needs rv32i extension
+.*Warning: invalid CSR `hvienh', needs `h' extension
+.*Warning: invalid CSR `hvienh', needs `ssaia' extension
+.*Warning: invalid CSR `hviph', needs rv32i extension
+.*Warning: invalid CSR `hviph', needs `h' extension
+.*Warning: invalid CSR `hviph', needs `ssaia' extension
+.*Warning: invalid CSR `hviph', needs rv32i extension
+.*Warning: invalid CSR `hviph', needs `h' extension
+.*Warning: invalid CSR `hviph', needs `ssaia' extension
+.*Warning: invalid CSR `hviprio1h', needs rv32i extension
+.*Warning: invalid CSR `hviprio1h', needs `h' extension
+.*Warning: invalid CSR `hviprio1h', needs `ssaia' extension
+.*Warning: invalid CSR `hviprio1h', needs rv32i extension
+.*Warning: invalid CSR `hviprio1h', needs `h' extension
+.*Warning: invalid CSR `hviprio1h', needs `ssaia' extension
+.*Warning: invalid CSR `hviprio2h', needs rv32i extension
+.*Warning: invalid CSR `hviprio2h', needs `h' extension
+.*Warning: invalid CSR `hviprio2h', needs `ssaia' extension
+.*Warning: invalid CSR `hviprio2h', needs rv32i extension
+.*Warning: invalid CSR `hviprio2h', needs `h' extension
+.*Warning: invalid CSR `hviprio2h', needs `ssaia' extension
+.*Warning: invalid CSR `vsieh', needs rv32i extension
+.*Warning: invalid CSR `vsieh', needs `h' extension
+.*Warning: invalid CSR `vsieh', needs `ssaia' extension
+.*Warning: invalid CSR `vsieh', needs rv32i extension
+.*Warning: invalid CSR `vsieh', needs `h' extension
+.*Warning: invalid CSR `vsieh', needs `ssaia' extension
+.*Warning: invalid CSR `vsiph', needs rv32i extension
+.*Warning: invalid CSR `vsiph', needs `h' extension
+.*Warning: invalid CSR `vsiph', needs `ssaia' extension
+.*Warning: invalid CSR `vsiph', needs rv32i extension
+.*Warning: invalid CSR `vsiph', needs `h' extension
+.*Warning: invalid CSR `vsiph', needs `ssaia' extension
+.*Warning: invalid CSR `scountovf', needs `sscofpmf' extension
+.*Warning: invalid CSR `scountovf', needs `sscofpmf' extension
+.*Warning: read-only CSR is written `csrw scountovf,a1'
+.*Warning: invalid CSR `mhpmevent3h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent3h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent3h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent3h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent4h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent4h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent4h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent4h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent5h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent5h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent5h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent5h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent6h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent6h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent6h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent6h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent7h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent7h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent7h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent7h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent8h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent8h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent8h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent8h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent9h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent9h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent9h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent9h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent10h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent10h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent10h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent10h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent11h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent11h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent11h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent11h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent12h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent12h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent12h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent12h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent13h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent13h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent13h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent13h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent14h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent14h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent14h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent14h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent15h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent15h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent15h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent15h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent16h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent16h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent16h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent16h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent17h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent17h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent17h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent17h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent18h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent18h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent18h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent18h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent19h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent19h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent19h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent19h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent20h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent20h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent20h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent20h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent21h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent21h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent21h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent21h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent22h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent22h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent22h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent22h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent23h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent23h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent23h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent23h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent24h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent24h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent24h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent24h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent25h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent25h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent25h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent25h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent26h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent26h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent26h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent26h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent27h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent27h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent27h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent27h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent28h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent28h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent28h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent28h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent29h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent29h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent29h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent29h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent30h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent30h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent30h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent30h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent31h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent31h', needs `sscofpmf' extension
+.*Warning: invalid CSR `mhpmevent31h', needs rv32i extension
+.*Warning: invalid CSR `mhpmevent31h', needs `sscofpmf' extension
+.*Warning: invalid CSR `stimecmp', needs `sstc' extension
+.*Warning: invalid CSR `stimecmp', needs `sstc' extension
+.*Warning: invalid CSR `stimecmph', needs rv32i extension
+.*Warning: invalid CSR `stimecmph', needs `sstc' extension
+.*Warning: invalid CSR `stimecmph', needs rv32i extension
+.*Warning: invalid CSR `stimecmph', needs `sstc' extension
+.*Warning: invalid CSR `vstimecmp', needs `h' extension
+.*Warning: invalid CSR `vstimecmp', needs `sstc' extension
+.*Warning: invalid CSR `vstimecmp', needs `h' extension
+.*Warning: invalid CSR `vstimecmp', needs `sstc' extension
+.*Warning: invalid CSR `vstimecmph', needs rv32i extension
+.*Warning: invalid CSR `vstimecmph', needs `h' extension
+.*Warning: invalid CSR `vstimecmph', needs `sstc' extension
+.*Warning: invalid CSR `vstimecmph', needs rv32i extension
+.*Warning: invalid CSR `vstimecmph', needs `h' extension
+.*Warning: invalid CSR `vstimecmph', needs `sstc' extension
 .*Warning: invalid CSR `utval' for the privileged spec `1.9.1'
 .*Warning: invalid CSR `utval' for the privileged spec `1.9.1'
 .*Warning: invalid CSR `fflags', needs `f' extension
@@ -471,20 +803,20 @@
 .*Warning: invalid CSR `fcsr', needs `f' extension
 .*Warning: invalid CSR `seed', needs `zkr' extension
 .*Warning: invalid CSR `seed', needs `zkr' extension
-.*Warning: invalid CSR `vstart', needs `v' extension
-.*Warning: invalid CSR `vstart', needs `v' extension
-.*Warning: invalid CSR `vxsat', needs `v' extension
-.*Warning: invalid CSR `vxsat', needs `v' extension
-.*Warning: invalid CSR `vxrm', needs `v' extension
-.*Warning: invalid CSR `vxrm', needs `v' extension
-.*Warning: invalid CSR `vcsr', needs `v' extension
-.*Warning: invalid CSR `vcsr', needs `v' extension
-.*Warning: invalid CSR `vl', needs `v' extension
-.*Warning: invalid CSR `vl', needs `v' extension
+.*Warning: invalid CSR `vstart', needs `zve32x' extension
+.*Warning: invalid CSR `vstart', needs `zve32x' extension
+.*Warning: invalid CSR `vxsat', needs `zve32x' extension
+.*Warning: invalid CSR `vxsat', needs `zve32x' extension
+.*Warning: invalid CSR `vxrm', needs `zve32x' extension
+.*Warning: invalid CSR `vxrm', needs `zve32x' extension
+.*Warning: invalid CSR `vcsr', needs `zve32x' extension
+.*Warning: invalid CSR `vcsr', needs `zve32x' extension
+.*Warning: invalid CSR `vl', needs `zve32x' extension
+.*Warning: invalid CSR `vl', needs `zve32x' extension
 .*Warning: read-only CSR is written `csrw vl,a1'
-.*Warning: invalid CSR `vtype', needs `v' extension
-.*Warning: invalid CSR `vtype', needs `v' extension
+.*Warning: invalid CSR `vtype', needs `zve32x' extension
+.*Warning: invalid CSR `vtype', needs `zve32x' extension
 .*Warning: read-only CSR is written `csrw vtype,a1'
-.*Warning: invalid CSR `vlenb', needs `v' extension
-.*Warning: invalid CSR `vlenb', needs `v' extension
+.*Warning: invalid CSR `vlenb', needs `zve32x' extension
+.*Warning: invalid CSR `vlenb', needs `zve32x' extension
 .*Warning: read-only CSR is written `csrw vlenb,a1'

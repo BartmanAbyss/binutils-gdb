@@ -27,10 +27,6 @@ set lib_opts  debug
 standard_testfile
 set exec_opts [list debug shlib=$lib_sl]
 
-if [get_compiler_info] {
-    return -1
-}
-
 if { [gdb_compile_shlib $libsrc $lib_sl $lib_opts] != ""
      || [gdb_compile $srcdir/$subdir/$srcfile $binfile executable $exec_opts] != ""} {
     untested "failed to compile"
@@ -41,6 +37,8 @@ if { [gdb_compile_shlib $libsrc $lib_sl $lib_opts] != ""
 clean_restart ${testfile}
 
 if { [skip_python_tests] } { continue }
+
+gdb_test_no_output "python import gdb.events"
 
 set pyfile [gdb_remote_download host ${srcdir}/${subdir}/py-events.py]
 gdb_test_no_output "source ${pyfile}" "load python file"

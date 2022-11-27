@@ -524,7 +524,7 @@ apply_ext_lang_val_pretty_printer (struct value *val,
    rather than trying filters in other extension languages.  */
 
 enum ext_lang_bt_status
-apply_ext_lang_frame_filter (struct frame_info *frame,
+apply_ext_lang_frame_filter (frame_info_ptr frame,
 			     frame_filter_flags flags,
 			     enum ext_lang_frame_args args_type,
 			     struct ui_out *out,
@@ -922,6 +922,26 @@ ext_lang_colorize_disasm (const std::string &content, gdbarch *gdbarch)
     }
 
   return result;
+}
+
+/* See extension.h.  */
+
+gdb::optional<int>
+ext_lang_print_insn (struct gdbarch *gdbarch, CORE_ADDR address,
+		     struct disassemble_info *info)
+{
+  for (const struct extension_language_defn *extlang : extension_languages)
+    {
+      if (extlang->ops == nullptr
+	  || extlang->ops->print_insn == nullptr)
+	continue;
+      gdb::optional<int> length
+	= extlang->ops->print_insn (gdbarch, address, info);
+      if (length.has_value ())
+	return length;
+    }
+
+  return {};
 }
 
 /* Called via an observer before gdb prints its prompt.

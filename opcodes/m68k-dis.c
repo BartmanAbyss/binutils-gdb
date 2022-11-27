@@ -570,8 +570,6 @@ print_base (int regno, bfd_vma disp, disassemble_info *info)
     }
   else
     {
-      char buf[50];
-
 #ifdef TARGET_AMIGA
       /* Dump the symbol instead of the number*/
       if (dump_baserel && regno == 12)
@@ -617,8 +615,7 @@ print_base (int regno, bfd_vma disp, disassemble_info *info)
 #endif
 
 #ifndef TARGET_AMIGA
-      sprintf_vma (buf, disp);
-      (*info->fprintf_func) (info->stream, "%s", buf);
+      (*info->fprintf_func) (info->stream, "%" PRIx64, (uint64_t) disp);
 #endif
     }
 }
@@ -643,7 +640,6 @@ print_indexed (int basereg,
   bfd_vma base_disp;
   bfd_vma outer_disp;
   char buf[40];
-  char vmabuf[50];
 
   NEXTWORD (p, word, NULL);
 
@@ -731,7 +727,7 @@ print_indexed (int basereg,
       (*info->fprintf_func) (info->stream, ",%s", buf);
       buf[0] = '\0';
     }
-  sprintf_vma (vmabuf, outer_disp);
+  (*info->fprintf_func) (info->stream, ")@(%" PRIx64, (uint64_t) outer_disp);  (*info->fprintf_func) (info->stream, ")@(%s", vmabuf);
 #ifdef MOTOROLA
   (*info->fprintf_func) (info->stream, "]");
   if (buf[0] != '\0')
@@ -739,7 +735,6 @@ print_indexed (int basereg,
   (*info->fprintf_func) (info->stream, ",%s", vmabuf);
   (*info->fprintf_func) (info->stream, ")");
 #else
-  (*info->fprintf_func) (info->stream, ")@(%s", vmabuf);
   if (buf[0] != '\0')
     (*info->fprintf_func) (info->stream, ",%s", buf);
   (*info->fprintf_func) (info->stream, ")");

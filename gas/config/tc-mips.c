@@ -7919,7 +7919,7 @@ append_insn (struct mips_cl_insn *ip, expressionS *address_expr,
 	      || reloc_type[0] == BFD_RELOC_MIPS_HIGHEST
 	      || reloc_type[0] == BFD_RELOC_MIPS_HIGHER
 	      || reloc_type[0] == BFD_RELOC_MIPS_SCN_DISP
-	      || reloc_type[0] == BFD_RELOC_MIPS_REL16
+	      || reloc_type[0] == BFD_RELOC_MIPS_16
 	      || reloc_type[0] == BFD_RELOC_MIPS_RELGOT
 	      || reloc_type[0] == BFD_RELOC_MIPS16_GPREL
 	      || hi16_reloc_p (reloc_type[0])
@@ -9083,7 +9083,7 @@ macro_build (expressionS *ep, const char *name, const char *fmt, ...)
 		      || *r == BFD_RELOC_LO16
 		      || *r == BFD_RELOC_MIPS_GOT_OFST
 		      || (mips_opts.micromips
-			  && (*r == BFD_RELOC_16
+			  && (*r == BFD_RELOC_MIPS_16
 			      || *r == BFD_RELOC_MIPS_GOT16
 			      || *r == BFD_RELOC_MIPS_CALL16
 			      || *r == BFD_RELOC_MIPS_GOT_HI16
@@ -9501,10 +9501,8 @@ load_register (int reg, expressionS *ep, int dbl)
 
   if (!dbl || GPR_SIZE == 32)
     {
-      char value[32];
-
-      sprintf_vma (value, ep->X_add_number);
-      as_bad (_("number (0x%s) larger than 32 bits"), value);
+      as_bad (_("number (0x%" PRIx64 ") larger than 32 bits"),
+	      ep->X_add_number);
       macro_build (ep, "addiu", "t,r,j", reg, 0, BFD_RELOC_LO16);
       return;
     }
@@ -12318,10 +12316,8 @@ macro (struct mips_cl_insn *ip, char *str)
       if (HAVE_32BIT_ADDRESSES
 	  && !IS_SEXT_32BIT_NUM (offset_expr.X_add_number))
 	{
-	  char value [32];
-
-	  sprintf_vma (value, offset_expr.X_add_number);
-	  as_bad (_("number (0x%s) larger than 32 bits"), value);
+	  as_bad (_("number (0x%" PRIx64 ") larger than 32 bits"),
+		  offset_expr.X_add_number);
 	}
 
       /* A constant expression in PIC code can be handled just as it
@@ -13001,10 +12997,8 @@ macro (struct mips_cl_insn *ip, char *str)
       if (HAVE_32BIT_ADDRESSES
 	  && !IS_SEXT_32BIT_NUM (offset_expr.X_add_number))
 	{
-	  char value [32];
-
-	  sprintf_vma (value, offset_expr.X_add_number);
-	  as_bad (_("number (0x%s) larger than 32 bits"), value);
+	  as_bad (_("number (0x%" PRIx64 ") larger than 32 bits"),
+		  offset_expr.X_add_number);
 	}
 
       if (mips_pic == NO_PIC || offset_expr.X_op == O_constant)
@@ -14577,7 +14571,7 @@ static const struct percent_op_match mips_percent_op[] =
   {"%got", BFD_RELOC_MIPS_GOT16},
   {"%gp_rel", BFD_RELOC_GPREL16},
   {"%gprel", BFD_RELOC_GPREL16},
-  {"%half", BFD_RELOC_16},
+  {"%half", BFD_RELOC_MIPS_16},
   {"%highest", BFD_RELOC_MIPS_HIGHEST},
   {"%higher", BFD_RELOC_MIPS_HIGHER},
   {"%neg", BFD_RELOC_MIPS_SUB},
@@ -15841,9 +15835,10 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 	break;
       }
 
-  /* Handle BFD_RELOC_8, since it's easy.  Punt on other bfd relocations
-     that have no MIPS ELF equivalent.  */
-  if (fixP->fx_r_type != BFD_RELOC_8)
+  /* Handle BFD_RELOC_8 and BFD_RELOC_16.  Punt on other bfd
+     relocations that have no MIPS ELF equivalent.  */
+  if (fixP->fx_r_type != BFD_RELOC_8
+      && fixP->fx_r_type != BFD_RELOC_16)
     {
       howto = bfd_reloc_type_lookup (stdoutput, fixP->fx_r_type);
       if (!howto)
@@ -15853,7 +15848,6 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
   gas_assert (fixP->fx_size == 2
 	      || fixP->fx_size == 4
 	      || fixP->fx_r_type == BFD_RELOC_8
-	      || fixP->fx_r_type == BFD_RELOC_16
 	      || fixP->fx_r_type == BFD_RELOC_64
 	      || fixP->fx_r_type == BFD_RELOC_CTOR
 	      || fixP->fx_r_type == BFD_RELOC_MIPS_SUB
@@ -15958,7 +15952,6 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
     case BFD_RELOC_MIPS_HIGHEST:
     case BFD_RELOC_MIPS_HIGHER:
     case BFD_RELOC_MIPS_SCN_DISP:
-    case BFD_RELOC_MIPS_REL16:
     case BFD_RELOC_MIPS_RELGOT:
     case BFD_RELOC_MIPS_JALR:
     case BFD_RELOC_HI16:
@@ -16044,6 +16037,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
     case BFD_RELOC_RVA:
     case BFD_RELOC_32:
     case BFD_RELOC_32_PCREL:
+    case BFD_RELOC_MIPS_16:
     case BFD_RELOC_16:
     case BFD_RELOC_8:
       /* If we are deleting this reloc entry, we must fill in the
@@ -20573,7 +20567,7 @@ mips_convert_symbolic_attribute (const char *name)
 }
 
 void
-md_mips_end (void)
+mips_md_finish (void)
 {
   int fpabi = Val_GNU_MIPS_ABI_FP_ANY;
 

@@ -57,7 +57,7 @@
 /* Return the name of a file that can be opened to get the symbols for
    the child process identified by PID.  */
 
-char *
+const char *
 fbsd_nat_target::pid_to_exec_file (int pid)
 {
   static char buf[PATH_MAX];
@@ -94,7 +94,7 @@ fbsd_nat_target::find_memory_regions (find_memory_region_ftype func,
   gdb::unique_xmalloc_ptr<struct kinfo_vmentry>
     vmentl (kinfo_getvmmap (pid, &nitems));
   if (vmentl == NULL)
-    perror_with_name (_("Couldn't fetch VM map entries."));
+    perror_with_name (_("Couldn't fetch VM map entries"));
 
   for (i = 0, kve = vmentl.get (); i < nitems; i++, kve++)
     {
@@ -125,7 +125,7 @@ fbsd_nat_target::find_memory_regions (find_memory_region_ftype func,
 	 Pass MODIFIED as true, we do not know the real modification state.  */
       func (kve->kve_start, size, kve->kve_protection & KVME_PROT_READ,
 	    kve->kve_protection & KVME_PROT_WRITE,
-	    kve->kve_protection & KVME_PROT_EXEC, 1, data);
+	    kve->kve_protection & KVME_PROT_EXEC, 1, false, data);
     }
   return 0;
 }
@@ -971,9 +971,9 @@ handle_target_event (int error, gdb_client_data client_data)
 /* Implement the "async" target method.  */
 
 void
-fbsd_nat_target::async (int enable)
+fbsd_nat_target::async (bool enable)
 {
-  if ((enable != 0) == is_async_p ())
+  if (enable == is_async_p ())
     return;
 
   /* Block SIGCHILD while we create/destroy the pipe, as the handler
@@ -983,7 +983,7 @@ fbsd_nat_target::async (int enable)
   if (enable)
     {
       if (!async_file_open ())
-	internal_error (__FILE__, __LINE__, "failed to create event pipe.");
+	internal_error ("failed to create event pipe.");
 
       add_file_handler (async_wait_fd (), handle_target_event, NULL, "fbsd-nat");
 
@@ -1732,19 +1732,20 @@ fbsd_nat_target::supports_disable_randomization ()
 bool
 fbsd_nat_target::fetch_register_set (struct regcache *regcache, int regnum,
 				     int fetch_op, const struct regset *regset,
-				     void *regs, size_t size)
+				     int regbase, void *regs, size_t size)
 {
   const struct regcache_map_entry *map
     = (const struct regcache_map_entry *) regset->regmap;
   pid_t pid = get_ptrace_pid (regcache->ptid ());
 
-  if (regnum == -1 || regcache_map_supplies (map, regnum, regcache->arch(),
-					     size))
+  if (regnum == -1
+      || (regnum >= regbase && regcache_map_supplies (map, regnum - regbase,
+						      regcache->arch(), size)))
     {
       if (ptrace (fetch_op, pid, (PTRACE_TYPE_ARG3) regs, 0) == -1)
 	perror_with_name (_("Couldn't get registers"));
 
-      regcache->supply_regset (regset, regnum, regs, size);
+      regset->supply_regset (regset, regcache, regnum, regs, size);
       return true;
     }
   return false;
@@ -1755,20 +1756,21 @@ fbsd_nat_target::fetch_register_set (struct regcache *regcache, int regnum,
 bool
 fbsd_nat_target::store_register_set (struct regcache *regcache, int regnum,
 				     int fetch_op, int store_op,
-				     const struct regset *regset, void *regs,
-				     size_t size)
+				     const struct regset *regset, int regbase,
+				     void *regs, size_t size)
 {
   const struct regcache_map_entry *map
     = (const struct regcache_map_entry *) regset->regmap;
   pid_t pid = get_ptrace_pid (regcache->ptid ());
 
-  if (regnum == -1 || regcache_map_supplies (map, regnum, regcache->arch(),
-					     size))
+  if (regnum == -1
+      || (regnum >= regbase && regcache_map_supplies (map, regnum - regbase,
+						      regcache->arch(), size)))
     {
       if (ptrace (fetch_op, pid, (PTRACE_TYPE_ARG3) regs, 0) == -1)
 	perror_with_name (_("Couldn't get registers"));
 
-      regcache->collect_regset (regset, regnum, regs, size);
+      regset->collect_regset (regset, regcache, regnum, regs, size);
 
       if (ptrace (store_op, pid, (PTRACE_TYPE_ARG3) regs, 0) == -1)
 	perror_with_name (_("Couldn't write registers"));
@@ -1779,7 +1781,7 @@ fbsd_nat_target::store_register_set (struct regcache *regcache, int regnum,
 
 /* See fbsd-nat.h.  */
 
-bool
+size_t
 fbsd_nat_target::have_regset (ptid_t ptid, int note)
 {
   pid_t pid = get_ptrace_pid (ptid);
@@ -1796,15 +1798,16 @@ fbsd_nat_target::have_regset (ptid_t ptid, int note)
 
 bool
 fbsd_nat_target::fetch_regset (struct regcache *regcache, int regnum, int note,
-			       const struct regset *regset, void *regs,
-			       size_t size)
+			       const struct regset *regset, int regbase,
+			       void *regs, size_t size)
 {
   const struct regcache_map_entry *map
     = (const struct regcache_map_entry *) regset->regmap;
   pid_t pid = get_ptrace_pid (regcache->ptid ());
 
-  if (regnum == -1 || regcache_map_supplies (map, regnum, regcache->arch(),
-					     size))
+  if (regnum == -1
+      || (regnum >= regbase && regcache_map_supplies (map, regnum - regbase,
+						      regcache->arch(), size)))
     {
       struct iovec iov;
 
@@ -1813,7 +1816,7 @@ fbsd_nat_target::fetch_regset (struct regcache *regcache, int regnum, int note,
       if (ptrace (PT_GETREGSET, pid, (PTRACE_TYPE_ARG3) &iov, note) == -1)
 	perror_with_name (_("Couldn't get registers"));
 
-      regcache->supply_regset (regset, regnum, regs, size);
+      regset->supply_regset (regset, regcache, regnum, regs, size);
       return true;
     }
   return false;
@@ -1821,15 +1824,16 @@ fbsd_nat_target::fetch_regset (struct regcache *regcache, int regnum, int note,
 
 bool
 fbsd_nat_target::store_regset (struct regcache *regcache, int regnum, int note,
-			       const struct regset *regset, void *regs,
-			       size_t size)
+			       const struct regset *regset, int regbase,
+			       void *regs, size_t size)
 {
   const struct regcache_map_entry *map
     = (const struct regcache_map_entry *) regset->regmap;
   pid_t pid = get_ptrace_pid (regcache->ptid ());
 
-  if (regnum == -1 || regcache_map_supplies (map, regnum, regcache->arch(),
-					     size))
+  if (regnum == -1
+      || (regnum >= regbase && regcache_map_supplies (map, regnum - regbase,
+						      regcache->arch(), size)))
     {
       struct iovec iov;
 
@@ -1838,7 +1842,7 @@ fbsd_nat_target::store_regset (struct regcache *regcache, int regnum, int note,
       if (ptrace (PT_GETREGSET, pid, (PTRACE_TYPE_ARG3) &iov, note) == -1)
 	perror_with_name (_("Couldn't get registers"));
 
-      regcache->collect_regset (regset, regnum, regs, size);
+      regset->collect_regset (regset, regcache, regnum, regs, size);
 
       if (ptrace (PT_SETREGSET, pid, (PTRACE_TYPE_ARG3) &iov, note) == -1)
 	perror_with_name (_("Couldn't write registers"));

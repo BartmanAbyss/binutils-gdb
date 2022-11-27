@@ -300,7 +300,7 @@ void
 read_pe_exported_syms (minimal_symbol_reader &reader,
 		       struct objfile *objfile)
 {
-  bfd *dll = objfile->obfd;
+  bfd *dll = objfile->obfd.get ();
   unsigned long nbnormal, nbforward;
   unsigned long pe_header_offset, opthdr_ofs, num_entries, i;
   unsigned long export_opthdrrva, export_opthdrsize;
@@ -312,7 +312,7 @@ read_pe_exported_syms (minimal_symbol_reader &reader,
   int is_pe64 = 0;
   int is_pe32 = 0;
 
-  char const *target = bfd_get_target (objfile->obfd);
+  char const *target = bfd_get_target (objfile->obfd.get ());
 
   std::vector<struct read_pe_section_data> section_data
     (PE_SECTION_TABLE_SIZE);
@@ -331,7 +331,9 @@ read_pe_exported_syms (minimal_symbol_reader &reader,
   section_data[PE_SECTION_INDEX_BSS].section_name = ".bss";
 
   is_pe64 = (strcmp (target, "pe-x86-64") == 0
-	     || strcmp (target, "pei-x86-64") == 0);
+	     || strcmp (target, "pei-x86-64") == 0
+	     || strcmp (target, "pe-aarch64") == 0
+	     || strcmp (target, "pei-aarch64") == 0);
   is_pe32 = (strcmp (target, "pe-i386") == 0
 	     || strcmp (target, "pei-i386") == 0
 	     || strcmp (target, "pe-arm-wince-little") == 0
@@ -610,7 +612,9 @@ pe_text_section_offset (struct bfd *abfd)
   target = bfd_get_target (abfd);
 
   is_pe64 = (strcmp (target, "pe-x86-64") == 0
-	     || strcmp (target, "pei-x86-64") == 0);
+	     || strcmp (target, "pei-x86-64") == 0
+	     || strcmp (target, "pe-aarch64") == 0
+	     || strcmp (target, "pei-aarch64") == 0);
   is_pe32 = (strcmp (target, "pe-i386") == 0
 	     || strcmp (target, "pei-i386") == 0
 	     || strcmp (target, "pe-arm-wince-little") == 0

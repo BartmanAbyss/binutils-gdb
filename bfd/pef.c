@@ -41,6 +41,7 @@
 #define bfd_pef_bfd_is_target_special_symbol        _bfd_bool_bfd_asymbol_false
 #define bfd_pef_get_lineno			    _bfd_nosymbols_get_lineno
 #define bfd_pef_find_nearest_line		    _bfd_nosymbols_find_nearest_line
+#define bfd_pef_find_nearest_line_with_alt	    _bfd_nosymbols_find_nearest_line_with_alt
 #define bfd_pef_find_line			    _bfd_nosymbols_find_line
 #define bfd_pef_find_inliner_info		    _bfd_nosymbols_find_inliner_info
 #define bfd_pef_get_symbol_version_string	    _bfd_nosymbols_get_symbol_version_string
@@ -750,6 +751,13 @@ bfd_pef_parse_function_stubs (bfd *abfd,
   if (ret < 0)
     goto error;
 
+  if ((loaderlen - 56) / 24 < header.imported_library_count)
+    goto error;
+
+  if ((loaderlen - 56 - header.imported_library_count * 24) / 4
+      < header.total_imported_symbol_count)
+    goto error;
+
   libraries = bfd_malloc
     (header.imported_library_count * sizeof (bfd_pef_imported_library));
   imports = bfd_malloc
@@ -757,8 +765,6 @@ bfd_pef_parse_function_stubs (bfd *abfd,
   if (libraries == NULL || imports == NULL)
     goto error;
 
-  if (loaderlen < (56 + (header.imported_library_count * 24)))
-    goto error;
   for (i = 0; i < header.imported_library_count; i++)
     {
       ret = bfd_pef_parse_imported_library
@@ -767,9 +773,6 @@ bfd_pef_parse_function_stubs (bfd *abfd,
 	goto error;
     }
 
-  if (loaderlen < (56 + (header.imported_library_count * 24)
-		   + (header.total_imported_symbol_count * 4)))
-    goto error;
   for (i = 0; i < header.total_imported_symbol_count; i++)
     {
       ret = (bfd_pef_parse_imported_symbol

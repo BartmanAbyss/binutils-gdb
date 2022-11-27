@@ -61,9 +61,9 @@ int *this_object_header_files;
 int n_this_object_header_files;
 int n_allocated_this_object_header_files;
 
-struct nextfield
+struct stabs_nextfield
 {
-  struct nextfield *next;
+  struct stabs_nextfield *next;
 
   /* This is the raw visibility from the stab.  It is not checked
      for being one of the visibilities we recognize, so code which
@@ -87,7 +87,7 @@ struct next_fnfieldlist
 
 struct stab_field_info
   {
-    struct nextfield *list = nullptr;
+    struct stabs_nextfield *list = nullptr;
     struct next_fnfieldlist *fnlist = nullptr;
 
     auto_obstack obstack;
@@ -800,7 +800,7 @@ define_symbol (CORE_ADDR valu, const char *string, int desc, int type,
 	    dbl_type = objfile_type (objfile)->builtin_double;
 	    dbl_valu
 	      = (gdb_byte *) obstack_alloc (&objfile->objfile_obstack,
-					    TYPE_LENGTH (dbl_type));
+					    dbl_type->length ());
 
 	    target_float_from_string (dbl_valu, dbl_type, std::string (p));
 
@@ -1086,7 +1086,7 @@ define_symbol (CORE_ADDR valu, const char *string, int desc, int type,
 	{
 	  /* If PCC says a parameter is a short or a char, it is
 	     really an int.  */
-	  if (TYPE_LENGTH (sym->type ())
+	  if (sym->type ()->length ()
 	      < gdbarch_int_bit (gdbarch) / TARGET_CHAR_BIT
 	      && sym->type ()->code () == TYPE_CODE_INT)
 	    {
@@ -1684,7 +1684,7 @@ again:
 	  {
 	    /* It's being defined as itself.  That means it is "void".  */
 	    type->set_code (TYPE_CODE_VOID);
-	    TYPE_LENGTH (type) = 1;
+	    type->set_length (1);
 	  }
 	else if (type_size >= 0 || is_string)
 	  {
@@ -1717,7 +1717,7 @@ again:
 	else
 	  {
 	    type->set_target_is_stub (true);
-	    TYPE_TARGET_TYPE (type) = xtype;
+	    type->set_target_type (xtype);
 	  }
       }
       break;
@@ -2008,7 +2008,7 @@ again:
 
   /* Size specified in a type attribute overrides any other size.  */
   if (type_size != -1)
-    TYPE_LENGTH (type) = (type_size + TARGET_CHAR_BIT - 1) / TARGET_CHAR_BIT;
+    type->set_length ((type_size + TARGET_CHAR_BIT - 1) / TARGET_CHAR_BIT);
 
   return type;
 }
@@ -2016,8 +2016,8 @@ again:
 /* RS/6000 xlc/dbx combination uses a set of builtin types, starting from -1.
    Return the proper type node for a given builtin type number.  */
 
-static const struct objfile_key<struct type *,
-				gdb::noop_deleter<struct type *>>
+static const registry<objfile>::key<struct type *,
+				    gdb::noop_deleter<struct type *>>
   rs6000_builtin_type_data;
 
 static struct type *
@@ -2883,7 +2883,7 @@ read_one_struct_field (struct stab_field_info *fip, const char **pp,
 	  FIELD_BITSIZE (fip->list->field) = 0;
 	}
       if ((FIELD_BITSIZE (fip->list->field)
-	   == TARGET_CHAR_BIT * TYPE_LENGTH (field_type)
+	   == TARGET_CHAR_BIT * field_type->length ()
 	   || (field_type->code () == TYPE_CODE_ENUM
 	       && FIELD_BITSIZE (fip->list->field)
 		  == gdbarch_int_bit (gdbarch))
@@ -2922,7 +2922,7 @@ read_struct_fields (struct stab_field_info *fip, const char **pp,
 		    struct type *type, struct objfile *objfile)
 {
   const char *p;
-  struct nextfield *newobj;
+  struct stabs_nextfield *newobj;
 
   /* We better set p right now, in case there are no fields at all...    */
 
@@ -2938,7 +2938,7 @@ read_struct_fields (struct stab_field_info *fip, const char **pp,
     {
       STABS_CONTINUE (pp, objfile);
       /* Get space to record the next field's data.  */
-      newobj = OBSTACK_ZALLOC (&fip->obstack, struct nextfield);
+      newobj = OBSTACK_ZALLOC (&fip->obstack, struct stabs_nextfield);
 
       newobj->next = fip->list;
       fip->list = newobj;
@@ -3019,7 +3019,7 @@ read_baseclasses (struct stab_field_info *fip, const char **pp,
 		  struct type *type, struct objfile *objfile)
 {
   int i;
-  struct nextfield *newobj;
+  struct stabs_nextfield *newobj;
 
   if (**pp != '!')
     {
@@ -3059,7 +3059,7 @@ read_baseclasses (struct stab_field_info *fip, const char **pp,
 
   for (i = 0; i < TYPE_N_BASECLASSES (type); i++)
     {
-      newobj = OBSTACK_ZALLOC (&fip->obstack, struct nextfield);
+      newobj = OBSTACK_ZALLOC (&fip->obstack, struct stabs_nextfield);
 
       newobj->next = fip->list;
       fip->list = newobj;
@@ -3245,7 +3245,7 @@ attach_fields_to_type (struct stab_field_info *fip, struct type *type,
 {
   int nfields = 0;
   int non_public_fields = 0;
-  struct nextfield *scan;
+  struct stabs_nextfield *scan;
 
   /* Count up the number of fields that we have, as well as taking note of
      whether or not there are any non-public fields, which requires us to
@@ -3384,8 +3384,8 @@ set_length_in_type_chain (struct type *type)
 
   while (ntype != type)
     {
-      if (TYPE_LENGTH(ntype) == 0)
-	TYPE_LENGTH (ntype) = TYPE_LENGTH (type);
+      if (ntype->length () == 0)
+	ntype->set_length (type->length ());
       else
 	complain_about_struct_wipeout (ntype);
       ntype = TYPE_CHAIN (ntype);
@@ -3441,7 +3441,7 @@ read_struct_type (const char **pp, struct type *type, enum type_code type_code,
   {
     int nbits;
 
-    TYPE_LENGTH (type) = read_huge_number (pp, 0, &nbits, 0);
+    type->set_length (read_huge_number (pp, 0, &nbits, 0));
     if (nbits != 0)
       return error_type (pp, objfile);
     set_length_in_type_chain (type);
@@ -3606,7 +3606,7 @@ read_enum_type (const char **pp, struct type *type,
 
   /* Now fill in the fields of the type-structure.  */
 
-  TYPE_LENGTH (type) = gdbarch_int_bit (gdbarch) / HOST_CHAR_BIT;
+  type->set_length (gdbarch_int_bit (gdbarch) / HOST_CHAR_BIT);
   set_length_in_type_chain (type);
   type->set_code (TYPE_CODE_ENUM);
   type->set_is_stub (false);

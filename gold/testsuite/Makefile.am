@@ -149,25 +149,25 @@ check_PROGRAMS += object_unittest
 object_unittest_SOURCES = object_unittest.cc
 object_unittest_LDFLAGS = $(THREADFLAGS)
 object_unittest_LDADD = libgoldtest.a ../libgold.a ../../libiberty/libiberty.a $(LIBINTL) \
-	$(THREADLIBS) $(LIBDL) $(ZLIB)
+	$(THREADLIBS) $(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
 
 check_PROGRAMS += binary_unittest
 binary_unittest_SOURCES = binary_unittest.cc
 binary_unittest_LDFLAGS = $(THREADFLAGS)
 binary_unittest_LDADD = libgoldtest.a ../libgold.a ../../libiberty/libiberty.a $(LIBINTL) \
-	$(THREADLIBS) $(LIBDL) $(ZLIB)
+	$(THREADLIBS) $(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
 
 check_PROGRAMS += leb128_unittest
 leb128_unittest_SOURCES = leb128_unittest.cc
 leb128_unittest_LDFLAGS = $(THREADFLAGS)
 leb128_unittest_LDADD = libgoldtest.a ../libgold.a ../../libiberty/libiberty.a $(LIBINTL) \
-	$(THREADLIBS) $(LIBDL) $(ZLIB)
+	$(THREADLIBS) $(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
 
 check_PROGRAMS += overflow_unittest
 overflow_unittest_SOURCES = overflow_unittest.cc
 overflow_unittest_LDFLAGS = $(THREADFLAGS)
 overflow_unittest_LDADD = libgoldtest.a ../libgold.a ../../libiberty/libiberty.a $(LIBINTL) \
-	$(THREADLIBS) $(LIBDL) $(ZLIB)
+	$(THREADLIBS) $(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
 overflow_unittest.o: overflow_unittest.cc
 	$(CXXCOMPILE) -O3 -c -o $@ $<
 
@@ -1702,7 +1702,7 @@ flagstest_compress_debug_sections.stdout: flagstest_compress_debug_sections
 
 # Check there are compressed DWARF .debug_* sections.
 flagstest_compress_debug_sections.check: flagstest_compress_debug_sections
-	$(TEST_READELF) -SW $< | egrep ".debug_.* C *" > $@.tmp
+	$(TEST_READELF) -SW $< | grep "\.debug_.* C" > $@.tmp
 	mv -f $@.tmp $@
 
 # Compare DWARF debug info.
@@ -1765,6 +1765,13 @@ flagstest_compress_debug_sections_gabi.cmp: flagstest_compress_debug_sections_ga
 	cmp flagstest_compress_debug_sections_gabi.stdout \
 		flagstest_compress_debug_sections_none.stdout > $@.tmp
 	mv -f $@.tmp $@
+
+if HAVE_ZSTD
+check_PROGRAMS += flagstest_compress_debug_sections_zstd
+flagstest_compress_debug_sections_zstd: flagstest_debug.o gcctestdir/ld
+	$(CXXLINK) -o $@ $< -Wl,--compress-debug-sections=zstd
+	test -s $@
+endif
 
 # The specialfile output has a tricky case when we also compress debug
 # sections, because it requires output-file resizing.
@@ -3120,6 +3127,17 @@ gdb_index_test_2_gabi: gdb_index_test_cdebug_gabi.o gcctestdir/ld
 	$(CXXLINK) -Wl,--gdb-index $<
 gdb_index_test_2_gabi.stdout: gdb_index_test_2_gabi
 	$(TEST_READELF) --debug-dump=gdb_index $< > $@
+if HAVE_ZSTD
+check_SCRIPTS += gdb_index_test_2_zstd.sh
+check_DATA += gdb_index_test_2_zstd.stdout
+MOSTLYCLEANFILES += gdb_index_test_2_zstd.stdout gdb_index_test_2_zstd
+gdb_index_test_cdebug_zstd.o: gdb_index_test.cc
+	$(CXXCOMPILE) -O0 -g -Wa,--compress-debug-sections=zstd -c -o $@ $<
+gdb_index_test_2_zstd: gdb_index_test_cdebug_zstd.o gcctestdir/ld
+	$(CXXLINK) -Wl,--gdb-index $<
+gdb_index_test_2_zstd.stdout: gdb_index_test_2_zstd
+	$(TEST_READELF) --debug-dump=gdb_index $< > $@
+endif
 
 # Another simple C test (DW_AT_high_pc encoding) for --gdb-index.
 check_SCRIPTS += gdb_index_test_3.sh
@@ -4435,3 +4453,10 @@ retain_2.o: retain_2.s
 	$(TEST_AS) -o $@ $<
 
 endif DEFAULT_TARGET_X86_64
+
+check_PROGRAMS += package_metadata_test
+package_metadata_test.o: package_metadata_main.c
+	$(COMPILE) -c -o $@ $<
+package_metadata_test$(EXEEXT): package_metadata_test.o gcctestdir/ld
+	$(CXXLINK) package_metadata_test.o -Wl,--package-metadata='{"foo":"bar"}'
+	$(TEST_READELF) --notes $@ | grep -q '{"foo":"bar"}'

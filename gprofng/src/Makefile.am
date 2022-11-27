@@ -104,25 +104,21 @@ LIBGPROFNG = libgprofng.la
 ZLIB = @zlibdir@ -lz
 ZLIBINC = @zlibinc@
 
-AM_CPPFLAGS = $(GPROFNG_CPPFLAGS) -DLOCALEDIR=\"@localedir@\" -I.. -I$(srcdir) \
+LOCALEDIR = @localedir@
+SYSCONFDIR = @sysconfdir@
+
+AM_CPPFLAGS = $(GPROFNG_CPPFLAGS) -DLOCALEDIR=\"$(LOCALEDIR)\" \
+	-DSYSCONFDIR=\"$(SYSCONFDIR)\" -DLIBDIR=\"$(libdir)\" \
+	-I.. -I$(srcdir) \
 	-I$(srcdir)/../common \
 	-I$(srcdir)/../../include -I$(srcdir)/../../opcodes \
 	-I../../bfd -I$(srcdir)/../../bfd $(ZLIBINC)
 AM_CFLAGS = $(GPROFNG_CFLAGS) $(PTHREAD_CFLAGS) \
-	$(GPROFNG_NO_FORMAT_TRUNCATION_CFLAGS) \
 	$(GPROFNG_NO_SWITCH_CFLAGS)
 AM_CXXFLAGS = $(AM_CFLAGS)
 
 QLParser.tab.cc QLParser.tab.hh: QLParser.yy
 	$(BISON) $^
-
-man_MANS = gprofng.1 \
-	gp-archive.1 \
-	gp-collect-app.1 \
-	gp-display-src.1 \
-	gp-display-text.1
-
-MAINTAINERCLEANFILES = $(man_MANS)
 
 BUILT_SOURCES = QLParser.tab.hh
 EXTRA_DIST = QLParser.yy $(man_MANS)
@@ -131,12 +127,16 @@ EXTRA_DIST = QLParser.yy $(man_MANS)
 pkglib_LTLIBRARIES = $(LIBGPROFNG)
 libgprofng_la_SOURCES = $(CCSOURCES) $(CSOURCES)
 libgprofng_la_LDFLAGS = -version-info 0:0:0
+
+# Pass -lpthread instead of $(PTHREAD_LIBS) due to $(PTHREAD_LIBS) being empty
+# when -nostdlib is passed to libtool.
+# See bug 29364 - libgprofng.so: needs to link against -pthread
 libgprofng_la_LIBADD = $(top_builddir)/../opcodes/libopcodes.la \
 	$(top_builddir)/../bfd/libbfd.la \
 	$(GPROFNG_LIBADD) \
-	$(PTHREAD_LIBS) -ldl
+	-lpthread -ldl
 
-dbedir = $(prefix)/etc
+dbedir = $(SYSCONFDIR)
 dbe_DATA = $(srcdir)/gprofng.rc
 
 
@@ -159,6 +159,14 @@ gp_display_text_LDADD = $(LIBGPROFNG) $(CLOCK_GETTIME_LINK) $(ZLIB)
 
 
 if BUILD_MAN
+
+man_MANS = gprofng.1 \
+	gp-archive.1 \
+	gp-collect-app.1 \
+	gp-display-src.1 \
+	gp-display-text.1
+
+MAINTAINERCLEANFILES = $(man_MANS)
 
 # The man pages depend on the version number and on a help2man include file.
 common_mandeps = $(top_srcdir)/../bfd/version.m4

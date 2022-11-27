@@ -82,7 +82,6 @@ HFILES = \
 	score-opc.h \
 	sh-opc.h \
 	sysdep.h \
-	xc16x-desc.h xc16x-opc.h \
 	xstormy16-desc.h xstormy16-opc.h \
 	z8k-opc.h
 
@@ -262,11 +261,6 @@ TARGET32_LIBOPCODES_CFILES = \
 	visium-dis.c \
 	visium-opc.c \
 	wasm32-dis.c \
-	xc16x-asm.c \
-	xc16x-desc.c \
-	xc16x-dis.c \
-	xc16x-ibld.c \
-	xc16x-opc.c \
 	xstormy16-asm.c \
 	xstormy16-desc.c \
 	xstormy16-dis.c \
@@ -357,8 +351,7 @@ po/POTFILES.in: @MAINT@ Makefile
 
 CLEANFILES = \
 	stamp-epiphany stamp-fr30 stamp-frv stamp-ip2k stamp-iq2000 stamp-lm32 \
-	stamp-m32c stamp-m32r stamp-mep stamp-mt \
-	stamp-or1k stamp-xc16x stamp-xstormy16 \
+	stamp-m32c stamp-m32r stamp-mep stamp-mt stamp-or1k stamp-xstormy16 \
 	libopcodes.a stamp-lib
 
 
@@ -375,7 +368,7 @@ CGENDEPS = \
 	$(CGENDIR)/opc-opinst.scm \
 	cgen-asm.in cgen-dis.in cgen-ibld.in
 
-CGEN_CPUS = cris epiphany fr30 frv ip2k iq2000 lm32 m32c m32r mep mt or1k xc16x xstormy16
+CGEN_CPUS = cris epiphany fr30 frv ip2k iq2000 lm32 m32c m32r mep mt or1k xstormy16
 
 if CGEN_MAINT
 BPF_DEPS = stamp-bpf
@@ -391,7 +384,6 @@ M32R_DEPS = stamp-m32r
 MEP_DEPS = stamp-mep
 MT_DEPS = stamp-mt
 OR1K_DEPS = stamp-or1k
-XC16X_DEPS = stamp-xc16x
 XSTORMY16_DEPS = stamp-xstormy16
 else
 BPF_DEPS =
@@ -407,7 +399,6 @@ M32R_DEPS =
 MEP_DEPS =
 MT_DEPS =
 OR1K_DEPS =
-XC16X_DEPS =
 XSTORMY16_DEPS =
 endif
 
@@ -524,14 +515,6 @@ stamp-or1k: $(CGENDEPS) $(CPUDIR)/or1k.cpu $(CPUDIR)/or1k.opc $(CPUDIR)/or1kcomm
 	$(MAKE) run-cgen arch=or1k prefix=or1k options=opinst \
 		archfile=$(CPUDIR)/or1k.cpu opcfile=$(CPUDIR)/or1k.opc extrafiles=opinst
 
-$(srcdir)/xc16x-desc.h $(srcdir)/xc16x-desc.c $(srcdir)/xc16x-opc.h $(srcdir)/xc16x-opc.c $(srcdir)/xc16x-ibld.c $(srcdir)/xc16x-asm.c $(srcdir)/xc16x-dis.c: $(XC16X_DEPS)
-	@true
-stamp-xc16x: $(CGENDEPS) $(CPUDIR)/xc16x.cpu $(CPUDIR)/xc16x.opc
-	$(MAKE) run-cgen arch=xc16x prefix=xc16x options= \
-		archfile=$(CPUDIR)/xc16x.cpu \
-		opcfile=$(CPUDIR)/xc16x.opc \
-		extrafiles=
-
 $(srcdir)/xstormy16-desc.h $(srcdir)/xstormy16-desc.c $(srcdir)/xstormy16-opc.h $(srcdir)/xstormy16-opc.c $(srcdir)/xstormy16-ibld.c $(srcdir)/xstormy16-asm.c $(srcdir)/xstormy16-dis.c: $(XSTORMY16_DEPS)
 	@true
 stamp-xstormy16: $(CGENDEPS) $(CPUDIR)/xstormy16.cpu $(CPUDIR)/xstormy16.opc
@@ -569,18 +552,20 @@ i386-gen$(EXEEXT_FOR_BUILD): i386-gen.o $(BUILD_LIB_DEPS)
 i386-gen.o: i386-gen.c i386-opc.h $(srcdir)/../include/opcode/i386.h \
 	$(INCDIR)/ansidecl.h $(INCDIR)/getopt.h $(INCDIR)/hashtab.h \
 	$(INCDIR)/libiberty.h $(INCDIR)/opcode/i386.h $(INCDIR)/safe-ctype.h \
-	config.h i386-opc.h sysdep.h
+	config.h sysdep.h
 	$(COMPILE_FOR_BUILD) -c $(srcdir)/i386-gen.c
 
-$(srcdir)/i386-tbl.h: $(srcdir)/i386-init.h
-	@echo $@
-
-$(srcdir)/i386-init.h: @MAINT@ i386-gen$(EXEEXT_FOR_BUILD) i386-opc.tbl i386-reg.tbl i386-opc.h
-	$(CPP) -P $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) - \
+# i386-gen will generate both headers in one go.  Use a pattern rule to properly
+# express this, with the inner dash ('-') arbitrarily chosen to be the stem.
+$(srcdir)/i386%tbl.h $(srcdir)/i386%init.h: @MAINT@ i386-gen$(EXEEXT_FOR_BUILD) i386-opc.tbl i386-reg.tbl i386-opc.h
+	$(AM_V_GEN)$(CPP) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) - \
 		< $(srcdir)/i386-opc.tbl \
 		| ./i386-gen$(EXEEXT_FOR_BUILD) --srcdir $(srcdir)
 
 i386-opc.lo: $(srcdir)/i386-tbl.h
+# While not really a dependency, specify i386-init.h here as well to make sure
+# it is generated even if i386-tbl.h is present and up-to-date.
+i386-opc.lo: $(srcdir)/i386-init.h
 
 ia64-gen$(EXEEXT_FOR_BUILD): ia64-gen.o $(BUILD_LIB_DEPS)
 	$(AM_V_CCLD)$(LINK_FOR_BUILD) ia64-gen.o $(BUILD_LIBS)

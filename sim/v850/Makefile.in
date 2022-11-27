@@ -23,12 +23,6 @@ SIM_OBJS = \
 	itable.o semantics.o idecode.o icache.o engine.o irun.o support.o \
 	sim-resume.o
 
-# List of extra dependencies.
-# Generally this consists of simulator specific files included by sim-main.h.
-SIM_EXTRA_DEPS = v850_sim.h sim-main.h
-
-# List of flags to always pass to $(CC)
-SIM_EXTRA_CFLAGS = \
-	-DDEBUG
+SIM_EXTRA_CFLAGS = -DWITH_TARGET_WORD_BITSIZE=32 -DWITH_TARGET_WORD_MSB=31
 
 ## COMMON_POST_CONFIG_FRAG

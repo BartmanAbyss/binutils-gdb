@@ -232,6 +232,9 @@ enum language
 #define LANGUAGE_BITS 5
 gdb_static_assert (nr_languages <= (1 << LANGUAGE_BITS));
 
+/* The number of bytes needed to represent all languages.  */
+#define LANGUAGE_BYTES ((LANGUAGE_BITS + HOST_CHAR_BIT - 1) / HOST_CHAR_BIT)
+
 enum precision_type
   {
     single_precision,
@@ -281,7 +284,7 @@ enum return_value_convention
 
 struct symtab;
 struct breakpoint;
-struct frame_info;
+class frame_info_ptr;
 struct gdbarch;
 struct value;
 
@@ -319,8 +322,6 @@ extern void print_prompt (void);
 
 struct ui;
 
-extern int input_interactive_p (struct ui *);
-
 extern bool info_verbose;
 
 /* From printcmd.c */
@@ -339,12 +340,17 @@ extern const char *pc_prefix (CORE_ADDR);
 /* * Process memory area starting at ADDR with length SIZE.  Area is
    readable iff READ is non-zero, writable if WRITE is non-zero,
    executable if EXEC is non-zero.  Area is possibly changed against
-   its original file based copy if MODIFIED is non-zero.  DATA is
-   passed without changes from a caller.  */
+   its original file based copy if MODIFIED is non-zero.
+
+   MEMORY_TAGGED is true if the memory region contains memory tags, false
+   otherwise.
+
+   DATA is passed without changes from a caller.  */
 
 typedef int (*find_memory_region_ftype) (CORE_ADDR addr, unsigned long size,
 					 int read, int write, int exec,
-					 int modified, void *data);
+					 int modified, bool memory_tagged,
+					 void *data);
 
 /* * Possible lvalue types.  Like enum language, this should be in
    value.h, but needs to be here for the same reason.  */

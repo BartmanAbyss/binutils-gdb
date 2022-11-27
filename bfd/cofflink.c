@@ -896,10 +896,8 @@ _bfd_coff_final_link (bfd *abfd,
 	      asymbol *sym = bfd_get_outsymbols (sub) [i];
 	      file_ptr pos;
 	      struct internal_syment isym;
-	      union internal_auxent iaux;
-	      bfd_size_type string_size = 0, indx;
 	      bfd_vma written = 0;
-	      bool rewrite = false, hash;
+	      bool rewrite = false;
 
 	      if (! (sym->flags & BSF_LOCAL)
 		  || (sym->flags & (BSF_SECTION_SYM | BSF_DEBUGGING_RELOC
@@ -925,53 +923,11 @@ _bfd_coff_final_link (bfd *abfd,
 					     * symesz;
 	      if (bfd_seek (abfd, pos, SEEK_SET) != 0)
 		goto error_return;
-	      if (! coff_write_alien_symbol(abfd, sym, &isym, &iaux, &written,
-					    &string_size, NULL, NULL))
+	      if (! coff_write_alien_symbol(abfd, sym, &isym, &written,
+					    flaginfo.strtab,
+					    !flaginfo.info->traditional_format,
+					    NULL, NULL))
 		goto error_return;
-
-	      hash = !flaginfo.info->traditional_format;
-
-	      if (string_size >= 6 && isym.n_sclass == C_FILE
-		  && ! isym._n._n_n._n_zeroes && isym.n_numaux)
-		{
-		  indx = _bfd_stringtab_add (flaginfo.strtab, ".file", hash,
-					     false);
-		  if (indx == (bfd_size_type) -1)
-		    goto error_return;
-		  isym._n._n_n._n_offset = STRING_SIZE_SIZE + indx;
-		  bfd_coff_swap_sym_out (abfd, &isym, flaginfo.outsyms);
-		  if (bfd_seek (abfd, pos, SEEK_SET) != 0
-		      || bfd_bwrite (flaginfo.outsyms, symesz,
-				     abfd) != symesz)
-		    goto error_return;
-		  string_size -= 6;
-		}
-
-	      if (string_size)
-		{
-		  indx = _bfd_stringtab_add (flaginfo.strtab,
-					     bfd_asymbol_name (sym), hash,
-					     false);
-		  if (indx == (bfd_size_type) -1)
-		    goto error_return;
-		  if (isym.n_sclass != C_FILE)
-		    {
-		      isym._n._n_n._n_offset = STRING_SIZE_SIZE + indx;
-		      bfd_coff_swap_sym_out (abfd, &isym, flaginfo.outsyms);
-		      rewrite = true;
-		    }
-		  else
-		    {
-		      BFD_ASSERT (isym.n_numaux == 1);
-		      iaux.x_file.x_n.x_n.x_offset = STRING_SIZE_SIZE + indx;
-		      bfd_coff_swap_aux_out (abfd, &iaux, isym.n_type, C_FILE,
-					     0, 1, flaginfo.outsyms + symesz);
-		      if (bfd_seek (abfd, pos + symesz, SEEK_SET) != 0
-			  || bfd_bwrite (flaginfo.outsyms + symesz, symesz,
-					 abfd) != symesz)
-			goto error_return;
-		    }
-		}
 
 	      if (isym.n_sclass == C_FILE)
 		{
@@ -2606,14 +2562,10 @@ _bfd_coff_write_global_sym (struct bfd_hash_entry *bh, void *data)
 	if (isym.n_value > (bfd_vma) 0xffffffff)
 	  {
 	    if (! h->root.linker_def)
-	      {
-		char value_buf[128];
-
-		sprintf_vma (value_buf, isym.n_value);
-		_bfd_error_handler
-		  (_("%pB: stripping non-representable symbol '%s' (value 0x%s)"),
-		   output_bfd, h->root.root.string, value_buf);
-	      }
+	      _bfd_error_handler
+		(_("%pB: stripping non-representable symbol '%s' "
+		   "(value 0x%" PRIx64 ")"),
+		 output_bfd, h->root.root.string, isym.n_value);
 	    return true;
 	  }
 #endif
@@ -3009,8 +2961,10 @@ _bfd_coff_generic_relocate_section (bfd *output_bfd,
 	      sec = sections[symndx];
 
 	      /* PR 19623: Relocations against symbols in
-		 the absolute sections should ignored.  */
-	      if (bfd_is_abs_section (sec))
+		 the absolute sections should ignored.
+		 PR 29807: Also ignore relocs against file symbols or
+		 other such nonsense in fuzzed objects.  */
+	      if (sec == NULL || bfd_is_abs_section (sec))
 		continue;
 
 	      val = (sec->output_section->vma

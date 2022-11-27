@@ -19,7 +19,7 @@ dnl along with this program.  If not, see <http://www.gnu.org/licenses/>.
 dnl Process this file with autoconf to produce a configure script.
 
 AC_INIT
-AC_CONFIG_MACRO_DIRS([../config])
+AC_CONFIG_MACRO_DIRS([.. ../config])
 AC_CONFIG_SRCDIR([main.c])
 AC_CONFIG_HEADERS(config.h:config.in, [echo > stamp-h])
 AM_MAINTAINER_MODE
@@ -45,6 +45,13 @@ AC_CANONICAL_TARGET
 ACX_NONCANONICAL_TARGET
 
 AC_ARG_PROGRAM
+
+# We require libtool to link with the in-tree libtool libraries
+# the proper way.
+LT_INIT
+# ... and we need it soon, since it is used by some of the
+# link tests in the configure script.
+LT_OUTPUT
 
 # We require a C++11 compiler.  Check if one is available, and if
 # necessary, set CXX_DIALECT to some -std=xxx switch.
@@ -259,15 +266,10 @@ if test "x$targ_defvec" != x; then
 fi
 
 # Enable MI.
-AC_ARG_ENABLE(gdbmi,
-AS_HELP_STRING([--disable-gdbmi], [disable machine-interface (MI)]),
-  [case $enableval in
-    yes | no)
-      ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-gdbmi]) ;;
-  esac],
-  [enable_gdbmi=yes])
+AC_ARG_ENABLE([gdbmi],
+	      [AS_HELP_STRING([--disable-gdbmi], [disable machine-interface (MI)])],
+	      [GDB_CHECK_YES_NO_VAL([$enableval], [--enable-gdbmi])],
+	      [enable_gdbmi=yes])
 if test x"$enable_gdbmi" = xyes; then
   if test -d "$srcdir/mi"; then
     CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_MI_OBS)"
@@ -279,28 +281,20 @@ fi
 
 # Enable TUI.
 AC_ARG_ENABLE(tui,
-AS_HELP_STRING([--enable-tui], [enable full-screen terminal user interface (TUI)]),
-  [case $enableval in
-    yes | no | auto)
-      ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-tui]) ;;
-  esac],enable_tui=auto)
+AS_HELP_STRING([--enable-tui],
+	       [enable full-screen terminal user interface (TUI)]),
+	       [GDB_CHECK_YES_NO_AUTO_VAL([$enableval], [--enable-tui])],
+	       [enable_tui=auto])
 
 # Enable gdbtk.
-AC_ARG_ENABLE(gdbtk,
-AS_HELP_STRING([--enable-gdbtk], [enable gdbtk graphical user interface (GUI)]),
-  [case $enableval in
-    yes | no)
-      ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-gdbtk]) ;;
-  esac],
-  [if test -d "$srcdir/gdbtk"; then
-    enable_gdbtk=yes
-  else
-    enable_gdbtk=no
-  fi])
+AC_ARG_ENABLE([gdbtk],
+	      [AS_HELP_STRING([--enable-gdbtk], [enable gdbtk graphical user interface (GUI)])],
+	      [GDB_CHECK_YES_NO_VAL([$enableval], [--enable-gdbtk])],
+	      [if test -d "$srcdir/gdbtk"; then
+		 enable_gdbtk=yes
+	       else
+		 enable_gdbtk=no
+	       fi])
 # We unconditionally disable gdbtk tests on selected platforms.
 case $host_os in
   go32* | windows*)
@@ -359,15 +353,10 @@ if test "$opt_curses" = "yes"; then
 fi
 
 # Profiling support.
-AC_ARG_ENABLE(profiling,
-AS_HELP_STRING([--enable-profiling], [enable profiling of GDB]),
-  [case $enableval in
-    yes | no)
-      ;;
-    *)
-      AC_MSG_ERROR([bad value $enableval for --enable-profile]) ;;
-  esac],
- [enable_profiling=no])
+AC_ARG_ENABLE([profiling],
+	      [AS_HELP_STRING([--enable-profiling], [enable profiling of GDB])],
+	      [GDB_CHECK_YES_NO_VAL([$enableval], [--enable-profiling])],
+	      [enable_profiling=no])
 
 AC_CHECK_FUNCS(monstartup _mcleanup)
 AC_CACHE_CHECK(
@@ -478,8 +467,10 @@ AC_SEARCH_LIBS(gethostbyname, nsl)
 # Some systems (e.g. Solaris) have `socketpair' in libsocket.
 AC_SEARCH_LIBS(socketpair, socket)
 
-# Link in zlib if we can.  This allows us to read compressed debug sections.
+# Link in zlib/zstd if we can.  This allows us to read compressed debug
+# sections.
 AM_ZLIB
+AC_ZSTD
 
 AM_ICONV
 
@@ -836,7 +827,8 @@ else
     case "${with_python}" in
     yes | auto)
       if test "${build}" = "${host}"; then
-        AC_PATH_PROG(python_prog_path, python, missing)
+        # Look first for 'python', then 'python3'.
+        AC_PATH_PROGS(python_prog_path, [python python3], missing)
         if test "${python_prog_path}" = missing; then
           python_prog=missing
         else
@@ -1221,15 +1213,11 @@ AM_CONDITIONAL(HAVE_GUILE, test "${have_libguile}" != no)
 SRCHIGH_LIBS=
 SRCHIGH_CFLAGS=
 
-AC_ARG_ENABLE(source-highlight,
-  AS_HELP_STRING([--enable-source-highlight],
-    [enable source-highlight for source listings]),
-  [case "${enableval}" in
-  yes)  enable_source_highlight=yes ;;
-  no)   enable_source_highlight=no  ;;
-  *)    AC_MSG_ERROR(bad value ${enableval} for source-highlight option) ;;
-esac],
-[enable_source_highlight=auto])
+AC_ARG_ENABLE([source-highlight],
+	      [AS_HELP_STRING([--enable-source-highlight],
+			      [enable source-highlight for source listings])],
+	      [GDB_CHECK_YES_NO_AUTO_VAL([$enableval], [--enable-source-highlight])],
+	      [enable_source_highlight=auto])
 
 if test "${enable_source_highlight}" != "no"; then
   AC_MSG_CHECKING([for the source-highlight library])
@@ -2129,18 +2117,14 @@ fi
 
 # Setup possible use of libbacktrace.
 AC_ARG_ENABLE([libbacktrace],
-[AS_HELP_STRING([--enable-libbacktrace],
-                [use libbacktrace to write a backtrace after a fatal signal.])],
-[case "${enableval}" in
-  yes)  enable_libbacktrace=yes ;;
-  no)   enable_libbacktrace=no  ;;
-  *)    AC_MSG_ERROR(bad value ${enableval} for --enable-libbacktrace option) ;;
-esac],
-enable_libbacktrace=yes)
+	      [AS_HELP_STRING([--enable-libbacktrace],
+			      [use libbacktrace to write a backtrace after a fatal signal.])],
+	      [GDB_CHECK_YES_NO_VAL([$enableval], [--enable-libbacktrace])],
+	      [enable_libbacktrace=yes])
 
-if test "${enable_libbacktrace}" == "yes"; then
+if test "${enable_libbacktrace}" = "yes"; then
   LIBBACKTRACE_INC="-I$srcdir/../libbacktrace/ -I../libbacktrace/"
-  LIBBACKTRACE_LIB=../libbacktrace/.libs/libbacktrace.a
+  LIBBACKTRACE_LIB=../libbacktrace/libbacktrace.la
   AC_DEFINE(HAVE_LIBBACKTRACE, 1, [Define if libbacktrace is being used.])
 else
   LIBBACKTRACE_INC=
@@ -2199,15 +2183,10 @@ AC_ARG_WITH(xxhash,
   [], [with_xxhash=auto])
 
 GCC_ENABLE([libctf], [yes], [], [Handle .ctf type-info sections])
-if test x${enable_static} = xno; then
-  LIBCTF="-Wl,--rpath,../libctf/.libs ../libctf/.libs/libctf.so"
-  CTF_DEPS="../libctf/.libs/libctf.so"
-else
-  LIBCTF="../libctf/.libs/libctf.a"
-  CTF_DEPS="$LIBCTF"
-fi
 if test "${enable_libctf}" = yes; then
   AC_DEFINE(ENABLE_LIBCTF, 1, [Handle .ctf type-info sections])
+  LIBCTF="../libctf/libctf.la"
+  CTF_DEPS="../libctf/libctf.la"
 else
   LIBCTF=
   CTF_DEPS=

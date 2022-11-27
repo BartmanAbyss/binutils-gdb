@@ -40,7 +40,7 @@
 #include "exec.h"
 #include "inline-frame.h"
 #include "tracepoint.h"
-#include "gdb/fileio.h"
+#include "gdbsupport/fileio.h"
 #include "gdbsupport/agent.h"
 #include "auxv.h"
 #include "target-debug.h"
@@ -423,7 +423,7 @@ target_extra_thread_info (thread_info *tp)
 
 /* See target.h.  */
 
-char *
+const char *
 target_pid_to_exec_file (int pid)
 {
   return current_inferior ()->top_target ()->pid_to_exec_file (pid);
@@ -867,8 +867,7 @@ add_target (const target_info &t, target_open_ftype *func,
 
   auto &func_slot = target_factories[&t];
   if (func_slot != nullptr)
-    internal_error (__FILE__, __LINE__,
-		    _("target already added (\"%s\")."), t.shortname);
+    internal_error (_("target already added (\"%s\")."), t.shortname);
   func_slot = func;
 
   if (targetlist == NULL)
@@ -1203,8 +1202,7 @@ target_stack::unpush (target_ops *t)
   strata stratum = t->stratum ();
 
   if (stratum == dummy_stratum)
-    internal_error (__FILE__, __LINE__,
-		    _("Attempt to unpush the dummy target"));
+    internal_error (_("Attempt to unpush the dummy target"));
 
   /* Look for the specified target.  Note that a target can only occur
      once in the target stack.  */
@@ -1243,8 +1241,7 @@ unpush_target_and_assert (struct target_ops *target)
       gdb_printf (gdb_stderr,
 		  "pop_all_targets couldn't find target %s\n",
 		  target->shortname ());
-      internal_error (__FILE__, __LINE__,
-		      _("failed internal consistency check"));
+      internal_error (_("failed internal consistency check"));
     }
 }
 
@@ -2675,7 +2672,7 @@ target_resume (ptid_t scope_ptid, int step, enum gdb_signal signal)
   clear_inline_frame_state (curr_target, scope_ptid);
 
   if (target_can_async_p ())
-    target_async (1);
+    target_async (true);
 }
 
 /* See target.h.  */
@@ -2713,8 +2710,7 @@ default_follow_fork (struct target_ops *self, inferior *child_inf,
 		     bool follow_child, bool detach_fork)
 {
   /* Some target returned a fork event, but did not know how to follow it.  */
-  internal_error (__FILE__, __LINE__,
-		  _("could not find a target to follow fork"));
+  internal_error (_("could not find a target to follow fork"));
 }
 
 /* See target.h.  */
@@ -2753,8 +2749,7 @@ target_follow_exec (inferior *follow_inf, ptid_t ptid,
 static void
 default_mourn_inferior (struct target_ops *self)
 {
-  internal_error (__FILE__, __LINE__,
-		  _("could not find a target to follow mourn inferior"));
+  internal_error (_("could not find a target to follow mourn inferior"));
 }
 
 void
@@ -2849,7 +2844,7 @@ target_require_runnable (void)
   /* This function is only called if the target is running.  In that
      case there should have been a process_stratum target and it
      should either know how to create inferiors, or not...  */
-  internal_error (__FILE__, __LINE__, _("No targets found"));
+  internal_error (_("No targets found"));
 }
 
 /* Whether GDB is allowed to fall back to the default run target for
@@ -2877,8 +2872,7 @@ void
 set_native_target (target_ops *target)
 {
   if (the_native_target != NULL)
-    internal_error (__FILE__, __LINE__,
-		    _("native target already set (\"%s\")."),
+    internal_error (_("native target already set (\"%s\")."),
 		    the_native_target->longname ());
 
   the_native_target = target;
@@ -3206,7 +3200,7 @@ fileio_fd_to_fh (int fd)
 int
 target_ops::fileio_open (struct inferior *inf, const char *filename,
 			 int flags, int mode, int warn_if_slow,
-			 int *target_errno)
+			 fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
@@ -3214,7 +3208,7 @@ target_ops::fileio_open (struct inferior *inf, const char *filename,
 
 int
 target_ops::fileio_pwrite (int fd, const gdb_byte *write_buf, int len,
-			   ULONGEST offset, int *target_errno)
+			   ULONGEST offset, fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
@@ -3222,21 +3216,21 @@ target_ops::fileio_pwrite (int fd, const gdb_byte *write_buf, int len,
 
 int
 target_ops::fileio_pread (int fd, gdb_byte *read_buf, int len,
-			  ULONGEST offset, int *target_errno)
+			  ULONGEST offset, fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
 }
 
 int
-target_ops::fileio_fstat (int fd, struct stat *sb, int *target_errno)
+target_ops::fileio_fstat (int fd, struct stat *sb, fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
 }
 
 int
-target_ops::fileio_close (int fd, int *target_errno)
+target_ops::fileio_close (int fd, fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
@@ -3244,7 +3238,7 @@ target_ops::fileio_close (int fd, int *target_errno)
 
 int
 target_ops::fileio_unlink (struct inferior *inf, const char *filename,
-			   int *target_errno)
+			   fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
@@ -3252,7 +3246,7 @@ target_ops::fileio_unlink (struct inferior *inf, const char *filename,
 
 gdb::optional<std::string>
 target_ops::fileio_readlink (struct inferior *inf, const char *filename,
-			     int *target_errno)
+			     fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return {};
@@ -3262,7 +3256,7 @@ target_ops::fileio_readlink (struct inferior *inf, const char *filename,
 
 int
 target_fileio_open (struct inferior *inf, const char *filename,
-		    int flags, int mode, bool warn_if_slow, int *target_errno)
+		    int flags, int mode, bool warn_if_slow, fileio_error *target_errno)
 {
   for (target_ops *t = default_fileio_target (); t != NULL; t = t->beneath ())
     {
@@ -3296,15 +3290,15 @@ target_fileio_open (struct inferior *inf, const char *filename,
 
 int
 target_fileio_pwrite (int fd, const gdb_byte *write_buf, int len,
-		      ULONGEST offset, int *target_errno)
+		      ULONGEST offset, fileio_error *target_errno)
 {
   fileio_fh_t *fh = fileio_fd_to_fh (fd);
   int ret = -1;
 
   if (fh->is_closed ())
-    *target_errno = EBADF;
+    *target_errno = FILEIO_EBADF;
   else if (fh->target == NULL)
-    *target_errno = EIO;
+    *target_errno = FILEIO_EIO;
   else
     ret = fh->target->fileio_pwrite (fh->target_fd, write_buf,
 				     len, offset, target_errno);
@@ -3322,15 +3316,15 @@ target_fileio_pwrite (int fd, const gdb_byte *write_buf, int len,
 
 int
 target_fileio_pread (int fd, gdb_byte *read_buf, int len,
-		     ULONGEST offset, int *target_errno)
+		     ULONGEST offset, fileio_error *target_errno)
 {
   fileio_fh_t *fh = fileio_fd_to_fh (fd);
   int ret = -1;
 
   if (fh->is_closed ())
-    *target_errno = EBADF;
+    *target_errno = FILEIO_EBADF;
   else if (fh->target == NULL)
-    *target_errno = EIO;
+    *target_errno = FILEIO_EIO;
   else
     ret = fh->target->fileio_pread (fh->target_fd, read_buf,
 				    len, offset, target_errno);
@@ -3347,15 +3341,15 @@ target_fileio_pread (int fd, gdb_byte *read_buf, int len,
 /* See target.h.  */
 
 int
-target_fileio_fstat (int fd, struct stat *sb, int *target_errno)
+target_fileio_fstat (int fd, struct stat *sb, fileio_error *target_errno)
 {
   fileio_fh_t *fh = fileio_fd_to_fh (fd);
   int ret = -1;
 
   if (fh->is_closed ())
-    *target_errno = EBADF;
+    *target_errno = FILEIO_EBADF;
   else if (fh->target == NULL)
-    *target_errno = EIO;
+    *target_errno = FILEIO_EIO;
   else
     ret = fh->target->fileio_fstat (fh->target_fd, sb, target_errno);
 
@@ -3369,13 +3363,13 @@ target_fileio_fstat (int fd, struct stat *sb, int *target_errno)
 /* See target.h.  */
 
 int
-target_fileio_close (int fd, int *target_errno)
+target_fileio_close (int fd, fileio_error *target_errno)
 {
   fileio_fh_t *fh = fileio_fd_to_fh (fd);
   int ret = -1;
 
   if (fh->is_closed ())
-    *target_errno = EBADF;
+    *target_errno = FILEIO_EBADF;
   else
     {
       if (fh->target != NULL)
@@ -3397,7 +3391,7 @@ target_fileio_close (int fd, int *target_errno)
 
 int
 target_fileio_unlink (struct inferior *inf, const char *filename,
-		      int *target_errno)
+		      fileio_error *target_errno)
 {
   for (target_ops *t = default_fileio_target (); t != NULL; t = t->beneath ())
     {
@@ -3423,7 +3417,7 @@ target_fileio_unlink (struct inferior *inf, const char *filename,
 
 gdb::optional<std::string>
 target_fileio_readlink (struct inferior *inf, const char *filename,
-			int *target_errno)
+			fileio_error *target_errno)
 {
   for (target_ops *t = default_fileio_target (); t != NULL; t = t->beneath ())
     {
@@ -3461,7 +3455,7 @@ public:
   {
     if (m_fd >= 0)
       {
-	int target_errno;
+	fileio_error target_errno;
 
 	target_fileio_close (m_fd, &target_errno);
       }
@@ -3493,7 +3487,7 @@ target_fileio_read_alloc_1 (struct inferior *inf, const char *filename,
   size_t buf_alloc, buf_pos;
   gdb_byte *buf;
   LONGEST n;
-  int target_errno;
+  fileio_error target_errno;
 
   scoped_target_fd fd (target_fileio_open (inf, filename, FILEIO_O_RDONLY,
 					   0700, false, &target_errno));
@@ -4352,7 +4346,7 @@ maintenance_print_target_stack (const char *cmd, int from_tty)
 /* See target.h.  */
 
 void
-target_async (int enable)
+target_async (bool enable)
 {
   /* If we are trying to enable async mode then it must be the case that
      async mode is possible for this target.  */

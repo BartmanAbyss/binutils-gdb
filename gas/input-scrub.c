@@ -139,6 +139,7 @@ input_scrub_reinit (void)
   input_file_begin ();		/* Reinitialize! */
   logical_input_line = -1u;
   logical_input_file = NULL;
+  sb_index = -1;
 
   buffer_length = input_file_buffer_size () * 2;
   buffer_start = XNEWVEC (char, BEFORE_SIZE + AFTER_SIZE + 1 + buffer_length);
@@ -171,8 +172,6 @@ input_scrub_push (char *saved_position)
   memcpy (saved->save_source, save_source, sizeof (save_source));
   saved->next_saved_file = next_saved_file;
   saved->input_file_save = input_file_push ();
-
-  sb_index = -1;
 
   input_scrub_reinit ();
 
@@ -279,9 +278,11 @@ input_scrub_include_sb (sb *from, char *position, enum expansion expansion)
 
   next_saved_file = input_scrub_push (position);
 
-  /* Allocate sufficient space: from->len + optional newline.  */
+  /* Allocate sufficient space: from->len plus optional newline
+     plus two ".linefile " directives, plus a little more for other
+     expansion.  */
   newline = from->len >= 1 && from->ptr[0] != '\n';
-  sb_build (&from_sb, from->len + newline);
+  sb_build (&from_sb, from->len + newline + 2 * sizeof (".linefile") + 30);
   if (expansion == expanding_repeat && from_sb_expansion >= expanding_macro)
     expansion = expanding_nested;
   from_sb_expansion = expansion;
@@ -468,13 +469,15 @@ new_logical_line_flags (const char *fname, /* DON'T destroy it!  We point to it!
       /* FIXME: we could check that include nesting is correct.  */
       break;
     case 1 << 3:
-      if (line_number < 0 || fname != NULL || next_saved_file == NULL)
+      if (line_number < 0 || fname != NULL)
 	abort ();
       /* PR gas/16908 workaround: Ignore updates when nested inside a macro
 	 expansion.  */
       if (from_sb_expansion == expanding_nested)
 	return;
-      if (next_saved_file->logical_input_file)
+      if (next_saved_file == NULL)
+	fname = physical_input_file;
+      else if (next_saved_file->logical_input_file)
 	fname = next_saved_file->logical_input_file;
       else
 	fname = next_saved_file->physical_input_file;

@@ -38,6 +38,7 @@
 #include "obstack.h"
 #include "ecoff.h"
 #include "dw2gencfi.h"
+#include "codeview.h"
 #include "wchar.h"
 
 #include <limits.h>
@@ -248,6 +249,7 @@ static void s_reloc (int);
 static int hex_float (int, char *);
 static segT get_known_segmented_expression (expressionS * expP);
 static void pobegin (void);
+static void poend (void);
 static size_t get_non_macro_line_sb (sb *);
 static void generate_file_debug (void);
 static char *_find_end_of_line (char *, int, int, int);
@@ -260,9 +262,6 @@ read_begin (void)
   pobegin ();
   obj_read_begin_hook ();
 
-  /* Something close -- but not too close -- to a multiple of 1024.
-     The debugging malloc I'm using has 24 bytes of overhead.  */
-  obstack_begin (&notes, chunksize);
   obstack_begin (&cond_obstack, chunksize);
 
 #ifndef tc_line_separator_chars
@@ -275,6 +274,13 @@ read_begin (void)
 
   if (flag_mri)
     lex_type['?'] = 3;
+}
+
+void
+read_end (void)
+{
+  poend ();
+  _obstack_free (&cond_obstack, NULL);
 }
 
 #ifndef TC_ADDRESS_BYTES
@@ -295,53 +301,7 @@ address_bytes (void)
 
 /* Set up pseudo-op tables.  */
 
-struct po_entry
-{
-  const char *poc_name;
-
-  const pseudo_typeS *pop;
-};
-
-typedef struct po_entry po_entry_t;
-
-/* Hash function for a po_entry.  */
-
-static hashval_t
-hash_po_entry (const void *e)
-{
-  const po_entry_t *entry = (const po_entry_t *) e;
-  return htab_hash_string (entry->poc_name);
-}
-
-/* Equality function for a po_entry.  */
-
-static int
-eq_po_entry (const void *a, const void *b)
-{
-  const po_entry_t *ea = (const po_entry_t *) a;
-  const po_entry_t *eb = (const po_entry_t *) b;
-
-  return strcmp (ea->poc_name, eb->poc_name) == 0;
-}
-
-static po_entry_t *
-po_entry_alloc (const char *poc_name, const pseudo_typeS *pop)
-{
-  po_entry_t *entry = XNEW (po_entry_t);
-  entry->poc_name = poc_name;
-  entry->pop = pop;
-  return entry;
-}
-
-static const pseudo_typeS *
-po_entry_find (htab_t table, const char *poc_name)
-{
-  po_entry_t needle = { poc_name, NULL };
-  po_entry_t *entry = htab_find (table, &needle);
-  return entry != NULL ? entry->pop : NULL;
-}
-
-static struct htab *po_hash;
+static htab_t po_hash;
 
 static const pseudo_typeS potable[] = {
   {"abort", s_abort, 0},
@@ -563,10 +523,8 @@ pop_insert (const pseudo_typeS *table)
   const pseudo_typeS *pop;
   for (pop = table; pop->poc_name; pop++)
     {
-      po_entry_t *elt = po_entry_alloc (pop->poc_name, pop);
-      if (htab_insert (po_hash, elt, 0) != NULL)
+      if (str_hash_insert (po_hash, pop->poc_name, pop, 0) != NULL)
 	{
-	  free (elt);
 	  if (!pop_override_ok)
 	    as_fatal (_("error constructing %s pseudo-op table"),
 		      pop_table_name);
@@ -589,8 +547,7 @@ pop_insert (const pseudo_typeS *table)
 static void
 pobegin (void)
 {
-  po_hash = htab_create_alloc (16, hash_po_entry, eq_po_entry, NULL,
-			       xcalloc, xfree);
+  po_hash = str_htab_create ();
 
   /* Do the target-specific pseudo ops.  */
   pop_table_name = "md";
@@ -610,6 +567,12 @@ pobegin (void)
   pop_override_ok = 1;
   cfi_pop_insert ();
 }
+
+static void
+poend (void)
+{
+  htab_delete (po_hash);
+}
 
 #define HANDLE_CONDITIONAL_ASSEMBLY(num_read)				\
   if (ignore_input ())							\
@@ -622,25 +585,6 @@ pobegin (void)
 			   : eol + 1;					\
       continue;								\
     }
-
-/* This function is used when scrubbing the characters between #APP
-   and #NO_APP.  */
-
-static char *scrub_string;
-static char *scrub_string_end;
-
-static size_t
-scrub_from_string (char *buf, size_t buflen)
-{
-  size_t copy;
-
-  copy = scrub_string_end - scrub_string;
-  if (copy > buflen)
-    copy = buflen;
-  memcpy (buf, scrub_string, copy);
-  scrub_string += copy;
-  return copy;
-}
 
 /* Helper function of read_a_source_file, which tries to expand a macro.  */
 static int
@@ -927,7 +871,7 @@ read_a_source_file (const char *name)
 		  if (s != last_eol)
 		    {
 		      char *copy;
-		      int len;
+		      size_t len;
 
 		      last_eol = s;
 		      /* Copy it for safe keeping.  Also give an indication of
@@ -1118,7 +1062,7 @@ read_a_source_file (const char *name)
 		    {
 		      /* The MRI assembler uses pseudo-ops without
 			 a period.  */
-		      pop = po_entry_find (po_hash, s);
+		      pop = str_hash_find (po_hash, s);
 		      if (pop != NULL && pop->poc_handler == NULL)
 			pop = NULL;
 		    }
@@ -1133,7 +1077,7 @@ read_a_source_file (const char *name)
 			 already know that the pseudo-op begins with a '.'.  */
 
 		      if (pop == NULL)
-			pop = po_entry_find (po_hash, s + 1);
+			pop = str_hash_find (po_hash, s + 1);
 		      if (pop && !pop->poc_handler)
 			pop = NULL;
 
@@ -1312,10 +1256,7 @@ read_a_source_file (const char *name)
 	    {			/* Its a comment.  Better say APP or NO_APP.  */
 	      sb sbuf;
 	      char *ends;
-	      char *new_buf;
-	      char *new_tmp;
-	      unsigned int new_length;
-	      char *tmp_buf = 0;
+	      size_t len;
 
 	      s = input_line_pointer;
 	      if (!startswith (s, "APP\n"))
@@ -1328,91 +1269,32 @@ read_a_source_file (const char *name)
 	      s += 4;
 
 	      ends = strstr (s, "#NO_APP\n");
+	      len = ends ? ends - s : buffer_limit - s;
 
+	      sb_build (&sbuf, len + 100);
+	      sb_add_buffer (&sbuf, s, len);
 	      if (!ends)
 		{
-		  unsigned int tmp_len;
-		  unsigned int num;
-
 		  /* The end of the #APP wasn't in this buffer.  We
 		     keep reading in buffers until we find the #NO_APP
 		     that goes with this #APP  There is one.  The specs
 		     guarantee it...  */
-		  tmp_len = buffer_limit - s;
-		  tmp_buf = XNEWVEC (char, tmp_len + 1);
-		  memcpy (tmp_buf, s, tmp_len);
 		  do
 		    {
-		      new_tmp = input_scrub_next_buffer (&buffer);
-		      if (!new_tmp)
+		      buffer_limit = input_scrub_next_buffer (&buffer);
+		      if (!buffer_limit)
 			break;
-		      else
-			buffer_limit = new_tmp;
-		      input_line_pointer = buffer;
 		      ends = strstr (buffer, "#NO_APP\n");
-		      if (ends)
-			num = ends - buffer;
-		      else
-			num = buffer_limit - buffer;
-
-		      tmp_buf = XRESIZEVEC (char, tmp_buf, tmp_len + num);
-		      memcpy (tmp_buf + tmp_len, buffer, num);
-		      tmp_len += num;
+		      len = ends ? ends - buffer : buffer_limit - buffer;
+		      sb_add_buffer (&sbuf, buffer, len);
 		    }
 		  while (!ends);
-
-		  input_line_pointer = ends ? ends + 8 : NULL;
-
-		  s = tmp_buf;
-		  ends = s + tmp_len;
-
-		}
-	      else
-		{
-		  input_line_pointer = ends + 8;
 		}
 
-	      scrub_string = s;
-	      scrub_string_end = ends;
-
-	      new_length = ends - s;
-	      new_buf = XNEWVEC (char, new_length);
-	      new_tmp = new_buf;
-	      for (;;)
-		{
-		  size_t space;
-		  size_t size;
-
-		  space = (new_buf + new_length) - new_tmp;
-		  size = do_scrub_chars (scrub_from_string, new_tmp, space);
-
-		  if (size < space)
-		    {
-		      new_tmp[size] = 0;
-		      new_length = new_tmp + size - new_buf;
-		      break;
-		    }
-
-		  new_buf = XRESIZEVEC (char, new_buf, new_length + 100);
-		  new_tmp = new_buf + new_length;
-		  new_length += 100;
-		}
-
-	      free (tmp_buf);
-
-	      /* We've "scrubbed" input to the preferred format.  In the
-		 process we may have consumed the whole of the remaining
-		 file (and included files).  We handle this formatted
-		 input similar to that of macro expansion, letting
-		 actual macro expansion (possibly nested) and other
-		 input expansion work.  Beware that in messages, line
-		 numbers and possibly file names will be incorrect.  */
-	      sb_build (&sbuf, new_length);
-	      sb_add_buffer (&sbuf, new_buf, new_length);
+	      input_line_pointer = ends ? ends + 8 : NULL;
 	      input_scrub_include_sb (&sbuf, input_line_pointer, expanding_none);
 	      sb_kill (&sbuf);
 	      buffer_limit = input_scrub_next_buffer (&input_line_pointer);
-	      free (new_buf);
 	      continue;
 	    }
 
@@ -1748,7 +1630,10 @@ read_symbol_name (void)
       /* Since quoted symbol names can contain non-ASCII characters,
 	 check the string and warn if it cannot be recognised by the
 	 current character set.  */
-      if (mbstowcs (NULL, name, len) == (size_t) -1)
+      /* PR 29447: mbstowcs ignores the third (length) parameter when
+	 the first (destination) parameter is NULL.  For clarity sake
+	 therefore we pass 0 rather than 'len' as the third parameter.  */
+      if (mbstowcs (NULL, name, 0) == (size_t) -1)
 	as_warn (_("symbol name not recognised in the current locale"));
     }
   else if (is_name_beginner (c) || (input_from_string && c == FAKE_LABEL_CHAR))
@@ -1780,6 +1665,7 @@ read_symbol_name (void)
     {
       as_bad (_("expected symbol name"));
       ignore_rest_of_line ();
+      free (start);
       return NULL;
     }
 
@@ -2037,17 +1923,36 @@ s_file (int ignore ATTRIBUTE_UNUSED)
     }
 }
 
-static int
+static bool
 get_linefile_number (int *flag)
 {
+  expressionS exp;
+
   SKIP_WHITESPACE ();
 
   if (*input_line_pointer < '0' || *input_line_pointer > '9')
-    return 0;
+    return false;
 
-  *flag = get_absolute_expression ();
+  /* Don't mistakenly interpret octal numbers as line numbers.  */
+  if (*input_line_pointer == '0')
+    {
+      *flag = 0;
+      ++input_line_pointer;
+      return true;
+    }
 
-  return 1;
+  expression_and_evaluate (&exp);
+  if (exp.X_op != O_constant)
+    return false;
+
+#if defined (BFD64) || LONG_MAX > INT_MAX
+  if (exp.X_add_number < INT_MIN || exp.X_add_number > INT_MAX)
+    return false;
+#endif
+
+  *flag = exp.X_add_number;
+
+  return true;
 }
 
 /* Handle the .linefile pseudo-op.  This is automatically generated by
@@ -2778,10 +2683,10 @@ s_macro (int ignore ATTRIBUTE_UNUSED)
 	}
 
       if (((NO_PSEUDO_DOT || flag_m68k_mri)
-	   && po_entry_find (po_hash, name) != NULL)
+	   && str_hash_find (po_hash, name) != NULL)
 	  || (!flag_m68k_mri
 	      && *name == '.'
-	      && po_entry_find (po_hash, name + 1) != NULL))
+	      && str_hash_find (po_hash, name + 1) != NULL))
 	as_warn_where (file,
 		 line,
 		 _("attempt to redefine pseudo-op `%s' ignored"),
@@ -3094,14 +2999,17 @@ s_rept (int ignore ATTRIBUTE_UNUSED)
 
   count = (size_t) get_absolute_expression ();
 
-  do_repeat (count, "REPT", "ENDR");
+  do_repeat (count, "REPT", "ENDR", NULL);
 }
 
 /* This function provides a generic repeat block implementation.   It allows
-   different directives to be used as the start/end keys.  */
+   different directives to be used as the start/end keys.  Any text matching
+   the optional EXPANDER in the block is replaced by the remaining iteration
+   count.  */
 
 void
-do_repeat (size_t count, const char *start, const char *end)
+do_repeat (size_t count, const char *start, const char *end,
+	   const char *expander)
 {
   sb one;
   sb many;
@@ -3119,46 +3027,16 @@ do_repeat (size_t count, const char *start, const char *end)
       return;
     }
 
-  sb_build (&many, count * one.len);
-  while (count-- > 0)
-    sb_add_sb (&many, &one);
-
-  sb_kill (&one);
-
-  input_scrub_include_sb (&many, input_line_pointer, expanding_repeat);
-  sb_kill (&many);
-  buffer_limit = input_scrub_next_buffer (&input_line_pointer);
-}
-
-/* Like do_repeat except that any text matching EXPANDER in the
-   block is replaced by the iteration count.  */
-
-void
-do_repeat_with_expander (size_t count,
-			 const char * start,
-			 const char * end,
-			 const char * expander)
-{
-  sb one;
-  sb many;
-
-  if (((ssize_t) count) < 0)
+  if (expander == NULL || strstr (one.ptr, expander) == NULL)
     {
-      as_bad (_("negative count for %s - ignored"), start);
-      count = 0;
+      sb_build (&many, count * one.len);
+      while (count-- > 0)
+	sb_add_sb (&many, &one);
     }
-
-  sb_new (&one);
-  if (!buffer_and_nest (start, end, &one, get_non_macro_line_sb))
+  else
     {
-      as_bad (_("%s without %s"), start, end);
-      return;
-    }
+      sb_new (&many);
 
-  sb_new (&many);
-
-  if (expander != NULL && strstr (one.ptr, expander) != NULL)
-    {
       while (count -- > 0)
 	{
 	  int len;
@@ -3177,9 +3055,6 @@ do_repeat_with_expander (size_t count,
 	  sb_kill (& processed);
 	}
     }
-  else
-    while (count-- > 0)
-      sb_add_sb (&many, &one);
 
   sb_kill (&one);
 
@@ -3234,7 +3109,7 @@ assign_symbol (char *name, int mode)
       if (listing & LISTING_SYMBOLS)
 	{
 	  extern struct list_info_struct *listing_tail;
-	  fragS *dummy_frag = XCNEW (fragS);
+	  fragS *dummy_frag = notes_calloc (1, sizeof (*dummy_frag));
 	  dummy_frag->line = listing_tail;
 	  dummy_frag->fr_symbol = symbolP;
 	  symbol_set_frag (symbolP, dummy_frag);
@@ -4063,10 +3938,9 @@ pseudo_set (symbolS *symbolP)
 	  return;
 	}
 #endif
+      symbol_set_value_expression (symbolP, &exp);
       S_SET_SEGMENT (symbolP, reg_section);
-      S_SET_VALUE (symbolP, (valueT) exp.X_add_number);
       set_zero_frag (symbolP);
-      symbol_get_value_expression (symbolP)->X_op = O_register;
       break;
 
     case O_symbol:
@@ -4625,14 +4499,9 @@ emit_expr_with_reloc (expressionS *exp,
       use = get & unmask;
       if ((get & mask) != 0 && (-get & mask) != 0)
 	{
-	  char get_buf[128];
-	  char use_buf[128];
-
-	  /* These buffers help to ease the translation of the warning message.  */
-	  sprintf_vma (get_buf, get);
-	  sprintf_vma (use_buf, use);
 	  /* Leading bits contain both 0s & 1s.  */
-	  as_warn (_("value 0x%s truncated to 0x%s"), get_buf, use_buf);
+	  as_warn (_("value 0x%" PRIx64 " truncated to 0x%" PRIx64),
+		   (uint64_t) get, (uint64_t) use);
 	}
       /* Put bytes in right order.  */
       md_number_to_chars (p, use, (int) nbytes);
@@ -6019,8 +5888,7 @@ s_include (int arg ATTRIBUTE_UNUSED)
     }
 
   demand_empty_rest_of_line ();
-  path = XNEWVEC (char, (unsigned long) i
-		  + include_dir_maxlen + 5 /* slop */ );
+  path = notes_alloc ((size_t) i + include_dir_maxlen + 5);
 
   for (i = 0; i < include_dir_count; i++)
     {
@@ -6034,10 +5902,9 @@ s_include (int arg ATTRIBUTE_UNUSED)
 	}
     }
 
-  free (path);
+  notes_free (path);
   path = filename;
  gotit:
-  /* malloc Storage leak when file is found on path.  FIXME-SOMEDAY.  */
   register_dependency (path);
   input_scrub_insert_file (path);
 }
@@ -6098,6 +5965,9 @@ generate_lineno_debug (void)
 	 has changed.  However, since there is additional backend
 	 support that is required (calling dwarf2_emit_insn), we
 	 let dwarf2dbg.c call as_where on its own.  */
+      break;
+    case DEBUG_CODEVIEW:
+      codeview_generate_asm_lineno ();
       break;
     }
 }

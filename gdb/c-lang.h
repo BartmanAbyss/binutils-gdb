@@ -65,16 +65,17 @@ extern int c_parse (struct parser_state *);
 extern int c_parse_escape (const char **, struct obstack *);
 
 /* Defined in c-typeprint.c */
-extern void c_print_type (struct type *, const char *,
-			  struct ui_file *, int, int,
-			  const struct type_print_options *);
 
-/* Print a type but allow the precise language to be specified.  */
+/* Print TYPE to STREAM using syntax appropriate for LANGUAGE, a
+   C-like language.  The other parameters are like
+   type_language_defn::print_type's.  */
 
-extern void c_print_type (struct type *, const char *,
-			  struct ui_file *, int, int,
-			  enum language,
-			  const struct type_print_options *);
+extern void c_print_type (struct type *type,
+			  const char *varstring,
+			  struct ui_file *stream,
+			  int show, int level,
+			  enum language language,
+			  const struct type_print_options *flags);
 
 extern void c_print_typedef (struct type *,
 			     struct symbol *,
@@ -92,19 +93,8 @@ extern void c_value_print (struct value *, struct ui_file *,
 
 extern void c_printchar (int, struct type *, struct ui_file *);
 
-extern void c_printstr (struct ui_file * stream,
-			struct type *elttype,
-			const gdb_byte *string,
-			unsigned int length,
-			const char *user_encoding,
-			int force_ellipses,
-			const struct value_print_options *options);
-
 extern void c_language_arch_info (struct gdbarch *gdbarch,
 				  struct language_arch_info *lai);
-
-extern void c_emit_char (int c, struct type *type,
-			 struct ui_file *stream, int quoter);
 
 /* These are in c-typeprint.c: */
 

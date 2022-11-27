@@ -191,10 +191,10 @@ int elf32xtensa_abi = XTHAL_ABI_UNDEFINED;
 
 static reloc_howto_type elf_howto_table[] =
 {
-  HOWTO (R_XTENSA_NONE, 0, 3, 0, false, 0, complain_overflow_dont,
+  HOWTO (R_XTENSA_NONE, 0, 0, 0, false, 0, complain_overflow_dont,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_NONE",
 	 false, 0, 0, false),
-  HOWTO (R_XTENSA_32, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_32, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_32",
 	 true, 0xffffffff, 0xffffffff, false),
 
@@ -203,19 +203,19 @@ static reloc_howto_type elf_howto_table[] =
      special: 1 means to substitute a pointer to the runtime linker's
      dynamic resolver function; 2 means to substitute the link map for
      the shared object.  */
-  HOWTO (R_XTENSA_RTLD, 0, 2, 32, false, 0, complain_overflow_dont,
+  HOWTO (R_XTENSA_RTLD, 0, 4, 32, false, 0, complain_overflow_dont,
 	 NULL, "R_XTENSA_RTLD", false, 0, 0, false),
 
-  HOWTO (R_XTENSA_GLOB_DAT, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_GLOB_DAT, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	 bfd_elf_generic_reloc, "R_XTENSA_GLOB_DAT",
 	 false, 0, 0xffffffff, false),
-  HOWTO (R_XTENSA_JMP_SLOT, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_JMP_SLOT, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	 bfd_elf_generic_reloc, "R_XTENSA_JMP_SLOT",
 	 false, 0, 0xffffffff, false),
-  HOWTO (R_XTENSA_RELATIVE, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_RELATIVE, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	 bfd_elf_generic_reloc, "R_XTENSA_RELATIVE",
 	 false, 0, 0xffffffff, false),
-  HOWTO (R_XTENSA_PLT, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_PLT, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_PLT",
 	 false, 0, 0xffffffff, false),
 
@@ -238,25 +238,25 @@ static reloc_howto_type elf_howto_table[] =
 
   EMPTY_HOWTO (13),
 
-  HOWTO (R_XTENSA_32_PCREL, 0, 2, 32, true, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_32_PCREL, 0, 4, 32, true, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_32_PCREL",
 	 false, 0, 0xffffffff, true),
 
   /* GNU extension to record C++ vtable hierarchy.  */
-  HOWTO (R_XTENSA_GNU_VTINHERIT, 0, 2, 0, false, 0, complain_overflow_dont,
+  HOWTO (R_XTENSA_GNU_VTINHERIT, 0, 4, 0, false, 0, complain_overflow_dont,
 	 NULL, "R_XTENSA_GNU_VTINHERIT",
 	 false, 0, 0, false),
   /* GNU extension to record C++ vtable member usage.  */
-  HOWTO (R_XTENSA_GNU_VTENTRY, 0, 2, 0, false, 0, complain_overflow_dont,
+  HOWTO (R_XTENSA_GNU_VTENTRY, 0, 4, 0, false, 0, complain_overflow_dont,
 	 _bfd_elf_rel_vtable_reloc_fn, "R_XTENSA_GNU_VTENTRY",
 	 false, 0, 0, false),
 
   /* Relocations for supporting difference of symbols.  */
-  HOWTO (R_XTENSA_DIFF8, 0, 0, 8, false, 0, complain_overflow_signed,
+  HOWTO (R_XTENSA_DIFF8, 0, 1, 8, false, 0, complain_overflow_signed,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_DIFF8", false, 0, 0xff, false),
-  HOWTO (R_XTENSA_DIFF16, 0, 1, 16, false, 0, complain_overflow_signed,
+  HOWTO (R_XTENSA_DIFF16, 0, 2, 16, false, 0, complain_overflow_signed,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_DIFF16", false, 0, 0xffff, false),
-  HOWTO (R_XTENSA_DIFF32, 0, 2, 32, false, 0, complain_overflow_signed,
+  HOWTO (R_XTENSA_DIFF32, 0, 4, 32, false, 0, complain_overflow_signed,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_DIFF32", false, 0, 0xffffffff, false),
 
   /* General immediate operand relocations.  */
@@ -324,16 +324,16 @@ static reloc_howto_type elf_howto_table[] =
 	 bfd_elf_xtensa_reloc, "R_XTENSA_SLOT14_ALT", false, 0, 0, true),
 
   /* TLS relocations.  */
-  HOWTO (R_XTENSA_TLSDESC_FN, 0, 2, 32, false, 0, complain_overflow_dont,
+  HOWTO (R_XTENSA_TLSDESC_FN, 0, 4, 32, false, 0, complain_overflow_dont,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_TLSDESC_FN",
 	 false, 0, 0xffffffff, false),
-  HOWTO (R_XTENSA_TLSDESC_ARG, 0, 2, 32, false, 0, complain_overflow_dont,
+  HOWTO (R_XTENSA_TLSDESC_ARG, 0, 4, 32, false, 0, complain_overflow_dont,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_TLSDESC_ARG",
 	 false, 0, 0xffffffff, false),
-  HOWTO (R_XTENSA_TLS_DTPOFF, 0, 2, 32, false, 0, complain_overflow_dont,
+  HOWTO (R_XTENSA_TLS_DTPOFF, 0, 4, 32, false, 0, complain_overflow_dont,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_TLS_DTPOFF",
 	 false, 0, 0xffffffff, false),
-  HOWTO (R_XTENSA_TLS_TPOFF, 0, 2, 32, false, 0, complain_overflow_dont,
+  HOWTO (R_XTENSA_TLS_TPOFF, 0, 4, 32, false, 0, complain_overflow_dont,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_TLS_TPOFF",
 	 false, 0, 0xffffffff, false),
   HOWTO (R_XTENSA_TLS_FUNC, 0, 0, 0, false, 0, complain_overflow_dont,
@@ -346,18 +346,18 @@ static reloc_howto_type elf_howto_table[] =
 	 bfd_elf_xtensa_reloc, "R_XTENSA_TLS_CALL",
 	 false, 0, 0, false),
 
-  HOWTO (R_XTENSA_PDIFF8, 0, 0, 8, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_PDIFF8, 0, 1, 8, false, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_PDIFF8", false, 0, 0xff, false),
-  HOWTO (R_XTENSA_PDIFF16, 0, 1, 16, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_PDIFF16, 0, 2, 16, false, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_PDIFF16", false, 0, 0xffff, false),
-  HOWTO (R_XTENSA_PDIFF32, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_PDIFF32, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_PDIFF32", false, 0, 0xffffffff, false),
 
-  HOWTO (R_XTENSA_NDIFF8, 0, 0, 8, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_NDIFF8, 0, 1, 8, false, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_NDIFF8", false, 0, 0xff, false),
-  HOWTO (R_XTENSA_NDIFF16, 0, 1, 16, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_NDIFF16, 0, 2, 16, false, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_NDIFF16", false, 0, 0xffff, false),
-  HOWTO (R_XTENSA_NDIFF32, 0, 2, 32, false, 0, complain_overflow_bitfield,
+  HOWTO (R_XTENSA_NDIFF32, 0, 4, 32, false, 0, complain_overflow_bitfield,
 	 bfd_elf_xtensa_reloc, "R_XTENSA_NDIFF32", false, 0, 0xffffffff, false),
 };
 
@@ -1116,7 +1116,7 @@ elf_xtensa_check_relocs (bfd *abfd,
       switch (r_type)
 	{
 	case R_XTENSA_TLSDESC_FN:
-	  if (bfd_link_pic (info))
+	  if (bfd_link_dll (info))
 	    {
 	      tls_type = GOT_TLS_GD;
 	      is_got = true;
@@ -1127,7 +1127,7 @@ elf_xtensa_check_relocs (bfd *abfd,
 	  break;
 
 	case R_XTENSA_TLSDESC_ARG:
-	  if (bfd_link_pic (info))
+	  if (bfd_link_dll (info))
 	    {
 	      tls_type = GOT_TLS_GD;
 	      is_got = true;
@@ -1135,13 +1135,14 @@ elf_xtensa_check_relocs (bfd *abfd,
 	  else
 	    {
 	      tls_type = GOT_TLS_IE;
-	      if (h && elf_xtensa_hash_entry (h) != htab->tlsbase)
+	      if (h && elf_xtensa_hash_entry (h) != htab->tlsbase
+		  && elf_xtensa_dynamic_symbol_p (h, info))
 		is_got = true;
 	    }
 	  break;
 
 	case R_XTENSA_TLS_DTPOFF:
-	  if (bfd_link_pic (info))
+	  if (bfd_link_dll (info))
 	    tls_type = GOT_TLS_GD;
 	  else
 	    tls_type = GOT_TLS_IE;
@@ -1151,7 +1152,7 @@ elf_xtensa_check_relocs (bfd *abfd,
 	  tls_type = GOT_TLS_IE;
 	  if (bfd_link_pic (info))
 	    info->flags |= DF_STATIC_TLS;
-	  if (bfd_link_pic (info) || h)
+	  if (bfd_link_dll (info) || elf_xtensa_dynamic_symbol_p (h, info))
 	    is_got = true;
 	  break;
 
@@ -2884,7 +2885,7 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 
 	case R_XTENSA_TLS_TPOFF:
 	  /* Switch to LE model for local symbols in an executable.  */
-	  if (! bfd_link_pic (info) && ! dynamic_symbol)
+	  if (! bfd_link_dll (info) && ! dynamic_symbol)
 	    {
 	      relocation = tpoff (info, relocation);
 	      break;
@@ -2896,12 +2897,12 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 	  {
 	    if (r_type == R_XTENSA_TLSDESC_FN)
 	      {
-		if (! bfd_link_pic (info) || (tls_type & GOT_TLS_IE) != 0)
+		if (! bfd_link_dll (info) || (tls_type & GOT_TLS_IE) != 0)
 		  r_type = R_XTENSA_NONE;
 	      }
 	    else if (r_type == R_XTENSA_TLSDESC_ARG)
 	      {
-		if (bfd_link_pic (info))
+		if (bfd_link_dll (info))
 		  {
 		    if ((tls_type & GOT_TLS_IE) != 0)
 		      r_type = R_XTENSA_TLS_TPOFF;
@@ -2975,7 +2976,7 @@ elf_xtensa_relocate_section (bfd *output_bfd,
 	  break;
 
 	case R_XTENSA_TLS_DTPOFF:
-	  if (! bfd_link_pic (info))
+	  if (! bfd_link_dll (info))
 	    /* Switch from LD model to LE model.  */
 	    relocation = tpoff (info, relocation);
 	  else
@@ -5054,12 +5055,9 @@ print_r_reloc (FILE *fp, const r_reloc *r_rel)
   else
     fprintf (fp, " ?? + ");
 
-  fprintf_vma (fp, r_rel->target_offset);
+  fprintf (fp, "%" PRIx64, (uint64_t) r_rel->target_offset);
   if (r_rel->virtual_offset)
-    {
-      fprintf (fp, " + ");
-      fprintf_vma (fp, r_rel->virtual_offset);
-    }
+    fprintf (fp, " + %" PRIx64, (uint64_t) r_rel->virtual_offset);
 
   fprintf (fp, ")");
 }

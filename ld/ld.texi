@@ -1876,6 +1876,15 @@ in filename invoked by -R or --just-symbols
 Treat all warnings as errors.  The default behaviour can be restored
 with the option @option{--no-fatal-warnings}.
 
+@kindex -w
+@kindex --no-warnings
+@item -w
+@itemx --no-warnings
+Do not display any warning or error messages.  This overrides
+@option{--fatal-warnings} if it has been enabled.  This option can be
+used when it is known that the output binary will not work, but there
+is still a need to create it.
+
 @kindex --force-exe-suffix
 @item  --force-exe-suffix
 Make sure that an output file has a .exe suffix.
@@ -2654,7 +2663,7 @@ object file formats.  For formats like COFF or ELF, the linker can not
 detect the use of global constructors.
 
 @kindex --warn-execstack
-@cindex warnings, on exectuable stack
+@cindex warnings, on executable stack
 @cindex executable stack, warnings on
 @item --warn-execstack
 @itemx --no-warn-execstack
@@ -2667,7 +2676,7 @@ line option has been used, but this behaviour can be overridden by the
 On the other hand the linker will normally warn if the stack is made
 executable because one or more of the input files need an execuable
 stack and neither of the @command{-z execstack} or @command{-z
-noexecstack} comman line options have been specified.  This warning
+noexecstack} command line options have been specified.  This warning
 can be disabled via the @command{--no-warn-execstack} option.
 
 Note: ELF format input files specify that they need an executable
@@ -2828,7 +2837,9 @@ section and ELF @code{PT_GNU_EH_FRAME} segment header.
 @item --no-ld-generated-unwind-info
 Request creation of @code{.eh_frame} unwind info for linker
 generated code sections like PLT.  This option is on by default
-if linker generated unwind info is supported.
+if linker generated unwind info is supported.  This option also
+controls the generation of @code{.sframe} unwind info for linker
+generated code sections like PLT.
 
 @kindex --enable-new-dtags
 @kindex --disable-new-dtags
@@ -2863,10 +2874,12 @@ but for most Linux based systems it will be @code{both}.
 @kindex --compress-debug-sections=zlib
 @kindex --compress-debug-sections=zlib-gnu
 @kindex --compress-debug-sections=zlib-gabi
+@kindex --compress-debug-sections=zstd
 @item --compress-debug-sections=none
 @itemx --compress-debug-sections=zlib
 @itemx --compress-debug-sections=zlib-gnu
 @itemx --compress-debug-sections=zlib-gabi
+@itemx --compress-debug-sections=zstd
 On ELF platforms, these options control how DWARF debug sections are
 compressed using zlib.
 
@@ -2879,6 +2892,9 @@ sets the SHF_COMPRESSED flag in the sections' headers.
 
 The @option{--compress-debug-sections=zlib} option is an alias for
 @option{--compress-debug-sections=zlib-gabi}.
+
+@option{--compress-debug-sections=zstd} compresses DWARF debug sections using
+zstd.
 
 Note that this option overrides any compression in input debug
 sections, so if a binary is linked with @option{--compress-debug-sections=none}
@@ -2935,6 +2951,18 @@ string identifying the original linked file does not change.
 
 Passing @code{none} for @var{style} disables the setting from any
 @code{--build-id} options earlier on the command line.
+
+@kindex --package-metadata=@var{JSON}
+@item --package-metadata=@var{JSON}
+Request the creation of a @code{.note.package} ELF note section.  The
+contents of the note are in JSON format, as per the package metadata
+specification.  For more information see:
+https://systemd.io/ELF_PACKAGE_METADATA/
+If the JSON argument is missing/empty then this will disable the
+creation of the metadata note, if one had been enabled by an earlier
+occurrence of the --package-metdata option.
+If the linker has been built with libjansson, then the JSON string
+will be validated.
 @end table
 
 @c man end

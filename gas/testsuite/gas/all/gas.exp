@@ -166,11 +166,11 @@ switch -glob $target_triplet {
 	# symbols on relocs.
 	setup_xfail "m68hc1*-*-*" "m6811-*-*" "m6812-*-*" "rl78-*-*"
 	setup_xfail "riscv*-*-*" "rx-*-*" "vax*-*-*" "xgate*-*-*" "z8k-*-*"
-	setup_xfail "loongarch*-*-*" "avr-*-*"
+	setup_xfail "avr-*-*"
 	run_dump_test redef2
 	setup_xfail "m68hc1*-*-*" "m6811-*-*" "m6812-*-*" "rl78-*-*"
 	setup_xfail "riscv*-*-*" "rx-*-*" "vax*-*-*" "xgate*-*-*" "z8k-*-*"
-	setup_xfail "loongarch*-*-*" "avr-*-*"
+	setup_xfail "avr-*-*"
 	# rs6000-aix disallows redefinition via .comm.
 	if [is_xcoff_format] {
 	    setup_xfail *-*-*
@@ -460,6 +460,13 @@ if [is_elf_format] {
 }
 
 run_dump_test quoted-sym-names
+
+# Targets where # is not a line comment character don't transform
+# "# <line> <file>" into .linefile (PR gas/29120).
+setup_xfail "tic30-*-*"
+run_list_test cond-2 "-al"
+setup_xfail "tic30-*-*"
+run_list_test linefile ""
 
 run_list_test macro "-alm"
 

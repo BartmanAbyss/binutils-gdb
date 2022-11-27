@@ -583,9 +583,9 @@ execute_i (SIM_CPU *cpu, unsigned_word iw, const struct riscv_opcode *op)
     case MATCH_FENCE_I:
       TRACE_INSN (cpu, "fence.i;");
       break;
-    case MATCH_SBREAK:
-      TRACE_INSN (cpu, "sbreak;");
-      /* GDB expects us to step over SBREAK.  */
+    case MATCH_EBREAK:
+      TRACE_INSN (cpu, "ebreak;");
+      /* GDB expects us to step over EBREAK.  */
       sim_engine_halt (sd, cpu, NULL, cpu->pc + 4, sim_stopped, SIM_SIGTRAP);
       break;
     case MATCH_ECALL:
@@ -936,6 +936,7 @@ execute_one (SIM_CPU *cpu, unsigned_word iw, const struct riscv_opcode *op)
     case INSN_CLASS_I:
       return execute_i (cpu, iw, op);
     case INSN_CLASS_M:
+    case INSN_CLASS_ZMMUL:
       return execute_m (cpu, iw, op);
     default:
       TRACE_INSN (cpu, "UNHANDLED EXTENSION: %d", op->insn_class);
@@ -1020,7 +1021,7 @@ pc_set (sim_cpu *cpu, sim_cia pc)
 }
 
 static int
-reg_fetch (sim_cpu *cpu, int rn, unsigned char *buf, int len)
+reg_fetch (sim_cpu *cpu, int rn, void *buf, int len)
 {
   if (len <= 0 || len > sizeof (unsigned_word))
     return -1;
@@ -1053,7 +1054,7 @@ reg_fetch (sim_cpu *cpu, int rn, unsigned char *buf, int len)
 }
 
 static int
-reg_store (sim_cpu *cpu, int rn, unsigned char *buf, int len)
+reg_store (sim_cpu *cpu, int rn, const void *buf, int len)
 {
   if (len <= 0 || len > sizeof (unsigned_word))
     return -1;
@@ -1191,15 +1192,15 @@ initialize_env (SIM_DESC sd, const char * const *argv, const char * const *env)
   cpu->sp = sp;
 
   /* First push the argc value.  */
-  sim_write (sd, sp, (void *)&argc, sizeof (unsigned_word));
+  sim_write (sd, sp, &argc, sizeof (unsigned_word));
   sp += sizeof (unsigned_word);
 
   /* Then the actual argv strings so we know where to point argv[].  */
   for (i = 0; i < argc; ++i)
     {
       unsigned len = strlen (argv[i]) + 1;
-      sim_write (sd, sp_flat, (void *)argv[i], len);
-      sim_write (sd, sp, (void *)&sp_flat, sizeof (address_word));
+      sim_write (sd, sp_flat, argv[i], len);
+      sim_write (sd, sp, &sp_flat, sizeof (address_word));
       sp_flat += len;
       sp += sizeof (address_word);
     }
@@ -1210,8 +1211,8 @@ initialize_env (SIM_DESC sd, const char * const *argv, const char * const *env)
   for (i = 0; i < envc; ++i)
     {
       unsigned len = strlen (env[i]) + 1;
-      sim_write (sd, sp_flat, (void *)env[i], len);
-      sim_write (sd, sp, (void *)&sp_flat, sizeof (address_word));
+      sim_write (sd, sp_flat, env[i], len);
+      sim_write (sd, sp, &sp_flat, sizeof (address_word));
       sp_flat += len;
       sp += sizeof (address_word);
     }

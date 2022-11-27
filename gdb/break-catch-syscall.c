@@ -79,7 +79,7 @@ struct catch_syscall_inferior_data
   int total_syscalls_count;
 };
 
-static const struct inferior_key<struct catch_syscall_inferior_data>
+static const registry<inferior>::key<catch_syscall_inferior_data>
   catch_syscall_inferior_data;
 
 static struct catch_syscall_inferior_data *
@@ -197,7 +197,7 @@ syscall_catchpoint::print_it (const bpstat *bs) const
      must print "called syscall" or "returned from syscall".  */
   struct target_waitstatus last;
   struct syscall s;
-  struct gdbarch *gdbarch = bs->bp_location_at->gdbarch;
+  struct gdbarch *gdbarch = b->gdbarch;
 
   get_last_target_status (nullptr, nullptr, &last);
 
@@ -218,7 +218,7 @@ syscall_catchpoint::print_it (const bpstat *bs) const
 						: EXEC_ASYNC_SYSCALL_RETURN));
       uiout->field_string ("disp", bpdisp_text (b->disposition));
     }
-  uiout->field_signed ("bkptno", b->number);
+  print_num_locno (bs, uiout);
 
   if (last.kind () == TARGET_WAITKIND_SYSCALL_ENTRY)
     uiout->text (" (call to syscall ");
@@ -242,7 +242,7 @@ syscall_catchpoint::print_one (bp_location **last_loc) const
 {
   struct value_print_options opts;
   struct ui_out *uiout = current_uiout;
-  struct gdbarch *gdbarch = loc->gdbarch;
+  struct gdbarch *gdbarch = loc->owner->gdbarch;
 
   get_user_print_options (&opts);
   /* Field 4, the address, is omitted (which makes the columns not
@@ -293,7 +293,7 @@ syscall_catchpoint::print_one (bp_location **last_loc) const
 void
 syscall_catchpoint::print_mention () const
 {
-  struct gdbarch *gdbarch = loc->gdbarch;
+  struct gdbarch *gdbarch = loc->owner->gdbarch;
 
   if (!syscalls_to_be_caught.empty ())
     {

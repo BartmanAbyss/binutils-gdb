@@ -156,6 +156,21 @@ run_sim(struct pstate *sregs, uint64_t icount, int dis)
     return TIME_OUT;
 }
 
+static int ATTRIBUTE_PRINTF (3, 4)
+fprintf_styled (void *stream, enum disassembler_style style,
+		const char *fmt, ...)
+{
+  int ret;
+  FILE *out = (FILE *) stream;
+  va_list args;
+
+  va_start (args, fmt);
+  ret = vfprintf (out, fmt, args);
+  va_end (args);
+
+  return ret;
+}
+
 SIM_DESC
 sim_open (SIM_OPEN_KIND kind, struct host_callback_struct *callback,
 	  struct bfd *abfd, char * const *argv)
@@ -295,8 +310,9 @@ sim_create_inferior(SIM_DESC sd, bfd *abfd, char * const *argv,
 }
 
 int
-sim_store_register(SIM_DESC sd, int regno, unsigned char *value, int length)
+sim_store_register(SIM_DESC sd, int regno, const void *buf, int length)
 {
+    const unsigned char *value = buf;
     int regval;
 
     regval = (value[0] << 24) | (value[1] << 16)
@@ -307,30 +323,32 @@ sim_store_register(SIM_DESC sd, int regno, unsigned char *value, int length)
 
 
 int
-sim_fetch_register(SIM_DESC sd, int regno, unsigned char *buf, int length)
+sim_fetch_register(SIM_DESC sd, int regno, void *buf, int length)
 {
     get_regi(&sregs, regno, buf);
     return -1;
 }
 
 int
-sim_write (SIM_DESC sd, SIM_ADDR mem, const unsigned char *buf, int length)
+sim_write (SIM_DESC sd, SIM_ADDR mem, const void *buffer, int length)
 {
     int i, len;
+    const unsigned char *data = buffer;
 
     for (i = 0; i < length; i++) {
-	sis_memory_write ((mem + i) ^ EBT, &buf[i], 1);
+	sis_memory_write ((mem + i) ^ EBT, &data[i], 1);
     }
     return length;
 }
 
 int
-sim_read (SIM_DESC sd, SIM_ADDR mem, unsigned char *buf, int length)
+sim_read (SIM_DESC sd, SIM_ADDR mem, void *buffer, int length)
 {
     int i, len;
+    unsigned char *data = buffer;
 
     for (i = 0; i < length; i++) {
-	sis_memory_read ((mem + i) ^ EBT, &buf[i], 1);
+	sis_memory_read ((mem + i) ^ EBT, &data[i], 1);
     }
     return length;
 }

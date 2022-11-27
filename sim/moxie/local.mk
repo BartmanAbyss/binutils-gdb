@@ -1,6 +1,7 @@
 ## See sim/Makefile.am
 ##
-## Copyright (C) 1993-2022 Free Software Foundation, Inc.
+## Copyright (C) 2008-2022 Free Software Foundation, Inc.
+## Written by Anthony Green
 ##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -14,6 +15,14 @@
 ##
 ## You should have received a copy of the GNU General Public License
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+%C%_run_SOURCES =
+%C%_run_LDADD = \
+	%D%/nrun.o \
+	%D%/libsim.a \
+	$(SIM_COMMON_LIBS)
+
+noinst_PROGRAMS += %D%/run
 
 dtbdir = $(datadir)/gdb/dtb
 

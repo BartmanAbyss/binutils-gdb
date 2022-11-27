@@ -1,5 +1,18 @@
 -*- text -*-
 
+* The linker has a new command line option to suppress the generation of any
+  warning or error messages.  This can be useful when there is a need to create
+  a known non-working binary.  The option is -w or --no-warnings.
+
+* ld now supports zstd compressed debug sections.  The new option
+  --compress-debug-sections=zstd compresses debug sections with zstd.
+
+* Add --enable-default-compressed-debug-sections-algorithm={zlib,zstd}
+  that selects the default compression algorithm
+  for --enable-compressed-debug-sections.
+
+Changes in 2.39:
+
 * The ELF linker will now generate a warning message if the stack is made
   executable.  By default this warning is not issued if the user has
   specifically requested an executable stack via the "-z execstack"
@@ -25,16 +38,22 @@
   --enable-warn-rwx-segments=no
      will make --no-warn-rwx-segments enabled by default.
      
-  --enable-defaul-execstack=no
+  --enable-default-execstack=no
      will stop the creation of an executable stack simply because an input file
      is missing a .note.GNU-stack section, even on architectures where this
-     ehaviour is the default.
+     behaviour is the default.
 
 * TYPE=<type> is now supported in an output section description to set the
   section type value.
 
 * Remove (rudimentary) support for the x86-64 sub-architectures Intel L1OM and
   Intel K1OM.
+
+* The ELF linker now supports a new --package-metadata option that allows
+  embedding a JSON payload in accordance to the Package Metadata specification.
+  If support for libjansson is enabled at build time, the linker will use it to
+  validate the input. This can be enabled with --enable-jansson.
+  For more details, see: https://systemd.io/ELF_PACKAGE_METADATA/
 
 Changes in 2.38:
 

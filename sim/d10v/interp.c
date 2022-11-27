@@ -706,7 +706,7 @@ xfer_mem (SIM_DESC sd,
 
 
 int
-sim_write (SIM_DESC sd, SIM_ADDR addr, const unsigned char *buffer, int size)
+sim_write (SIM_DESC sd, SIM_ADDR addr, const void *buffer, int size)
 {
   /* FIXME: this should be performing a virtual transfer */
   /* FIXME: We cast the const away, but it's safe because xfer_mem only reads
@@ -715,7 +715,7 @@ sim_write (SIM_DESC sd, SIM_ADDR addr, const unsigned char *buffer, int size)
 }
 
 int
-sim_read (SIM_DESC sd, SIM_ADDR addr, unsigned char *buffer, int size)
+sim_read (SIM_DESC sd, SIM_ADDR addr, void *buffer, int size)
 {
   /* FIXME: this should be performing a virtual transfer */
   return xfer_mem (sd, addr, buffer, size, 0);
@@ -743,8 +743,8 @@ free_state (SIM_DESC sd)
   sim_state_free (sd);
 }
 
-static int d10v_reg_fetch (SIM_CPU *, int, unsigned char *, int);
-static int d10v_reg_store (SIM_CPU *, int, unsigned char *, int);
+static int d10v_reg_fetch (SIM_CPU *, int, void *, int);
+static int d10v_reg_store (SIM_CPU *, int, const void *, int);
 
 SIM_DESC
 sim_open (SIM_OPEN_KIND kind, host_callback *cb,
@@ -1171,8 +1171,8 @@ sim_create_inferior (SIM_DESC sd, struct bfd *abfd,
     start_address = 0xffc0 << 2;
 #ifdef DEBUG
   if (d10v_debug)
-    sim_io_printf (sd, "sim_create_inferior:  PC=0x%" BFD_VMA_FMT "x\n",
-		   start_address);
+    sim_io_printf (sd, "sim_create_inferior:  PC=0x%" PRIx64 "\n",
+		   (uint64_t) start_address);
 #endif
   {
     SIM_CPU *cpu = STATE_CPU (sd, 0);
@@ -1209,7 +1209,7 @@ sim_create_inferior (SIM_DESC sd, struct bfd *abfd,
 }
 
 static int
-d10v_reg_fetch (SIM_CPU *cpu, int rn, unsigned char *memory, int length)
+d10v_reg_fetch (SIM_CPU *cpu, int rn, void *memory, int length)
 {
   SIM_DESC sd = CPU_STATE (cpu);
   int size;
@@ -1293,7 +1293,7 @@ d10v_reg_fetch (SIM_CPU *cpu, int rn, unsigned char *memory, int length)
 }
  
 static int
-d10v_reg_store (SIM_CPU *cpu, int rn, unsigned char *memory, int length)
+d10v_reg_store (SIM_CPU *cpu, int rn, const void *memory, int length)
 {
   SIM_DESC sd = CPU_STATE (cpu);
   int size;

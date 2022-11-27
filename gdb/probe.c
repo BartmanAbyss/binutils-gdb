@@ -114,7 +114,7 @@ parse_probes_in_pspace (const static_probe_ops *spops,
 /* See definition in probe.h.  */
 
 std::vector<symtab_and_line>
-parse_probes (const struct event_location *location,
+parse_probes (const location_spec *locspec,
 	      struct program_space *search_pspace,
 	      struct linespec_result *canonical)
 {
@@ -122,8 +122,8 @@ parse_probes (const struct event_location *location,
   char *objfile_namestr = NULL, *provider = NULL, *name, *p;
   const char *arg_start, *cs;
 
-  gdb_assert (event_location_type (location) == PROBE_LOCATION);
-  arg_start = get_probe_location (location);
+  gdb_assert (locspec->type () == PROBE_LOCATION_SPEC);
+  arg_start = locspec->to_string ();
 
   cs = arg_start;
   const static_probe_ops *spops = probe_linespec_to_static_ops (&cs);
@@ -204,7 +204,7 @@ parse_probes (const struct event_location *location,
       std::string canon (arg_start, arg_end - arg_start);
       canonical->special_display = 1;
       canonical->pre_expanded = 1;
-      canonical->location = new_probe_location (std::move (canon));
+      canonical->locspec = new_probe_location_spec (std::move (canon));
     }
 
   return result;
@@ -683,7 +683,7 @@ disable_probes_command (const char *arg, int from_tty)
 /* See comments in probe.h.  */
 
 struct value *
-probe_safe_evaluate_at_pc (struct frame_info *frame, unsigned n)
+probe_safe_evaluate_at_pc (frame_info_ptr frame, unsigned n)
 {
   struct bound_probe probe;
   unsigned n_args;
@@ -801,7 +801,7 @@ static struct value *
 compute_probe_arg (struct gdbarch *arch, struct internalvar *ivar,
 		   void *data)
 {
-  struct frame_info *frame = get_selected_frame (_("No frame selected"));
+  frame_info_ptr frame = get_selected_frame (_("No frame selected"));
   CORE_ADDR pc = get_frame_pc (frame);
   int sel = (int) (uintptr_t) data;
   struct bound_probe pc_probe;

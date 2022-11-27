@@ -99,7 +99,6 @@ if [is_elf64 tmpdir/symbol3w.a] {
 	 || [istarget h8300-*-*]
 	 || [istarget ip2k-*-*]
 	 || [istarget m68hc11-*]
-	 || [istarget "xc16x-*"]
 	 || [istarget "z80-*-*"] } {
 	set pr25490_2_exp "pr25490-2-16.rd"
 	set pr25490_3_exp "pr25490-3-16.rd"
@@ -182,12 +181,13 @@ if { [check_gc_sections_available] && ![istarget "v850-*-*"] } {
 
 proc target_defaults_to_execstack {} {
     if {   [istarget "aarch64*-*-*"]
-	|| [istarget "arm*-*-*"]
-	|| [istarget "*-*-nacl"]
 	|| [istarget "arc*-*-*"]
+	|| [istarget "cris*-*-*"]
 	|| [istarget "ia64*-*-*"]
+	|| [istarget "loongarch*-*-*"]
 	|| [istarget "nios2*-*-*"]
 	|| [istarget "powerpc64*-*-*"]
+	|| [istarget "pru*-*-*"]
 	|| [istarget "riscv*-*-*"]
 	|| [istarget "tilegx*-*-*"]
 	|| [istarget "tilepro*-*-*"] } {
@@ -237,10 +237,12 @@ if {   [istarget *-*-*linux*]
     proc prune_warnings_extra { text } {
 	return $text
     }
-    
+
+    # Since the warnings can be disabled by configure, ensure consistency
+    # of the first test by forcing the flags.
     run_ld_link_tests [list \
 	[list "PR ld/29072 (warn about an executable .note.GNU-stack)" \
-	    "-e 0" \
+	    "-e 0 --warn-execstack --warn-rwx-segments" \
 	    "" \
 	    "" \
 	    {pr29072-a.s} \

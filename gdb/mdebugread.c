@@ -86,7 +86,7 @@ static struct objfile *mdebugread_objfile;
 /* We put a pointer to this structure in the read_symtab_private field
    of the psymtab.  */
 
-struct symloc
+struct md_symloc
   {
     /* Index of the FDR that this psymtab represents.  */
     int fdr_idx;
@@ -102,7 +102,7 @@ struct symloc
     enum language pst_language;
   };
 
-#define PST_PRIVATE(p) ((struct symloc *)(p)->read_symtab_private)
+#define PST_PRIVATE(p) ((struct md_symloc *)(p)->read_symtab_private)
 #define FDR_IDX(p) (PST_PRIVATE(p)->fdr_idx)
 #define CUR_BFD(p) (PST_PRIVATE(p)->cur_bfd)
 #define DEBUG_SWAP(p) (PST_PRIVATE(p)->debug_swap)
@@ -335,7 +335,7 @@ mdebug_build_psymtabs (minimal_symbol_reader &reader,
 		       const struct ecoff_debug_swap *swap,
 		       struct ecoff_debug_info *info)
 {
-  cur_bfd = objfile->obfd;
+  cur_bfd = objfile->obfd.get ();
   debug_swap = swap;
   debug_info = info;
 
@@ -357,7 +357,7 @@ mdebug_build_psymtabs (minimal_symbol_reader &reader,
 		 + info->symbolic_header.ifdMax * swap->external_fdr_size);
       fdr_ptr = info->fdr;
       for (; fdr_src < fdr_end; fdr_src += swap->external_fdr_size, fdr_ptr++)
-	(*swap->swap_fdr_in) (objfile->obfd, fdr_src, fdr_ptr);
+	(*swap->swap_fdr_in) (objfile->obfd.get (), fdr_src, fdr_ptr);
     }
 
   psymbol_functions *psf = new psymbol_functions ();
@@ -1022,7 +1022,7 @@ parse_symbol (SYMR *sh, union aux_ext *ax, char *ext_sh, int bigend,
 				 name, (char *) NULL));
 
 	t->set_code (type_code);
-	TYPE_LENGTH (t) = sh->value;
+	t->set_length (sh->value);
 	t->set_num_fields (nfields);
 	f = ((struct field *) TYPE_ALLOC (t, nfields * sizeof (struct field)));
 	t->set_fields (f);
@@ -1041,9 +1041,9 @@ parse_symbol (SYMR *sh, union aux_ext *ax, char *ext_sh, int bigend,
 	       are hopefully rare enough.
 	       Alpha cc -migrate has a sh.value field of zero, we adjust
 	       that too.  */
-	    if (TYPE_LENGTH (t) == t->num_fields ()
-		|| TYPE_LENGTH (t) == 0)
-	      TYPE_LENGTH (t) = gdbarch_int_bit (gdbarch) / HOST_CHAR_BIT;
+	    if (t->length () == t->num_fields ()
+		|| t->length () == 0)
+	      t->set_length (gdbarch_int_bit (gdbarch) / HOST_CHAR_BIT);
 	    for (ext_tsym = ext_sh + external_sym_size;
 		 ;
 		 ext_tsym += external_sym_size)
@@ -1354,8 +1354,8 @@ parse_symbol (SYMR *sh, union aux_ext *ax, char *ext_sh, int bigend,
 
 /* Basic types.  */
 
-static const struct objfile_key<struct type *,
-				gdb::noop_deleter<struct type *>>
+static const registry<objfile>::key<struct type *,
+				    gdb::noop_deleter<struct type *>>
   basic_type_data;
 
 static struct type *
@@ -1645,7 +1645,7 @@ parse_type (int fd, union aux_ext *ax, unsigned int aux_index, int *bs,
 	 dereference them.  */
       while (tp->code () == TYPE_CODE_PTR
 	     || tp->code () == TYPE_CODE_ARRAY)
-	tp = TYPE_TARGET_TYPE (tp);
+	tp = tp->target_type ();
 
       /* Make sure that TYPE_CODE(tp) has an expected type code.
 	 Any type may be returned from cross_ref if file indirect entries
@@ -1869,7 +1869,7 @@ upgrade_type (int fd, struct type **tpp, int tq, union aux_ext *ax, int bigend,
 	 dbx seems to ignore it too.  */
 
       /* TYPE_TARGET_STUB now takes care of the zero TYPE_LENGTH problem.  */
-      if (TYPE_LENGTH (*tpp) == 0)
+      if ((*tpp)->length () == 0)
 	t->set_target_is_stub (true);
 
       *tpp = t;
@@ -2041,7 +2041,7 @@ parse_procedure (PDR *pr, struct compunit_symtab *search_symtab,
 
   if (processing_gcc_compilation == 0
       && found_ecoff_debugging_info == 0
-      && TYPE_TARGET_TYPE (s->type ())->code () == TYPE_CODE_VOID)
+      && s->type ()->target_type ()->code () == TYPE_CODE_VOID)
     s->set_type (objfile_type (mdebugread_objfile)->nodebug_text_symbol);
 }
 
@@ -2604,8 +2604,8 @@ parse_partial_symbols (minimal_symbol_reader &reader,
 	textlow = 0;
       pst = new legacy_psymtab (fdr_name (fh), partial_symtabs,
 				objfile->per_bfd, textlow);
-      pst->read_symtab_private = XOBNEW (&objfile->objfile_obstack, symloc);
-      memset (pst->read_symtab_private, 0, sizeof (struct symloc));
+      pst->read_symtab_private = XOBNEW (&objfile->objfile_obstack, md_symloc);
+      memset (pst->read_symtab_private, 0, sizeof (struct md_symloc));
 
       save_pst = pst;
       FDR_IDX (pst) = f_idx;
@@ -4623,7 +4623,7 @@ new_symtab (const char *name, int maxlines, struct objfile *objfile)
   symtab = allocate_symtab (cust, name);
 
   symtab->set_linetable (new_linetable (maxlines));
-  lang = compunit_language (cust);
+  lang = cust->language ();
 
   /* All symtabs must have at least two blocks.  */
   bv = new_bvect (2);
@@ -4649,7 +4649,7 @@ new_psymtab (const char *name, psymtab_storage *partial_symtabs,
   /* Keep a backpointer to the file's symbols.  */
 
   psymtab->read_symtab_private
-    = OBSTACK_ZALLOC (&objfile->objfile_obstack, symloc);
+    = OBSTACK_ZALLOC (&objfile->objfile_obstack, md_symloc);
   CUR_BFD (psymtab) = cur_bfd;
   DEBUG_SWAP (psymtab) = debug_swap;
   DEBUG_INFO (psymtab) = debug_info;
@@ -4764,7 +4764,7 @@ void
 elfmdebug_build_psymtabs (struct objfile *objfile,
 			  const struct ecoff_debug_swap *swap, asection *sec)
 {
-  bfd *abfd = objfile->obfd;
+  bfd *abfd = objfile->obfd.get ();
   struct ecoff_debug_info *info;
 
   /* FIXME: It's not clear whether we should be getting minimal symbol

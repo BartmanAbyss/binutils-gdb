@@ -2,6 +2,10 @@ dnl Process this file with autoconf to produce a configure script.
 AC_INIT(Makefile.in)
 AC_CONFIG_MACRO_DIRS([../m4 ../.. ../../config])
 
+dnl The sim shouldn't be checking $target and changing behavior.  But it is,
+dnl and until we clean that up, we need to expand --target for use below.
+AC_CANONICAL_SYSTEM
+
 # DEPRECATED
 #
 # Instead of defining a `subtarget' macro, code should be checking
@@ -41,20 +45,16 @@ SIM_AC_OPTION_BITSIZE($mips_bitsize,$mips_msb)
 #
 # Select the floating hardware support of the target
 #
-mips_fpu=HARDWARE_FLOATING_POINT
 mips_fpu_bitsize=
 case "${target}" in
-  mips*tx39*)		mips_fpu=HARD_FLOATING_POINT ; mips_fpu_bitsize=32 ;;
-  mips*-sde-elf*)       mips_fpu=HARD_FLOATING_POINT ; mips_fpu_bitsize=64 ;;
-  mips*-mti-elf*)       mips_fpu=HARD_FLOATING_POINT ; mips_fpu_bitsize=64 ;;
-  mips64*-*-*)          mips_fpu=HARD_FLOATING_POINT ;;
-  mips16*-*-*)          mips_fpu=HARD_FLOATING_POINT ;;
-  mipsisa32*-*-*)       mips_fpu=HARD_FLOATING_POINT ; mips_fpu_bitsize=64 ;;
-  mipsisa64*-*-*)       mips_fpu=HARD_FLOATING_POINT ; mips_fpu_bitsize=64 ;;
-  mips*-*-*)            mips_fpu=HARD_FLOATING_POINT ; mips_fpu_bitsize=32 ;;
-  *)                    mips_fpu=HARD_FLOATING_POINT ;;
+  mips*tx39*)           mips_fpu_bitsize=32 ;;
+  mips*-sde-elf*)       mips_fpu_bitsize=64 ;;
+  mips*-mti-elf*)       mips_fpu_bitsize=64 ;;
+  mipsisa32*-*-*)       mips_fpu_bitsize=64 ;;
+  mipsisa64*-*-*)       mips_fpu_bitsize=64 ;;
+  mips*-*-*)            mips_fpu_bitsize=32 ;;
 esac
-SIM_AC_OPTION_FLOAT($mips_fpu,$mips_fpu_bitsize)
+SIM_AC_OPTION_FLOAT(HARD_FLOATING_POINT,$mips_fpu_bitsize)
 
 
 

@@ -79,21 +79,18 @@ do_module_cleanup (void *arg, int registers_valid)
 	}
     }
 
+  objfile *objfile = data->module->objfile;
+  gdb_assert (objfile != nullptr);
+
   /* We have to make a copy of the name so that we can unlink the
      underlying file -- removing the objfile will cause the name to be
      freed, so we can't simply keep a reference to it.  */
-  std::string objfile_name_s = objfile_name (data->module->objfile);
-  for (objfile *objfile : current_program_space->objfiles ())
-    if ((objfile->flags & OBJF_USERLOADED) == 0
-	&& objfile_name_s == objfile_name (objfile))
-      {
-	objfile->unlink ();
+  std::string objfile_name_s = objfile_name (objfile);
 
-	/* It may be a bit too pervasive in this dummy_frame dtor callback.  */
-	clear_symtab_users (0);
+  objfile->unlink ();
 
-	break;
-      }
+  /* It may be a bit too pervasive in this dummy_frame dtor callback.  */
+  clear_symtab_users (0);
 
   /* Delete the .c file.  */
   unlink (data->module->source_file.c_str ());
@@ -109,8 +106,8 @@ do_module_cleanup (void *arg, int registers_valid)
 static type *
 create_copied_type_recursive (objfile *objfile, type *func_type)
 {
-  htab_up copied_types = create_copied_types_hash (objfile);
-  func_type = copy_type_recursive (objfile, func_type, copied_types.get ());
+  htab_up copied_types = create_copied_types_hash ();
+  func_type = copy_type_recursive (func_type, copied_types.get ());
   return func_type;
 }
 

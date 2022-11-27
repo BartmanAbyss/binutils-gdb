@@ -44,6 +44,7 @@ AC_DISABLE_SHARED
 
 LT_INIT
 AC_SYS_LARGEFILE
+LT_OUTPUT
 
 MISSING=`cd $ac_aux_dir && ${PWDCMD-pwd}`/missing
 AC_CHECK_PROGS([ACLOCAL], [aclocal], [$MISSING aclocal])
@@ -71,6 +72,7 @@ AC_FUNC_MMAP
 # Needed for BFD capability checks.
 AC_SEARCH_LIBS(dlsym, dl)
 AM_ZLIB
+AC_ZSTD
 
 GCC_ENABLE([libctf-hash-debugging], [no], [], [Enable expensive debugging of CTF deduplication type hashing])
 if test "${enable_libctf_hash_debugging}" = yes; then
@@ -82,14 +84,16 @@ AM_CONDITIONAL(ENABLE_LIBCTF_HASH_DEBUGGING, test "${enable_libctf_hash_debuggin
 OLD_CFLAGS=$CFLAGS
 OLD_LDFLAGS=$LDFLAGS
 OLD_LIBS=$LIBS
+OLD_CC=$CC
 # Put the old CFLAGS/LDFLAGS last, in case the user's (C|LD)FLAGS
 # points somewhere with bfd, with -I/foo/lib and -L/foo/lib.  We
 # always want our bfd.
+CC="./libtool --quiet --mode=link $OLD_CC"
 CFLAGS="-I${srcdir}/../include -I../bfd -I${srcdir}/../bfd $CFLAGS"
 ZLIBDIR=`echo $zlibdir | sed 's,\$(top_builddir)/,,g'`
 LDFLAGS="-L../bfd -L../libiberty $ZLIBDIR $LDFLAGS"
 intl=`echo $LIBINTL | sed 's,${top_builddir}/,,g'`
-LIBS="-lbfd -liberty -lz $intl $LIBS"
+LIBS="-lbfd -liberty -lz $ZSTD_LIBS $intl $LIBS"
 AC_CACHE_CHECK([for ELF support in BFD], ac_cv_libctf_bfd_elf,
 [AC_TRY_LINK([#include <stdlib.h>
 	     #include <string.h>
@@ -102,6 +106,7 @@ AC_CACHE_CHECK([for ELF support in BFD], ac_cv_libctf_bfd_elf,
 CFLAGS=$OLD_CFLAGS
 LDFLAGS=$OLD_LDFLAGS
 LIBS=$OLD_LIBS
+CC=$OLD_CC
 
 if test $ac_cv_libctf_bfd_elf = yes; then
   AC_DEFINE([HAVE_BFD_ELF], 1,

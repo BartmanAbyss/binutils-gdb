@@ -33,6 +33,10 @@ if {[skip_shlib_tests]} {
     return 0
 }
 
+if { [is_remote host] } {
+    gdb_remote_download host $srcdir/$subdir/ss.h
+}
+
 standard_testfile shmain.c shr1.c shr2.c
 set srcfile  ${srcdir}/${subdir}/${srcfile}
 set lib1src  ${srcdir}/${subdir}/${srcfile2}
@@ -42,10 +46,6 @@ set lib2     [standard_output_file shr2.sl]
 
 set lib_opts "debug"
 set exec_opts [list debug shlib=${lib1} shlib=${lib2}]
-
-if [get_compiler_info] {
-    return -1
-}
 
 if { [gdb_compile_shlib ${lib1src} ${lib1} $lib_opts] != ""
      || [gdb_compile_shlib ${lib2src} ${lib2} $lib_opts] != ""

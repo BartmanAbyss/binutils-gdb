@@ -178,7 +178,7 @@ private:
 
 static struct gdbsim_target gdbsim_ops;
 
-static inferior_key<sim_inferior_data> sim_inferior_data_key;
+static const registry<inferior>::key<sim_inferior_data> sim_inferior_data_key;
 
 /* Flag indicating the "open" status of this module.  It's set to 1
    in gdbsim_open() and 0 in gdbsim_close().  */
@@ -537,11 +537,9 @@ gdbsim_target::store_registers (struct regcache *regcache, int regno)
 				     tmp.data (), regsize);
 
       if (nr_bytes > 0 && nr_bytes != regsize)
-	internal_error (__FILE__, __LINE__,
-			_("Register size different to expected"));
+	internal_error (_("Register size different to expected"));
       if (nr_bytes < 0)
-	internal_error (__FILE__, __LINE__,
-			_("Register %d not updated"), regno);
+	internal_error (_("Register %d not updated"), regno);
       if (nr_bytes == 0)
 	warning (_("Register %s not updated"),
 		 gdbarch_register_name (gdbarch, regno));

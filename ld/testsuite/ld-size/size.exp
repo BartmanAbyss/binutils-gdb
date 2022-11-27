@@ -33,6 +33,12 @@ if {!(([istarget "i?86-*-*"]
     return
 }
 
+# Skip when -shared is not supported
+if { ![check_shared_lib_support] } {
+    verbose "Size relocation tests not run - shared support disabled"
+    return
+}
+
 # So as to avoid rewriting every last test case here in a nacl variant,
 # we use black magic to massage the generic cases into nacl-variant cases.
 if [istarget "*-*-nacl*"] {
@@ -274,7 +280,7 @@ run_ld_link_exec_tests [list \
     ] \
     [list \
 	"Run size-8" \
-	"$NOPIE_LDFLAGS -Wl,--no-as-needed,--hash-styl=gnu,-z,notext \
+	"$NOPIE_LDFLAGS -Wl,--no-as-needed,--hash-style=gnu,-z,notext \
 	 tmpdir/libsize-8.so" \
 	"" \
 	{size-8a.c} \

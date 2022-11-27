@@ -77,8 +77,8 @@ responsibility among the other maintainers.
   CRIS		   Hans-Peter Nilsson <hp@axis.com>
   CRX		   M R Swami Reddy <MR.Swami.Reddy@nsc.com>
   CTF		   Nick Alcock <nick.alcock@oracle.com>
-  C-SKY		   Lifang Xia <lifang_xia@c-sky.com>
-  C-SKY		   Yunhai Shang <yunhai_shang@c-sky.com>
+  C-SKY		   Lifang Xia <lifang_xia@linux.alibaba.com>
+  C-SKY		   Yunhai Shang <yunhai@linux.alibaba.com>
   DLX              Nikolaos Kavvadias <nkavv@physics.auth.gr>
   DWARF2	   Jason Merrill <jason@redhat.com>
   DWARF2	   Jakub Jelinek <jakub@redhat.com>
@@ -133,7 +133,7 @@ responsibility among the other maintainers.
   RISC-V	   Palmer Dabbelt <palmer@dabbelt.com>
   RISC-V	   Andrew Waterman <andrew@sifive.com>
   RISC-V	   Jim Wilson <jim.wilson.gcc@gmail.com>
-  RISC-V	   Nelson Chu <nelson.chu@sifive.com>
+  RISC-V	   Nelson Chu <nelson@rivosinc.com>
   RX               Nick Clifton <nickc@redhat.com>
   S12Z		   John Darrington <john@darrington.wattle.id.au>
   s390, s390x	   Andreas Krebbel <krebbel@linux.ibm.com>
@@ -211,6 +211,35 @@ spelling mistakes, blatantly incorrect code (where the correct code is
 also blatantly obvious), and so on.  Obvious fixes should always be
 small, the larger they are, the more likely it is that they contain
 some un-obvious side effect or consequence.
+
+Obvious fixes should not be "legally significant", as defined here:
+
+  https://www.gnu.org/prep/maintain/maintain.html#Legally-Significant
+
+     --------  Patches and Copyright  ---------
+
+If a patch is non-obvious, its copyright must be considered.  There
+are two ways to handle this.  The first is to assign the copyright
+of the FSF.  This ensures that if problems with the authorship of the
+patch arise, the FSF will be able to deal with them.
+
+The list of already assigned copyrights can be obtained from
+fencepost.gnu.org in the file: /gd/gnuorg/copyright.list. 
+
+New copyright assignments can be obtained by completing one of the
+forms found here and sending it off to the FSF:
+
+  https://git.savannah.gnu.org/gitweb/?p=gnulib.git;a=tree;f=doc/Copyright
+
+The alternative is to sign off the contribution by agreeing to the
+Developer's Certificate of Origin (version 1.1 or later) and adding a
+line to the end of the contribution that looks something like this:
+
+  Signed-off-by: Random J Developer <random@developer.example.org>
+
+The details of the Developer's Certificate or Origin can be found here:
+       
+  https://developercertificate.org/
 
     --------- Branch Checkins ---------
 

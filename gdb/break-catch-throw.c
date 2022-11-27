@@ -63,15 +63,17 @@ static const struct exception_names exception_functions[] =
   { "-probe-stap libstdcxx:catch", "__cxa_begin_catch" }
 };
 
-/* The type of an exception catchpoint.  */
+/* The type of an exception catchpoint.  Unlike most catchpoints, this
+   one is implemented with code breakpoints, so it inherits struct
+   code_breakpoint, not struct catchpoint.  */
 
-struct exception_catchpoint : public catchpoint
+struct exception_catchpoint : public code_breakpoint
 {
   exception_catchpoint (struct gdbarch *gdbarch,
-			bool temp, const char *cond_string,
+			bool temp, const char *cond_string_,
 			enum exception_event_kind kind_,
 			std::string &&except_rx)
-    : catchpoint (gdbarch, temp, cond_string),
+    : code_breakpoint (gdbarch, bp_catchpoint, temp, cond_string_),
       kind (kind_),
       exception_rx (std::move (except_rx)),
       pattern (exception_rx.empty ()
@@ -79,6 +81,8 @@ struct exception_catchpoint : public catchpoint
 	       : new compiled_regex (exception_rx.c_str (), REG_NOSUB,
 				     _("invalid type-matching regexp")))
   {
+    pspace = current_program_space;
+    re_set ();
   }
 
   void re_set () override;
@@ -129,7 +133,7 @@ is_exception_catchpoint (breakpoint *bp)
 static void
 fetch_probe_arguments (struct value **arg0, struct value **arg1)
 {
-  struct frame_info *frame = get_selected_frame (_("No frame selected"));
+  frame_info_ptr frame = get_selected_frame (_("No frame selected"));
   CORE_ADDR pc = get_frame_pc (frame);
   struct bound_probe pc_probe;
   unsigned n_args;
@@ -211,9 +215,9 @@ exception_catchpoint::re_set ()
   /* We first try to use the probe interface.  */
   try
     {
-      event_location_up location
-	= new_probe_location (exception_functions[kind].probe);
-      sals = parse_probes (location.get (), filter_pspace, NULL);
+      location_spec_up locspec
+	= new_probe_location_spec (exception_functions[kind].probe);
+      sals = parse_probes (locspec.get (), filter_pspace, NULL);
     }
   catch (const gdb_exception_error &e)
     {
@@ -221,13 +225,10 @@ exception_catchpoint::re_set ()
 	 catchpoint mode.  */
       try
 	{
-	  struct explicit_location explicit_loc;
-
-	  initialize_explicit_location (&explicit_loc);
-	  explicit_loc.function_name
-	    = ASTRDUP (exception_functions[kind].function);
-	  event_location_up location = new_explicit_location (&explicit_loc);
-	  sals = this->decode_location (location.get (), filter_pspace);
+	  location_spec_up locspec
+	    = (new_explicit_location_spec_function
+	       (exception_functions[kind].function));
+	  sals = this->decode_location_spec (locspec.get (), filter_pspace);
 	}
       catch (const gdb_exception_error &ex)
 	{
@@ -253,7 +254,7 @@ exception_catchpoint::print_it (const bpstat *bs) const
   bp_temp = disposition == disp_del;
   uiout->text (bp_temp ? "Temporary catchpoint "
 		       : "Catchpoint ");
-  uiout->field_signed ("bkptno", number);
+  print_num_locno (bs, uiout);
   uiout->text ((kind == EX_EVENT_THROW ? " (exception thrown), "
 		: (kind == EX_EVENT_CATCH ? " (exception caught), "
 		   : " (exception rethrown), ")));
@@ -374,8 +375,6 @@ handle_gnu_v3_exceptions (int tempflag, std::string &&except_rx,
   std::unique_ptr<exception_catchpoint> cp
     (new exception_catchpoint (gdbarch, tempflag, cond_string,
 			       ex_event, std::move (except_rx)));
-
-  cp->re_set ();
 
   install_breakpoint (0, std::move (cp), 1);
 }

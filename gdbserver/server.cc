@@ -2475,7 +2475,8 @@ handle_query (char *own_buf, int packet_len, int *new_packet_len_p)
       if (target_supports_agent ())
 	strcat (own_buf, ";QAgent+");
 
-      supported_btrace_packets (own_buf);
+      if (the_target->supports_btrace ())
+	supported_btrace_packets (own_buf);
 
       if (target_supports_stopped_by_sw_breakpoint ())
 	strcat (own_buf, ";swbreak+");
@@ -2982,14 +2983,7 @@ handle_v_run (char *own_buf)
   char *p, *next_p;
   std::vector<char *> new_argv;
   char *new_program_name = NULL;
-  int i, new_argc;
-
-  new_argc = 0;
-  for (p = own_buf + strlen ("vRun;"); p && *p; p = strchr (p, ';'))
-    {
-      p++;
-      new_argc++;
-    }
+  int i;
 
   for (i = 0, p = own_buf + strlen ("vRun;"); *p; p = next_p, ++i)
     {

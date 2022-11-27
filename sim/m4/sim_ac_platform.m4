@@ -79,6 +79,8 @@ AC_CHECK_FUNCS_ONCE(m4_flatten([
   kill
   link
   lseek
+  lstat
+  mkdir
   mmap
   munmap
   pipe
@@ -142,44 +144,35 @@ AC_TYPE_SIGNAL
 AC_TYPE_SIZE_T
 AC_TYPE_UID_T
 
-dnl We don't use gettext, but bfd does.  So we do the appropriate checks
-dnl to see if there are intl libraries we should link against.
-ALL_LINGUAS=
-ZW_GNU_GETTEXT_SISTER_DIR
-
-dnl BFD conditionally uses zlib, so we must link it in if libbfd does, by
-dnl using the same condition.
-AM_ZLIB
-
-dnl BFD uses libdl when when plugins enabled.
-AC_PLUGINS
-AM_CONDITIONAL(PLUGINS, test "$plugins" = yes)
-LT_INIT([dlopen])
-AC_SUBST(lt_cv_dlopen_libs)
+LT_INIT
 
 dnl Libraries.
-AC_CHECK_LIB(socket, bind)
-AC_CHECK_LIB(nsl, gethostbyname)
-AC_CHECK_LIB(m, fabs)
-AC_CHECK_LIB(m, log2)
+AC_SEARCH_LIBS([bind], [socket])
+AC_SEARCH_LIBS([gethostbyname], [nsl])
+AC_SEARCH_LIBS([fabs], [m])
+AC_SEARCH_LIBS([log2], [m])
 
-AC_CHECK_LIB(dl, dlopen)
+AC_SEARCH_LIBS([dlopen], [dl])
 if test "${ac_cv_lib_dl_dlopen}" = "yes"; then
   PKG_CHECK_MODULES(SDL, sdl2, [dnl
     SDL_CFLAGS="${SDL_CFLAGS} -DHAVE_SDL=2"
-    SDL_LIBS="-ldl"
   ], [
     PKG_CHECK_MODULES(SDL, sdl, [dnl
       SDL_CFLAGS="${SDL_CFLAGS} -DHAVE_SDL=1"
-      SDL_LIBS="-ldl"
     ], [:])
+  ])
+  dnl If we use SDL, we need dlopen support.
+  AS_IF([test -n "$SDL_CFLAGS"], [dnl
+    AS_IF([test "$ac_cv_search_dlopen" = no], [dnl
+      AC_MSG_WARN([SDL support requires dlopen support])
+    ])
   ])
 else
   SDL_CFLAGS=
-  SDL_LIBS=
 fi
+dnl We dlopen the libs at runtime, so never pass down SDL_LIBS.
+SDL_LIBS=
 AC_SUBST(SDL_CFLAGS)
-AC_SUBST(SDL_LIBS)
 
 dnl In the Cygwin environment, we need some additional flags.
 AC_CACHE_CHECK([for cygwin], sim_cv_os_cygwin,
@@ -199,7 +192,7 @@ AC_SUBST(TERMCAP_LIB)
 dnl We prefer the in-tree readline.  Top-level dependencies make sure
 dnl src/readline (if it's there) is configured before src/sim.
 if test -r ../readline/Makefile; then
-  READLINE_LIB=../../readline/readline/libreadline.a
+  READLINE_LIB=../readline/readline/libreadline.a
   READLINE_CFLAGS='-I$(READLINE_SRC)/..'
 else
   AC_CHECK_LIB(readline, readline, READLINE_LIB=-lreadline,

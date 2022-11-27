@@ -79,14 +79,12 @@ static struct interp *interp_lookup_existing (struct ui *ui,
 					      const char *name);
 
 interp::interp (const char *name)
-  : m_name (xstrdup (name))
+  : m_name (make_unique_xstrdup (name))
 {
-  this->inited = false;
 }
 
 interp::~interp ()
 {
-  xfree (m_name);
 }
 
 /* An interpreter factory.  Maps an interpreter name to the factory
@@ -117,8 +115,7 @@ interp_factory_register (const char *name, interp_factory_func func)
   for (const interp_factory &f : interpreter_factories)
     if (strcmp (f.name, name) == 0)
       {
-	internal_error (__FILE__, __LINE__,
-			_("interpreter factory already registered: \"%s\"\n"),
+	internal_error (_("interpreter factory already registered: \"%s\"\n"),
 			name);
       }
 
@@ -170,21 +167,19 @@ interp_set (struct interp *interp, bool top_level)
   if (top_level)
     ui_interp->top_level_interpreter = interp;
 
-  /* We use interpreter_p for the "set interpreter" variable, so we need
-     to make sure we have a malloc'ed copy for the set command to free.  */
-  if (interpreter_p != NULL
-      && strcmp (interp->name (), interpreter_p) != 0)
-    {
-      xfree (interpreter_p);
+  if (interpreter_p != interp->name ())
+    interpreter_p = interp->name ();
 
-      interpreter_p = xstrdup (interp->name ());
-    }
+  bool warn_about_mi1 = false;
 
   /* Run the init proc.  */
   if (!interp->inited)
     {
       interp->init (top_level);
       interp->inited = true;
+
+      if (streq (interp->name (), "mi1"))
+	warn_about_mi1 = true;
     }
 
   /* Do this only after the interpreter is initialized.  */
@@ -194,6 +189,11 @@ interp_set (struct interp *interp, bool top_level)
   clear_interpreter_hooks ();
 
   interp->resume ();
+
+  if (warn_about_mi1)
+    warning (_("MI version 1 is deprecated in GDB 13 and "
+	       "will be removed in GDB 14.  Please upgrade "
+	       "to a newer version of MI."));
 }
 
 /* Look up the interpreter for NAME.  If no such interpreter exists,

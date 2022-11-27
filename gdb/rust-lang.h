@@ -71,6 +71,11 @@ public:
 
   /* See language.h.  */
 
+  const char *get_digit_separator () const override
+  { return "_"; }
+
+  /* See language.h.  */
+
   const std::vector<const char *> &filename_extensions () const override
   {
     static const std::vector<const char *> extensions = { ".rs" };
@@ -102,6 +107,13 @@ public:
 
   /* See language.h.  */
 
+  bool can_print_type_offsets () const override
+  {
+    return true;
+  }
+
+  /* See language.h.  */
+
   void print_type (struct type *type, const char *varstring,
 		   struct ui_file *stream, int show, int level,
 		   const struct type_print_options *flags) const override;
@@ -111,7 +123,7 @@ public:
   gdb::unique_xmalloc_ptr<char> watch_location_expression
 	(struct type *type, CORE_ADDR addr) const override
   {
-    type = check_typedef (TYPE_TARGET_TYPE (check_typedef (type)));
+    type = check_typedef (check_typedef (type)->target_type ());
     std::string name = type_to_string (type);
     return xstrprintf ("*(%s as *mut %s)", core_addr_to_string (addr),
 		       name.c_str ());

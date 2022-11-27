@@ -26,7 +26,7 @@
 
 struct breakpoint;
 struct command_line;
-struct frame_info;
+class frame_info_ptr;
 struct language_defn;
 struct objfile;
 struct extension_language_defn;
@@ -291,7 +291,7 @@ extern int apply_ext_lang_val_pretty_printer
    const struct language_defn *language);
 
 extern enum ext_lang_bt_status apply_ext_lang_frame_filter
-  (struct frame_info *frame, frame_filter_flags flags,
+  (frame_info_ptr frame, frame_filter_flags flags,
    enum ext_lang_frame_args args_type,
    struct ui_out *out, int frame_low, int frame_high);
 
@@ -326,6 +326,16 @@ extern gdb::optional<std::string> ext_lang_colorize
 
 extern gdb::optional<std::string> ext_lang_colorize_disasm
   (const std::string &content, gdbarch *gdbarch);
+
+/* Calls extension_language_ops::print_insn for each extension language,
+   returning the result from the first extension language that returns a
+   non-empty result (any further extension languages are not then called).
+
+   All arguments are forwarded to extension_language_ops::print_insn, see
+   that function for a full description.  */
+
+extern gdb::optional<int> ext_lang_print_insn
+  (struct gdbarch *gdbarch, CORE_ADDR address, struct disassemble_info *info);
 
 #if GDB_SELF_TEST
 namespace selftests {

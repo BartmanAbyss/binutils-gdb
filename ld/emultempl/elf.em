@@ -572,6 +572,7 @@ enum elf_options
   OPTION_EXCLUDE_LIBS,
   OPTION_HASH_STYLE,
   OPTION_BUILD_ID,
+  OPTION_PACKAGE_METADATA,
   OPTION_AUDIT,
   OPTION_COMPRESS_DEBUG
 };
@@ -602,6 +603,7 @@ EOF
 fi
 fragment <<EOF
     {"build-id", optional_argument, NULL, OPTION_BUILD_ID},
+    {"package-metadata", optional_argument, NULL, OPTION_PACKAGE_METADATA},
     {"compress-debug-sections", required_argument, NULL, OPTION_COMPRESS_DEBUG},
 EOF
 if test x"$GENERATE_SHLIB_SCRIPT" = xyes; then
@@ -650,16 +652,24 @@ gld${EMULATION_NAME}_handle_option (int optc)
 	ldelf_emit_note_gnu_build_id = xstrdup (optarg);
       break;
 
+    case OPTION_PACKAGE_METADATA:
+      free ((char *) ldelf_emit_note_fdo_package_metadata);
+      ldelf_emit_note_fdo_package_metadata = NULL;
+      if (optarg != NULL && strlen(optarg) > 0)
+	ldelf_emit_note_fdo_package_metadata = xstrdup (optarg);
+      break;
+
     case OPTION_COMPRESS_DEBUG:
-      if (strcasecmp (optarg, "none") == 0)
-	link_info.compress_debug = COMPRESS_DEBUG_NONE;
-      else if (strcasecmp (optarg, "zlib") == 0)
-	link_info.compress_debug = COMPRESS_DEBUG_GABI_ZLIB;
-      else if (strcasecmp (optarg, "zlib-gnu") == 0)
-	link_info.compress_debug = COMPRESS_DEBUG_GNU_ZLIB;
-      else if (strcasecmp (optarg, "zlib-gabi") == 0)
-	link_info.compress_debug = COMPRESS_DEBUG_GABI_ZLIB;
-      else
+      link_info.compress_debug = bfd_get_compression_algorithm (optarg);
+      if (strcasecmp (optarg, "zstd") == 0)
+	{
+#ifndef HAVE_ZSTD
+	  if (link_info.compress_debug == COMPRESS_DEBUG_ZSTD)
+	    einfo (_ ("%F%P: --compress-debug-sections=zstd: ld is not built "
+		  "with zstd support\n"));
+#endif
+	}
+      if (link_info.compress_debug == COMPRESS_UNKNOWN)
 	einfo (_("%F%P: invalid --compress-debug-sections option: \`%s'\n"),
 	       optarg);
       break;

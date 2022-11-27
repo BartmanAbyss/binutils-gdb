@@ -617,7 +617,7 @@ DESCRIPTION
 #define COERCE16(x) (((bfd_vma) (x) ^ 0x8000) - 0x8000)
 #define COERCE32(x) (((bfd_vma) (x) ^ 0x80000000) - 0x80000000)
 #define COERCE64(x) \
-  (((bfd_uint64_t) (x) ^ ((bfd_uint64_t) 1 << 63)) - ((bfd_uint64_t) 1 << 63))
+  (((uint64_t) (x) ^ ((uint64_t) 1 << 63)) - ((uint64_t) 1 << 63))
 
 bfd_vma
 bfd_getb16 (const void *p)
@@ -757,12 +757,11 @@ bfd_getl_signed_32 (const void *p)
   return COERCE32 (v);
 }
 
-bfd_uint64_t
-bfd_getb64 (const void *p ATTRIBUTE_UNUSED)
+uint64_t
+bfd_getb64 (const void *p)
 {
-#ifdef BFD_HOST_64_BIT
   const bfd_byte *addr = (const bfd_byte *) p;
-  bfd_uint64_t v;
+  uint64_t v;
 
   v  = addr[0]; v <<= 8;
   v |= addr[1]; v <<= 8;
@@ -774,18 +773,13 @@ bfd_getb64 (const void *p ATTRIBUTE_UNUSED)
   v |= addr[7];
 
   return v;
-#else
-  BFD_FAIL();
-  return 0;
-#endif
 }
 
-bfd_uint64_t
-bfd_getl64 (const void *p ATTRIBUTE_UNUSED)
+uint64_t
+bfd_getl64 (const void *p)
 {
-#ifdef BFD_HOST_64_BIT
   const bfd_byte *addr = (const bfd_byte *) p;
-  bfd_uint64_t v;
+  uint64_t v;
 
   v  = addr[7]; v <<= 8;
   v |= addr[6]; v <<= 8;
@@ -797,19 +791,13 @@ bfd_getl64 (const void *p ATTRIBUTE_UNUSED)
   v |= addr[0];
 
   return v;
-#else
-  BFD_FAIL();
-  return 0;
-#endif
-
 }
 
-bfd_int64_t
-bfd_getb_signed_64 (const void *p ATTRIBUTE_UNUSED)
+int64_t
+bfd_getb_signed_64 (const void *p)
 {
-#ifdef BFD_HOST_64_BIT
   const bfd_byte *addr = (const bfd_byte *) p;
-  bfd_uint64_t v;
+  uint64_t v;
 
   v  = addr[0]; v <<= 8;
   v |= addr[1]; v <<= 8;
@@ -821,18 +809,13 @@ bfd_getb_signed_64 (const void *p ATTRIBUTE_UNUSED)
   v |= addr[7];
 
   return COERCE64 (v);
-#else
-  BFD_FAIL();
-  return 0;
-#endif
 }
 
-bfd_int64_t
-bfd_getl_signed_64 (const void *p ATTRIBUTE_UNUSED)
+int64_t
+bfd_getl_signed_64 (const void *p)
 {
-#ifdef BFD_HOST_64_BIT
   const bfd_byte *addr = (const bfd_byte *) p;
-  bfd_uint64_t v;
+  uint64_t v;
 
   v  = addr[7]; v <<= 8;
   v |= addr[6]; v <<= 8;
@@ -844,10 +827,6 @@ bfd_getl_signed_64 (const void *p ATTRIBUTE_UNUSED)
   v |= addr[0];
 
   return COERCE64 (v);
-#else
-  BFD_FAIL();
-  return 0;
-#endif
 }
 
 void
@@ -871,9 +850,8 @@ bfd_putl32 (bfd_vma data, void *p)
 }
 
 void
-bfd_putb64 (bfd_uint64_t data ATTRIBUTE_UNUSED, void *p ATTRIBUTE_UNUSED)
+bfd_putb64 (uint64_t data, void *p)
 {
-#ifdef BFD_HOST_64_BIT
   bfd_byte *addr = (bfd_byte *) p;
   addr[0] = (data >> (7*8)) & 0xff;
   addr[1] = (data >> (6*8)) & 0xff;
@@ -883,15 +861,11 @@ bfd_putb64 (bfd_uint64_t data ATTRIBUTE_UNUSED, void *p ATTRIBUTE_UNUSED)
   addr[5] = (data >> (2*8)) & 0xff;
   addr[6] = (data >> (1*8)) & 0xff;
   addr[7] = (data >> (0*8)) & 0xff;
-#else
-  BFD_FAIL();
-#endif
 }
 
 void
-bfd_putl64 (bfd_uint64_t data ATTRIBUTE_UNUSED, void *p ATTRIBUTE_UNUSED)
+bfd_putl64 (uint64_t data, void *p)
 {
-#ifdef BFD_HOST_64_BIT
   bfd_byte *addr = (bfd_byte *) p;
   addr[7] = (data >> (7*8)) & 0xff;
   addr[6] = (data >> (6*8)) & 0xff;
@@ -901,13 +875,10 @@ bfd_putl64 (bfd_uint64_t data ATTRIBUTE_UNUSED, void *p ATTRIBUTE_UNUSED)
   addr[2] = (data >> (2*8)) & 0xff;
   addr[1] = (data >> (1*8)) & 0xff;
   addr[0] = (data >> (0*8)) & 0xff;
-#else
-  BFD_FAIL();
-#endif
 }
 
 void
-bfd_put_bits (bfd_uint64_t data, void *p, int bits, bool big_p)
+bfd_put_bits (uint64_t data, void *p, int bits, bool big_p)
 {
   bfd_byte *addr = (bfd_byte *) p;
   int i;
@@ -926,11 +897,11 @@ bfd_put_bits (bfd_uint64_t data, void *p, int bits, bool big_p)
     }
 }
 
-bfd_uint64_t
+uint64_t
 bfd_get_bits (const void *p, int bits, bool big_p)
 {
   const bfd_byte *addr = (const bfd_byte *) p;
-  bfd_uint64_t data;
+  uint64_t data;
   int i;
   int bytes;
 
@@ -1272,4 +1243,40 @@ _bfd_generic_init_private_section_data (bfd *ibfd ATTRIBUTE_UNUSED,
 					struct bfd_link_info *link_info ATTRIBUTE_UNUSED)
 {
   return true;
+}
+
+/* Display texts for type of compressed DWARF debug sections.  */
+static const struct compressed_type_tuple compressed_debug_section_names[] =
+{
+  { COMPRESS_DEBUG_NONE, "none" },
+  { COMPRESS_DEBUG_GABI_ZLIB, "zlib" },
+  { COMPRESS_DEBUG_GNU_ZLIB, "zlib-gnu" },
+  { COMPRESS_DEBUG_GABI_ZLIB, "zlib-gabi" },
+  { COMPRESS_DEBUG_ZSTD, "zstd" },
+};
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof (a) / sizeof ((a)[0]))
+#endif
+
+/* Return compressed_debug_section_type from a string representation.  */
+enum compressed_debug_section_type
+bfd_get_compression_algorithm (const char *name)
+{
+  for (unsigned i = 0; i < ARRAY_SIZE (compressed_debug_section_names); ++i)
+    if (strcasecmp (compressed_debug_section_names[i].name, name) == 0)
+      return compressed_debug_section_names[i].type;
+
+  return COMPRESS_UNKNOWN;
+}
+
+/* Return compression algorithm name based on the type.  */
+const char *
+bfd_get_compression_algorithm_name (enum compressed_debug_section_type type)
+{
+  for (unsigned i = 0; i < ARRAY_SIZE (compressed_debug_section_names); ++i)
+    if (type == compressed_debug_section_names[i].type)
+      return compressed_debug_section_names[i].name;
+
+  return NULL;
 }

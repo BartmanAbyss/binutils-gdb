@@ -122,6 +122,14 @@ void *mempcpy(void *, const void *, size_t);
 
 #define xfree free
 
+#if GCC_VERSION >= 7000
+#define gas_mul_overflow(a, b, res) __builtin_mul_overflow (a, b, res)
+#else
+/* Assumes unsigned values.  Careful!  Args evaluated multiple times.  */
+#define gas_mul_overflow(a, b, res) \
+  ((*res) = (a), (*res) *= (b), (b) != 0 && (*res) / (b) != (a))
+#endif
+
 #include "asintl.h"
 
 #define BAD_CASE(val)							    \
@@ -253,7 +261,10 @@ enum _relax_state
   rs_cfa,
 
   /* Cross-fragment dwarf2 line number optimization.  */
-  rs_dwarf2dbg
+  rs_dwarf2dbg,
+
+  /* SFrame FRE type selection optimization.  */
+  rs_sframe
 };
 
 typedef enum _relax_state relax_stateT;
@@ -329,8 +340,14 @@ COMMON int flag_execstack;
 /* TRUE if .note.GNU-stack section with SEC_CODE should be created */
 COMMON int flag_noexecstack;
 
+/* TRUE if .sframe section should be created.  */
+COMMON int flag_gen_sframe;
+
 /* name of emitted object file */
 COMMON const char *out_file_name;
+
+/* Keep the output file.  */
+COMMON int keep_it;
 
 /* name of file defining extensions to the basic instruction set */
 COMMON char *insttbl_file_name;
@@ -370,7 +387,8 @@ enum debug_info_type
   DEBUG_STABS,
   DEBUG_ECOFF,
   DEBUG_DWARF,
-  DEBUG_DWARF2
+  DEBUG_DWARF2,
+  DEBUG_CODEVIEW
 };
 
 extern enum debug_info_type debug_type;
@@ -384,6 +402,8 @@ extern int max_macro_nest;
 
 /* Verbosity level.  */
 extern int verbose;
+
+struct obstack;
 
 /* Obstack chunk size.  Keep large for efficient space use, make small to
    increase malloc calls for monitoring memory allocation.  */
@@ -458,6 +478,7 @@ void   input_scrub_insert_file (char *);
 char * input_scrub_new_file (const char *);
 char * input_scrub_next_buffer (char **bufp);
 size_t do_scrub_chars (size_t (*get) (char *, size_t), char *, size_t);
+size_t do_scrub_pending (void);
 bool   scan_for_multibyte_characters (const unsigned char *, const unsigned char *, bool);
 int    gen_to_words (LITTLENUM_TYPE *, int, long);
 int    had_err (void);
@@ -476,6 +497,7 @@ void   input_scrub_end (void);
 void   new_logical_line (const char *, int);
 void   new_logical_line_flags (const char *, int, int);
 void   subsegs_begin (void);
+void   subsegs_end (struct obstack **);
 void   subseg_change (segT, int);
 segT   subseg_new (const char *, subsegT);
 segT   subseg_force_new (const char *, subsegT);
@@ -487,7 +509,7 @@ void   register_dependency (const char *);
 void   print_dependencies (void);
 segT   subseg_get (const char *, int);
 
-const char *remap_debug_filename (const char *);
+char *remap_debug_filename (const char *);
 void add_debug_prefix_map (const char *);
 
 static inline char *
@@ -510,6 +532,11 @@ int eh_frame_relax_frag (fragS *);
 void eh_frame_convert_frag (fragS *);
 int generic_force_reloc (struct fix *);
 
+/* SFrame FRE optimization.  */
+int sframe_estimate_size_before_relax (fragS *);
+int sframe_relax_frag (fragS *);
+void sframe_convert_frag (fragS *);
+
 #include "expr.h"		/* Before targ-*.h */
 
 /* This one starts the chain of target dependent headers.  */
@@ -527,10 +554,10 @@ int generic_force_reloc (struct fix *);
 
 #include "write.h"
 #include "frags.h"
-#include "hashtab.h"
-#include "hash.h"
 #include "read.h"
 #include "symbols.h"
+#include "hashtab.h"
+#include "hash.h"
 
 #include "tc.h"
 #include "obj.h"

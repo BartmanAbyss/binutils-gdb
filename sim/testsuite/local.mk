@@ -40,7 +40,9 @@ DO_RUNTEST = \
 
 # Ignore dirs that only contain configuration settings.
 check/./config/%.exp: ; @true
+check/config/%.exp: ; @true
 check/./lib/%.exp: ; @true
+check/lib/%.exp: ; @true
 
 check/%.exp:
 	$(AM_V_at)mkdir -p testsuite/$*
@@ -48,13 +50,14 @@ check/%.exp:
 
 check-DEJAGNU-parallel:
 	$(AM_V_at)( \
-	$(MAKE) -k \
-	  `cd $(srcdir)/testsuite && find . -name '*.exp' -printf 'check/%p '`; \
+	set -- `cd $(srcdir)/testsuite && find . -name '*.exp' -printf '%P\n' | sed 's:[.]exp$$::'`; \
+	$(MAKE) -k `printf 'check/%s.exp ' $$@`; \
 	ret=$$?; \
+	set -- `printf 'testsuite/%s/ ' $$@`; \
 	$(SHELL) $(srcroot)/contrib/dg-extract-results.sh \
-	  `find testsuite/ -maxdepth 4 -name testrun.sum | sort` > testrun.sum; \
+	  `find $$@ -maxdepth 1 -name testrun.sum 2>/dev/null | sort` > testrun.sum; \
 	$(SHELL) $(srcroot)/contrib/dg-extract-results.sh -L \
-	  `find testsuite/ -maxdepth 4 -name testrun.log | sort` > testrun.log; \
+	  `find $$@ -maxdepth 1 -name testrun.log 2>/dev/null | sort` > testrun.log; \
 	echo; \
 	$(SED) -n '/^.*===.*Summary.*===/,$$p' testrun.sum; \
 	exit $$ret)
