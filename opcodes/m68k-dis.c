@@ -598,13 +598,14 @@ print_base (int regno, bfd_vma disp, disassemble_info *info)
 #ifdef MOTOROLA
       if (regno == -2)
 	;
-      else {
-	(*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      else 
+  {
+	    (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
       if (regno == -3)
-	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+	      (*info->fprintf_styled_func) (info->stream, dis_style_register,
 				      "zpc");
       else
-	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+	      (*info->fprintf_styled_func) (info->stream, dis_style_register,
 				      "%s", reg_names[regno]);
 	}
 #else
@@ -634,7 +635,12 @@ print_index_register (int ext, disassemble_info *info)
   (*info->fprintf_styled_func) (info->stream, dis_style_register,
 				"%s", reg_names[(ext >> 12) & 0xf]);
   (*info->fprintf_styled_func) (info->stream, dis_style_text,
-				":%c", ext & 0x800 ? 'l' : 'w');
+#ifdef MOTOROLA
+				".%c", 
+#else
+				":%c", 
+#endif
+        ext & 0x800 ? 'l' : 'w');
   if ((ext >> 9) & 3)
     {
       (*info->fprintf_styled_func) (info->stream, dis_style_text, ":");
@@ -662,21 +668,9 @@ print_indexed (int basereg,
 #endif
   bfd_vma base_disp;
   bfd_vma outer_disp;
-  char buf[40];
   bool print_index = true;
 
   NEXTWORD (p, word, NULL);
-
-  /* Generate the text for the index register.
-     Where this will be output is not yet determined.  */
-#ifdef MOTOROLA
-  sprintf (buf, "%s.%c%s",
-#else
-  sprintf (buf, "%s:%c%s",
-#endif
-	   reg_names[(word >> 12) & 0xf],
-	   (word & 0x800) ? 'l' : 'w',
-	   scales[(word >> 9) & 3]);
 
   /* Handle the 68000 style of indexing.  */
 
@@ -684,11 +678,11 @@ print_indexed (int basereg,
     {
       base_disp = word & 0xff;
       if ((base_disp & 0x80) != 0)
-	base_disp -= 0x100;
+	      base_disp -= 0x100;
       if (basereg == -1)
-	base_disp += addr;
+	      base_disp += addr;
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "(");
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
 #endif
       print_base (basereg, base_disp, info);
       (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
@@ -724,7 +718,7 @@ print_indexed (int basereg,
   if ((word & 7) == 0)
     {
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "(");
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
 #endif
       print_base (basereg, base_disp, info);
       if (print_index)
