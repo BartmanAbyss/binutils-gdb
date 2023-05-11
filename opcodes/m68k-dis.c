@@ -662,6 +662,7 @@ print_indexed (int basereg,
 #endif
   bfd_vma base_disp;
   bfd_vma outer_disp;
+  char buf[40];
   bool print_index = true;
 
   NEXTWORD (p, word, NULL);
@@ -1236,7 +1237,8 @@ print_insn_arg (const char *d,
 	(*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
 	(*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
 				      "%d", val);
-	(*info->fprintf_styled_func) (info->stream, dis_style_text, ")");#endif
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
+#endif
 	break;
       }
 
