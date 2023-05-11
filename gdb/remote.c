@@ -4504,7 +4504,7 @@ remote_target::get_offsets ()
         addr = (addr << 4) + fromhex(*ptr++);
       //warning("id: %d, section_id: %d, index: %d, name: %s => addr %x\n", section->id, section->section_id, section->index, section->name, addr);
       //offsets returned by gdbserver are absolute addresses of sections!
-      offs[section->index] = addr - objf->sections[section->index].the_bfd_section->vma;
+      offs[section->index] = addr - objf->sections_start[section->index].the_bfd_section->vma;
       if (*ptr == ';')
         ptr++;
     }
