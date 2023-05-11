@@ -1,6 +1,6 @@
 /* MI Command Set for GDB, the GNU debugger.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -225,5 +225,10 @@ extern bool remove_mi_cmd_entry (const std::string &name);
 using remove_mi_cmd_entries_ftype
   = gdb::function_view<bool (mi_command *)>;
 extern void remove_mi_cmd_entries (remove_mi_cmd_entries_ftype callback);
+
+/* Return true if type is a simple type: that is, neither an array, structure,
+   or union, nor a reference to an array, structure, or union.  */
+
+extern bool mi_simple_type_p (struct type *type);
 
 #endif /* MI_MI_CMDS_H */

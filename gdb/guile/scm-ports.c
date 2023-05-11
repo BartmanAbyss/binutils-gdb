@@ -1,7 +1,7 @@
 /* Support for connecting Guile's stdio to GDB's.
    as well as r/w memory via ports.
 
-   Copyright (C) 2014-2022 Free Software Foundation, Inc.
+   Copyright (C) 2014-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -23,7 +23,7 @@
 
 #include "defs.h"
 #include "gdbsupport/gdb_select.h"
-#include "top.h"
+#include "ui.h"
 #include "target.h"
 #include "guile-internal.h"
 #include "gdbsupport/gdb_optional.h"

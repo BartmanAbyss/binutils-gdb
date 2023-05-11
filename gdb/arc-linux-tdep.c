@@ -1,6 +1,6 @@
 /* Target dependent code for GNU/Linux ARC.
 
-   Copyright 2020-2022 Free Software Foundation, Inc.
+   Copyright 2020-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -377,23 +377,23 @@ handle_atomic_sequence (arc_instruction insn, disassemble_info *di)
 		       di, arc_delayed_print_insn, &insn);
 
       if (insn.insn_class == BRCC)
-        {
-          /* If more than one conditional branch is found, this is not
-             the pattern we are interested in.  */
-          if (found_bc)
+	{
+	  /* If more than one conditional branch is found, this is not
+	     the pattern we are interested in.  */
+	  if (found_bc)
 	    break;
 	  found_bc = true;
 	  continue;
-        }
+	}
 
       /* This is almost a happy ending.  */
       if (insn.insn_class == SCOND)
-        {
+	{
 	  /* SCOND should match the LLOCK's data size.  */
 	  if (insn.data_size_mode == llock_data_size_mode)
 	    is_pattern_valid = true;
 	  break;
-        }
+	}
     }
 
   if (is_pattern_valid)

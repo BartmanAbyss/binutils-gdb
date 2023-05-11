@@ -1,5 +1,5 @@
 /* GDB routines for manipulating the minimal symbol tables.
-   Copyright (C) 1992-2022 Free Software Foundation, Inc.
+   Copyright (C) 1992-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support, using pieces from other GDB modules.
 
    This file is part of GDB.
@@ -52,7 +52,7 @@
 #include "cli/cli-utils.h"
 #include "gdbsupport/symbol.h"
 #include <algorithm>
-#include "safe-ctype.h"
+#include "gdbsupport/gdb-safe-ctype.h"
 #include "gdbsupport/parallel-for.h"
 #include "inferior.h"
 
@@ -385,13 +385,9 @@ lookup_minimal_symbol (const char *name, const char *sfile,
       if (objf == NULL || objf == objfile
 	  || objf == objfile->separate_debug_objfile_backlink)
 	{
-	  if (symbol_lookup_debug)
-	    {
-	      gdb_printf (gdb_stdlog,
-			  "lookup_minimal_symbol (%s, %s, %s)\n",
-			  name, sfile != NULL ? sfile : "NULL",
-			  objfile_debug_name (objfile));
-	    }
+	  symbol_lookup_debug_printf ("lookup_minimal_symbol (%s, %s, %s)",
+				      name, sfile != NULL ? sfile : "NULL",
+				      objfile_debug_name (objfile));
 
 	  /* Do two passes: the first over the ordinary hash table,
 	     and the second over the demangled hash table.  */
@@ -438,9 +434,9 @@ lookup_minimal_symbol (const char *name, const char *sfile,
 	{
 	  minimal_symbol *minsym = found.external_symbol.minsym;
 
-	  gdb_printf (gdb_stdlog,
-		      "lookup_minimal_symbol (...) = %s (external)\n",
-		      host_address_to_string (minsym));
+	  symbol_lookup_debug_printf
+	    ("lookup_minimal_symbol (...) = %s (external)",
+	     host_address_to_string (minsym));
 	}
       return found.external_symbol;
     }
@@ -452,9 +448,9 @@ lookup_minimal_symbol (const char *name, const char *sfile,
 	{
 	  minimal_symbol *minsym = found.file_symbol.minsym;
 
-	  gdb_printf (gdb_stdlog,
-		      "lookup_minimal_symbol (...) = %s (file-local)\n",
-		      host_address_to_string (minsym));
+	  symbol_lookup_debug_printf
+	    ("lookup_minimal_symbol (...) = %s (file-local)",
+	     host_address_to_string (minsym));
 	}
       return found.file_symbol;
     }
@@ -466,17 +462,16 @@ lookup_minimal_symbol (const char *name, const char *sfile,
 	{
 	  minimal_symbol *minsym = found.trampoline_symbol.minsym;
 
-	  gdb_printf (gdb_stdlog,
-		      "lookup_minimal_symbol (...) = %s (trampoline)\n",
-		      host_address_to_string (minsym));
+	  symbol_lookup_debug_printf
+	    ("lookup_minimal_symbol (...) = %s (trampoline)",
+	     host_address_to_string (minsym));
 	}
 
       return found.trampoline_symbol;
     }
 
   /* Not found.  */
-  if (symbol_lookup_debug)
-    gdb_printf (gdb_stdlog, "lookup_minimal_symbol (...) = NULL\n");
+  symbol_lookup_debug_printf ("lookup_minimal_symbol (...) = NULL");
   return {};
 }
 
@@ -677,19 +672,18 @@ lookup_minimal_symbol_by_pc_name (CORE_ADDR pc, const char *name,
 
 /* A helper function that makes *PC section-relative.  This searches
    the sections of OBJFILE and if *PC is in a section, it subtracts
-   the section offset and returns true.  Otherwise it returns
-   false.  */
+   the section offset, stores the result into UNREL_ADDR, and returns
+   true.  Otherwise it returns false.  */
 
 static int
-frob_address (struct objfile *objfile, CORE_ADDR *pc)
+frob_address (struct objfile *objfile, CORE_ADDR pc,
+	      unrelocated_addr *unrel_addr)
 {
-  struct obj_section *iter;
-
-  ALL_OBJFILE_OSECTIONS (objfile, iter)
+  for (obj_section *iter : objfile->sections ())
     {
-      if (*pc >= iter->addr () && *pc < iter->endaddr ())
+      if (pc >= iter->addr () && pc < iter->endaddr ())
 	{
-	  *pc -= iter->offset ();
+	  *unrel_addr = unrelocated_addr (pc - iter->offset ());
 	  return 1;
 	}
     }
@@ -798,15 +792,16 @@ lookup_minimal_symbol_by_pc_section (CORE_ADDR pc_in, struct obj_section *sectio
 
 	     Warning: this code is trickier than it would appear at first.  */
 
-	  if (frob_address (objfile, &pc)
-	      && pc >= msymbol[lo].value_raw_address ())
+	  unrelocated_addr unrel_pc;
+	  if (frob_address (objfile, pc, &unrel_pc)
+	      && unrel_pc >= msymbol[lo].unrelocated_address ())
 	    {
-	      while (msymbol[hi].value_raw_address () > pc)
+	      while (msymbol[hi].unrelocated_address () > unrel_pc)
 		{
 		  /* pc is still strictly less than highest address.  */
 		  /* Note "new" will always be >= lo.  */
 		  newobj = (lo + hi) / 2;
-		  if ((msymbol[newobj].value_raw_address () >= pc)
+		  if ((msymbol[newobj].unrelocated_address () >= unrel_pc)
 		      || (lo == newobj))
 		    {
 		      hi = newobj;
@@ -821,8 +816,8 @@ lookup_minimal_symbol_by_pc_section (CORE_ADDR pc_in, struct obj_section *sectio
 		 hi to point to the last one.  That way we can find the
 		 right symbol if it has an index greater than hi.  */
 	      while (hi < objfile->per_bfd->minimal_symbol_count - 1
-		     && (msymbol[hi].value_raw_address ()
-			 == msymbol[hi + 1].value_raw_address ()))
+		     && (msymbol[hi].unrelocated_address ()
+			 == msymbol[hi + 1].unrelocated_address ()))
 		hi++;
 
 	      /* Skip various undesirable symbols.  */
@@ -869,8 +864,8 @@ lookup_minimal_symbol_by_pc_section (CORE_ADDR pc_in, struct obj_section *sectio
 		      && msymbol[hi].type () != want_type
 		      && msymbol[hi - 1].type () == want_type
 		      && (msymbol[hi].size () == msymbol[hi - 1].size ())
-		      && (msymbol[hi].value_raw_address ()
-			  == msymbol[hi - 1].value_raw_address ())
+		      && (msymbol[hi].unrelocated_address ()
+			  == msymbol[hi - 1].unrelocated_address ())
 		      && (msymbol[hi].obj_section (objfile)
 			  == msymbol[hi - 1].obj_section (objfile)))
 		    {
@@ -899,10 +894,8 @@ lookup_minimal_symbol_by_pc_section (CORE_ADDR pc_in, struct obj_section *sectio
 		     the cancellable variants, but both have sizes.  */
 		  if (hi > 0
 		      && msymbol[hi].size () != 0
-		      && pc >= (msymbol[hi].value_raw_address ()
-				+ msymbol[hi].size ())
-		      && pc < (msymbol[hi - 1].value_raw_address ()
-			       + msymbol[hi - 1].size ()))
+		      && unrel_pc >= msymbol[hi].unrelocated_end_address ()
+		      && unrel_pc < msymbol[hi - 1].unrelocated_end_address ())
 		    {
 		      hi--;
 		      continue;
@@ -931,8 +924,7 @@ lookup_minimal_symbol_by_pc_section (CORE_ADDR pc_in, struct obj_section *sectio
 
 	      if (hi >= 0
 		  && msymbol[hi].size () != 0
-		  && pc >= (msymbol[hi].value_raw_address ()
-			    + msymbol[hi].size ()))
+		  && unrel_pc >= msymbol[hi].unrelocated_end_address ())
 		{
 		  if (best_zero_sized != -1)
 		    hi = best_zero_sized;
@@ -943,8 +935,8 @@ lookup_minimal_symbol_by_pc_section (CORE_ADDR pc_in, struct obj_section *sectio
 		      if (previous != nullptr)
 			{
 			  if (previous->minsym == nullptr
-			      || (msymbol[hi].value_raw_address ()
-				  > previous->minsym->value_raw_address ()))
+			      || (msymbol[hi].unrelocated_address ()
+				  > previous->minsym->unrelocated_address ()))
 			    {
 			      previous->minsym = &msymbol[hi];
 			      previous->objfile = objfile;
@@ -961,8 +953,8 @@ lookup_minimal_symbol_by_pc_section (CORE_ADDR pc_in, struct obj_section *sectio
 
 	      if (hi >= 0
 		  && ((best_symbol == NULL) ||
-		      (best_symbol->value_raw_address () <
-		       msymbol[hi].value_raw_address ())))
+		      (best_symbol->unrelocated_address () <
+		       msymbol[hi].unrelocated_address ())))
 		{
 		  best_symbol = &msymbol[hi];
 		  best_objfile = objfile;
@@ -1097,7 +1089,7 @@ minimal_symbol_reader::~minimal_symbol_reader ()
 /* See minsyms.h.  */
 
 void
-minimal_symbol_reader::record (const char *name, CORE_ADDR address,
+minimal_symbol_reader::record (const char *name, unrelocated_addr address,
 			       enum minimal_symbol_type ms_type)
 {
   int section;
@@ -1157,7 +1149,7 @@ mst_str (minimal_symbol_type t)
 
 struct minimal_symbol *
 minimal_symbol_reader::record_full (gdb::string_view name,
-				    bool copy_name, CORE_ADDR address,
+				    bool copy_name, unrelocated_addr address,
 				    enum minimal_symbol_type ms_type,
 				    int section)
 {
@@ -1183,8 +1175,9 @@ minimal_symbol_reader::record_full (gdb::string_view name,
     return (NULL);
 
   symtab_create_debug_printf_v ("recording minsym:  %-21s  %18s  %4d  %.*s",
-				mst_str (ms_type), hex_string (address), section,
-				(int) name.size (), name.data ());
+				mst_str (ms_type),
+				hex_string (LONGEST (address)),
+				section, (int) name.size (), name.data ());
 
   if (m_msym_bunch_index == BUNCH_SIZE)
     {
@@ -1194,7 +1187,7 @@ minimal_symbol_reader::record_full (gdb::string_view name,
       m_msym_bunch = newobj;
     }
   msymbol = &m_msym_bunch->contents[m_msym_bunch_index];
-  msymbol->set_language (language_auto,
+  msymbol->set_language (language_unknown,
 			 &m_objfile->per_bfd->storage_obstack);
 
   if (copy_name)
@@ -1203,7 +1196,7 @@ minimal_symbol_reader::record_full (gdb::string_view name,
   else
     msymbol->m_name = name.data ();
 
-  msymbol->set_value_address (address);
+  msymbol->set_unrelocated_address (address);
   msymbol->set_section_index (section);
 
   msymbol->set_type (ms_type);
@@ -1227,11 +1220,11 @@ static inline bool
 minimal_symbol_is_less_than (const minimal_symbol &fn1,
 			     const minimal_symbol &fn2)
 {
-  if ((&fn1)->value_raw_address () < (&fn2)->value_raw_address ())
+  if ((&fn1)->unrelocated_address () < (&fn2)->unrelocated_address ())
     {
       return true;		/* addr 1 is less than addr 2.  */
     }
-  else if ((&fn1)->value_raw_address () > (&fn2)->value_raw_address ())
+  else if ((&fn1)->unrelocated_address () > (&fn2)->unrelocated_address ())
     {
       return false;		/* addr 1 is greater than addr 2.  */
     }
@@ -1291,8 +1284,8 @@ compact_minimal_symbols (struct minimal_symbol *msymbol, int mcount,
       copyfrom = copyto = msymbol;
       while (copyfrom < msymbol + mcount - 1)
 	{
-	  if (copyfrom->value_raw_address ()
-	      == (copyfrom + 1)->value_raw_address ()
+	  if (copyfrom->unrelocated_address ()
+	      == (copyfrom + 1)->unrelocated_address ()
 	      && (copyfrom->section_index ()
 		  == (copyfrom + 1)->section_index ())
 	      && strcmp (copyfrom->linkage_name (),
@@ -1598,8 +1591,8 @@ minimal_symbol_upper_bound (struct bound_minimal_symbol minsym)
   section = msymbol->section_index ();
   for (iter = msymbol + 1; iter != past_the_end; ++iter)
     {
-      if ((iter->value_raw_address ()
-	   != msymbol->value_raw_address ())
+      if ((iter->unrelocated_address ()
+	   != msymbol->unrelocated_address ())
 	  && iter->section_index () == section)
 	break;
     }
@@ -1615,4 +1608,82 @@ minimal_symbol_upper_bound (struct bound_minimal_symbol minsym)
     result = obj_section->endaddr ();
 
   return result;
+}
+
+/* See minsyms.h.  */
+
+type *
+find_minsym_type_and_address (minimal_symbol *msymbol,
+			      struct objfile *objfile,
+			      CORE_ADDR *address_p)
+{
+  bound_minimal_symbol bound_msym = {msymbol, objfile};
+  struct obj_section *section = msymbol->obj_section (objfile);
+  enum minimal_symbol_type type = msymbol->type ();
+
+  bool is_tls = (section != NULL
+		 && section->the_bfd_section->flags & SEC_THREAD_LOCAL);
+
+  /* The minimal symbol might point to a function descriptor;
+     resolve it to the actual code address instead.  */
+  CORE_ADDR addr;
+  if (is_tls)
+    {
+      /* Addresses of TLS symbols are really offsets into a
+	 per-objfile/per-thread storage block.  */
+      addr = CORE_ADDR (bound_msym.minsym->unrelocated_address ());
+    }
+  else if (msymbol_is_function (objfile, msymbol, &addr))
+    {
+      if (addr != bound_msym.value_address ())
+	{
+	  /* This means we resolved a function descriptor, and we now
+	     have an address for a code/text symbol instead of a data
+	     symbol.  */
+	  if (msymbol->type () == mst_data_gnu_ifunc)
+	    type = mst_text_gnu_ifunc;
+	  else
+	    type = mst_text;
+	  section = NULL;
+	}
+    }
+  else
+    addr = bound_msym.value_address ();
+
+  if (overlay_debugging)
+    addr = symbol_overlayed_address (addr, section);
+
+  if (is_tls)
+    {
+      /* Skip translation if caller does not need the address.  */
+      if (address_p != NULL)
+	*address_p = target_translate_tls_address (objfile, addr);
+      return builtin_type (objfile)->nodebug_tls_symbol;
+    }
+
+  if (address_p != NULL)
+    *address_p = addr;
+
+  switch (type)
+    {
+    case mst_text:
+    case mst_file_text:
+    case mst_solib_trampoline:
+      return builtin_type (objfile)->nodebug_text_symbol;
+
+    case mst_text_gnu_ifunc:
+      return builtin_type (objfile)->nodebug_text_gnu_ifunc_symbol;
+
+    case mst_data:
+    case mst_file_data:
+    case mst_bss:
+    case mst_file_bss:
+      return builtin_type (objfile)->nodebug_data_symbol;
+
+    case mst_slot_got_plt:
+      return builtin_type (objfile)->nodebug_got_plt_symbol;
+
+    default:
+      return builtin_type (objfile)->nodebug_unknown_symbol;
+    }
 }

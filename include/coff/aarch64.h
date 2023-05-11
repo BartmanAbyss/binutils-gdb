@@ -1,5 +1,5 @@
 /* AArch64 COFF support for BFD.
-   Copyright (C) 2021-2022 Free Software Foundation, Inc.
+   Copyright (C) 2021-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -54,11 +54,10 @@ struct external_reloc
   char r_vaddr[4];
   char r_symndx[4];
   char r_type[2];
-  char r_offset[4];
 };
 
 #define RELOC struct external_reloc
-#define RELSZ 14
+#define RELSZ 10
 
 /* ARM64 relocations types. */
 

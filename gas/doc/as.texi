@@ -1,5 +1,5 @@
 \input texinfo @c                               -*-Texinfo-*-
-@c  Copyright (C) 1991-2022 Free Software Foundation, Inc.
+@c  Copyright (C) 1991-2023 Free Software Foundation, Inc.
 @c UPDATE!!  On future updates--
 @c   (1)   check for new machine-dep cmdline options in
 @c         md_parse_option definitions in config/tc-*.c
@@ -100,7 +100,7 @@
 This file documents the GNU Assembler "@value{AS}".
 
 @c man begin COPYRIGHT
-Copyright @copyright{} 1991-2022 Free Software Foundation, Inc.
+Copyright @copyright{} 1991-2023 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU Free Documentation License, Version 1.3
@@ -149,7 +149,7 @@ done.
 @end tex
 
 @vskip 0pt plus 1filll
-Copyright @copyright{} 1991-2022 Free Software Foundation, Inc.
+Copyright @copyright{} 1991-2023 Free Software Foundation, Inc.
 
       Permission is granted to copy, distribute and/or modify this document
       under the terms of the GNU Free Documentation License, Version 1.3
@@ -4878,6 +4878,11 @@ same number of @code{.bundle_lock} and @code{.bundle_unlock} directives.
 @code{.byte} expects zero or more expressions, separated by commas.
 Each expression is assembled into the next byte.
 
+Note - this directive is not intended for encoding instructions, and it will
+not trigger effects like DWARF line number generation.  Instead some targets
+support special directives for encoding arbitrary binary sequences as
+instructions such as @code{.insn} or @code{.inst}.
+
 @node CFI directives
 @section CFI directives
 @subsection @code{.cfi_sections @var{section_list}}
@@ -5176,6 +5181,11 @@ If no suffix is used then @samp{.w} is assumed.
 The byte ordering is target dependent, as is the size and format of floating
 point values.
 
+Note - these directives are not intended for encoding instructions, and they
+will not trigger effects like DWARF line number generation.  Instead some
+targets support special directives for encoding arbitrary binary sequences as
+instructions such as @code{.insn} or @code{.inst}.
+
 @node Dcb
 @section @code{.dcb[@var{size}] @var{number} [,@var{fill}]}
 @cindex @code{dcb} directive
@@ -5235,7 +5245,6 @@ suffixes do not indicate that floating-point values are to be inserted.
 If the @var{size} suffix is omitted then @samp{.w} is assumed.
 
 The byte ordering is target dependent.
-
 
 @ifset COFF
 @node Def
@@ -5770,6 +5779,11 @@ integers.  On the H8/300H and the Renesas SH, however, @code{.int} emits
 32-bit integers.
 @end ifset
 @end ifclear
+
+Note - this directive is not intended for encoding instructions, and it will
+not trigger effects like DWARF line number generation.  Instead some targets
+support special directives for encoding arbitrary binary sequences as
+instructions such as eg @code{.insn} or @code{.inst}.
 
 @ifset ELF
 @node Internal
@@ -6586,6 +6600,11 @@ warning message; and just takes the lowest order 16 bytes of the bignum.
 @cindex integer, 16-byte
 @end ifset
 
+Note - this directive is not intended for encoding instructions, and it will
+not trigger effects like DWARF line number generation.  Instead some targets
+support special directives for encoding arbitrary binary sequences as
+instructions such as @code{.insn} or @code{.inst}.
+
 @node Reloc
 @section @code{.reloc @var{offset}, @var{reloc_name}[, @var{expression}]}
 
@@ -7016,6 +7035,11 @@ This expects zero or more @var{expressions}, and emits
 a 16 bit number for each.
 @end ifset
 @end ifclear
+
+Note - this directive is not intended for encoding instructions, and it will
+not trigger effects like DWARF line number generation.  Instead some targets
+support special directives for encoding arbitrary binary sequences as
+instructions such as @code{.insn} or @code{.inst}.
 
 @node Single
 @section @code{.single @var{flonums}}
@@ -7792,6 +7816,17 @@ registers and 32-bit general-purpose registers.
 registers, 32-bit general-purpose registers and a rule that forbids the
 direct use of odd-numbered single-precision floating-point registers.
 @end itemize
+
+@item Tag_GNU_MIPS_ABI_MSA (8)
+The MIPS SIMD Architecture (MSA) ABI used by this object file.  The value will be:
+
+@itemize @bullet
+@item
+0 for file not tagged or not using any ABIs affected by MSA.
+@item
+1 for files using 128 bit MSA.
+@end itemize
+
 @end table
 
 @subsection PowerPC Attributes

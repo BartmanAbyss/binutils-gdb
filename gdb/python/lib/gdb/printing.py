@@ -1,5 +1,5 @@
 # Pretty-printer utilities.
-# Copyright (C) 2010-2022 Free Software Foundation, Inc.
+# Copyright (C) 2010-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,7 +19,6 @@
 import gdb
 import gdb.types
 import re
-import sys
 
 
 class PrettyPrinter(object):
@@ -229,7 +228,7 @@ class _EnumInstance:
         flag_list = []
         v = int(self.val)
         any_found = False
-        for (e_name, e_value) in self.enumerators:
+        for e_name, e_value in self.enumerators:
             if v & e_value != 0:
                 flag_list.append(e_name)
                 v = v & ~e_value
@@ -268,6 +267,75 @@ class FlagEnumerationPrinter(PrettyPrinter):
             return _EnumInstance(self.enumerators, val)
         else:
             return None
+
+
+class NoOpScalarPrinter:
+    """A no-op pretty printer that wraps a scalar value."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def to_string(self):
+        return self.value.format_string(raw=True)
+
+
+class NoOpArrayPrinter:
+    """A no-op pretty printer that wraps an array value."""
+
+    def __init__(self, value):
+        self.value = value
+        (low, high) = self.value.type.range()
+        self.low = low
+        self.high = high
+        # This is a convenience to the DAP code and perhaps other
+        # users.
+        self.num_children = high - low + 1
+
+    def to_string(self):
+        return ""
+
+    def display_hint(self):
+        return "array"
+
+    def children(self):
+        for i in range(self.low, self.high):
+            yield (i, self.value[i])
+
+
+class NoOpStructPrinter:
+    """A no-op pretty printer that wraps a struct or union value."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def to_string(self):
+        return ""
+
+    def children(self):
+        for field in self.value.type.fields():
+            if field.name is not None:
+                yield (field.name, self.value[field])
+
+
+def make_visualizer(value):
+    """Given a gdb.Value, wrap it in a pretty-printer.
+
+    If a pretty-printer is found by the usual means, it is returned.
+    Otherwise, VALUE will be wrapped in a no-op visualizer."""
+
+    result = gdb.default_visualizer(value)
+    if result is not None:
+        # Found a pretty-printer.
+        pass
+    elif value.type.code == gdb.TYPE_CODE_ARRAY:
+        result = gdb.printing.NoOpArrayPrinter(value)
+        (low, high) = value.type.range()
+        result.n_children = high - low + 1
+    elif value.type.code in (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION):
+        result = gdb.printing.NoOpStructPrinter(value)
+    else:
+        result = gdb.printing.NoOpScalarPrinter(value)
+    return result
 
 
 # Builtin pretty-printers.

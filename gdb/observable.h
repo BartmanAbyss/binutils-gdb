@@ -1,6 +1,6 @@
 /* Observers
 
-   Copyright (C) 2016-2022 Free Software Foundation, Inc.
+   Copyright (C) 2016-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,6 +21,7 @@
 #define OBSERVABLE_H
 
 #include "gdbsupport/observable.h"
+#include "target/waitstatus.h"
 
 struct bpstat;
 struct so_list;
@@ -56,9 +57,6 @@ extern observable<struct bpstat */* bs */, int /* print_frame */> normal_stop;
 /* The inferior was stopped by a signal.  */
 extern observable<enum gdb_signal /* siggnal */> signal_received;
 
-/* We are done with a step/next/si/ni command.  */
-extern observable<> end_stepping_range;
-
 /* The inferior was terminated by a signal.  */
 extern observable<enum gdb_signal /* siggnal */> signal_exited;
 
@@ -90,8 +88,20 @@ extern observable<> executable_changed;
    information on the inferior has been printed.  */
 extern observable<inferior */* inferior */> inferior_created;
 
-/* The inferior INF has exec'ed a new executable file.  */
-extern observable<struct inferior */* inf */> inferior_execd;
+/* The inferior EXEC_INF has exec'ed a new executable file.
+
+   Execution continues in FOLLOW_INF, which may or may not be the same as
+   EXEC_INF, depending on "set follow-exec-mode".  */
+extern observable<inferior */* exec_inf */, inferior */* follow_inf */>
+    inferior_execd;
+
+/* The inferior PARENT_INF has forked.  If we are setting up an inferior for
+   the child (because we follow only the child or we follow both), CHILD_INF
+   is the child inferior.  Otherwise, CHILD_INF is nullptr.
+
+   FORK_KIND is TARGET_WAITKIND_FORKED or TARGET_WAITKIND_VFORKED.  */
+extern observable<inferior */* parent_inf */, inferior */* child_inf */,
+		  target_waitkind /* fork_kind */> inferior_forked;
 
 /* The status of process record for inferior inferior in gdb has
    changed.  The process record is started if STARTED is true, and
@@ -180,6 +190,9 @@ extern observable<struct inferior */* inf */> inferior_added;
 /* The inferior identified by INF has been attached to a
    process.  */
 extern observable<struct inferior */* inf */> inferior_appeared;
+
+/* Inferior INF is about to be detached.  */
+extern observable<struct inferior */* inf */> inferior_pre_detach;
 
 /* Either the inferior associated with INF has been detached from
    the process, or the process has exited.  */

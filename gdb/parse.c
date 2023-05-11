@@ -1,6 +1,6 @@
 /* Parse expressions for GDB.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    Modified from expread.y by the Department of Computer Science at the
    State University of New York at Buffalo, 1991.
@@ -86,91 +86,11 @@ innermost_block_tracker::update (const struct block *b,
 {
   if ((m_types & t) != 0
       && (m_innermost_block == NULL
-	  || contained_in (b, m_innermost_block)))
+	  || m_innermost_block->contains (b)))
     m_innermost_block = b;
 }
 
 
-
-/* Return the type of MSYMBOL, a minimal symbol of OBJFILE.  If
-   ADDRESS_P is not NULL, set it to the MSYMBOL's resolved
-   address.  */
-
-type *
-find_minsym_type_and_address (minimal_symbol *msymbol,
-			      struct objfile *objfile,
-			      CORE_ADDR *address_p)
-{
-  bound_minimal_symbol bound_msym = {msymbol, objfile};
-  struct obj_section *section = msymbol->obj_section (objfile);
-  enum minimal_symbol_type type = msymbol->type ();
-
-  bool is_tls = (section != NULL
-		 && section->the_bfd_section->flags & SEC_THREAD_LOCAL);
-
-  /* The minimal symbol might point to a function descriptor;
-     resolve it to the actual code address instead.  */
-  CORE_ADDR addr;
-  if (is_tls)
-    {
-      /* Addresses of TLS symbols are really offsets into a
-	 per-objfile/per-thread storage block.  */
-      addr = bound_msym.minsym->value_raw_address ();
-    }
-  else if (msymbol_is_function (objfile, msymbol, &addr))
-    {
-      if (addr != bound_msym.value_address ())
-	{
-	  /* This means we resolved a function descriptor, and we now
-	     have an address for a code/text symbol instead of a data
-	     symbol.  */
-	  if (msymbol->type () == mst_data_gnu_ifunc)
-	    type = mst_text_gnu_ifunc;
-	  else
-	    type = mst_text;
-	  section = NULL;
-	}
-    }
-  else
-    addr = bound_msym.value_address ();
-
-  if (overlay_debugging)
-    addr = symbol_overlayed_address (addr, section);
-
-  if (is_tls)
-    {
-      /* Skip translation if caller does not need the address.  */
-      if (address_p != NULL)
-	*address_p = target_translate_tls_address (objfile, addr);
-      return objfile_type (objfile)->nodebug_tls_symbol;
-    }
-
-  if (address_p != NULL)
-    *address_p = addr;
-
-  switch (type)
-    {
-    case mst_text:
-    case mst_file_text:
-    case mst_solib_trampoline:
-      return objfile_type (objfile)->nodebug_text_symbol;
-
-    case mst_text_gnu_ifunc:
-      return objfile_type (objfile)->nodebug_text_gnu_ifunc_symbol;
-
-    case mst_data:
-    case mst_file_data:
-    case mst_bss:
-    case mst_file_bss:
-      return objfile_type (objfile)->nodebug_data_symbol;
-
-    case mst_slot_got_plt:
-      return objfile_type (objfile)->nodebug_got_plt_symbol;
-
-    default:
-      return objfile_type (objfile)->nodebug_unknown_symbol;
-    }
-}
 
 bool
 expr_complete_tag::complete (struct expression *exp,
@@ -268,7 +188,8 @@ parser_state::push_dollar (struct stoken str)
     {
       /* Just dollars (one or two).  */
       i = -negate;
-      goto handle_last;
+      push_new<expr::last_operation> (i);
+      return;
     }
   /* Is the rest of the token digits?  */
   for (; i < str.length; i++)
@@ -279,7 +200,8 @@ parser_state::push_dollar (struct stoken str)
       i = atoi (str.ptr + 1 + negate);
       if (negate)
 	i = -i;
-      goto handle_last;
+      push_new<expr::last_operation> (i);
+      return;
     }
 
   /* Handle tokens that refer to machine registers:
@@ -287,7 +209,14 @@ parser_state::push_dollar (struct stoken str)
   i = user_reg_map_name_to_regnum (gdbarch (),
 				   str.ptr + 1, str.length - 1);
   if (i >= 0)
-    goto handle_register;
+    {
+      str.length--;
+      str.ptr++;
+      push_new<expr::register_operation> (copy_name (str));
+      block_tracker->update (expression_context_block,
+			     INNERMOST_BLOCK_FOR_REGISTERS);
+      return;
+    }
 
   /* Any names starting with $ are probably debugger internal variables.  */
 
@@ -319,17 +248,6 @@ parser_state::push_dollar (struct stoken str)
 
   push_new<expr::internalvar_operation>
     (create_internalvar (copy.c_str () + 1));
-  return;
-handle_last:
-  push_new<expr::last_operation> (i);
-  return;
-handle_register:
-  str.length--;
-  str.ptr++;
-  push_new<expr::register_operation> (copy_name (str));
-  block_tracker->update (expression_context_block,
-			 INNERMOST_BLOCK_FOR_REGISTERS);
-  return;
 }
 
 
@@ -488,7 +406,7 @@ parse_exp_in_context (const char **stringptr, CORE_ADDR pc,
 	 the current frame language to parse the expression.  That's why
 	 we do the following language detection only if the context block
 	 has been specifically provided.  */
-      struct symbol *func = block_linkage_function (block);
+      struct symbol *func = block->linkage_function ();
 
       if (func != NULL)
 	lang = language_def (func->language ());
@@ -514,7 +432,7 @@ parse_exp_in_context (const char **stringptr, CORE_ADDR pc,
     {
       lang->parser (&ps);
     }
-  catch (const gdb_exception &except)
+  catch (const gdb_exception_error &except)
     {
       /* If parsing for completion, allow this to succeed; but if no
 	 expression elements have been written, then there's nothing
@@ -648,6 +566,32 @@ fits_in_type (int n_sign, ULONGEST n, int type_bits, bool type_signed_p)
   else
     gdb_assert_not_reached ("");
 }
+
+/* Return true if the number N_SIGN * N fits in a type with TYPE_BITS and
+   TYPE_SIGNED_P.  N_SIGNED is either 1 or -1.  */
+
+bool
+fits_in_type (int n_sign, const gdb_mpz &n, int type_bits, bool type_signed_p)
+{
+  /* N must be nonnegative.  */
+  gdb_assert (n.sgn () >= 0);
+
+  /* Zero always fits.  */
+  /* Normalize -0.  */
+  if (n.sgn () == 0)
+    return true;
+
+  if (n_sign == -1 && !type_signed_p)
+    /* Can't fit a negative number in an unsigned type.  */
+    return false;
+
+  gdb_mpz max = gdb_mpz::pow (2, (type_signed_p
+				  ? type_bits - 1
+				  : type_bits));
+  if (n_sign == -1)
+    return n <= max;
+  return n < max;
+}
 
 /* This function avoids direct calls to fprintf 
    in the parser generated debug code.  */
@@ -665,18 +609,6 @@ parser_fprintf (FILE *x, const char *y, ...)
       gdb_vprintf (gdb_stderr, y, args);
     }
   va_end (args);
-}
-
-/* Return rue if EXP uses OBJFILE (and will become dangling when
-   OBJFILE is unloaded), otherwise return false.  OBJFILE must not be
-   a separate debug info file.  */
-
-bool
-exp_uses_objfile (struct expression *exp, struct objfile *objfile)
-{
-  gdb_assert (objfile->separate_debug_objfile_backlink == NULL);
-
-  return exp->op->uses_objfile (objfile);
 }
 
 void _initialize_parse ();

@@ -1,5 +1,5 @@
 /* codeview.c - CodeView debug support
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -286,13 +286,20 @@ write_lines_info (void)
 static uint16_t
 target_processor (void)
 {
-  if (stdoutput->arch_info->arch != bfd_arch_i386)
-    return 0;
+  switch (stdoutput->arch_info->arch)
+    {
+    case bfd_arch_i386:
+      if (stdoutput->arch_info->mach & bfd_mach_x86_64)
+	return CV_CFL_X64;
+      else
+	return CV_CFL_80386;
 
-  if (stdoutput->arch_info->mach & bfd_mach_x86_64)
-    return CV_CFL_X64;
-  else
-    return CV_CFL_80386;
+    case bfd_arch_aarch64:
+      return CV_CFL_ARM64;
+
+    default:
+      return 0;
+    }
 }
 
 /* Write the CodeView symbols, describing the object name and
@@ -452,7 +459,7 @@ void
 codeview_generate_asm_lineno (void)
 {
   const char *file;
-  unsigned int fileno;
+  unsigned int filenr;
   unsigned int lineno;
   struct line *l;
   symbolS *sym = NULL;
@@ -461,7 +468,7 @@ codeview_generate_asm_lineno (void)
 
   file = as_where (&lineno);
 
-  fileno = get_fileno (file);
+  filenr = get_fileno (file);
 
   if (!blocks_tail || blocks_tail->frag != frag_now)
     {
@@ -492,11 +499,11 @@ codeview_generate_asm_lineno (void)
       lb = blocks_tail;
     }
 
-  if (!lb->files_tail || lb->files_tail->fileno != fileno)
+  if (!lb->files_tail || lb->files_tail->fileno != filenr)
     {
       lf = xmalloc (sizeof (struct line_file));
       lf->next = NULL;
-      lf->fileno = fileno;
+      lf->fileno = filenr;
       lf->lines_head = lf->lines_tail = NULL;
       lf->num_lines = 0;
 

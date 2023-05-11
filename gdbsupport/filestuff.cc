@@ -1,5 +1,5 @@
 /* Low-level file-handling.
-   Copyright (C) 2012-2022 Free Software Foundation, Inc.
+   Copyright (C) 2012-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -527,7 +527,7 @@ read_text_file_to_string (const char *path)
       gdb_assert (n < chunk_size);
 
       /* Less than CHUNK means EOF or error.  If it's an error, return
-         no value.  */
+	 no value.  */
       if (ferror (file.get ()))
 	return {};
 

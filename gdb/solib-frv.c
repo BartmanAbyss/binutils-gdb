@@ -1,5 +1,5 @@
 /* Handle FR-V (FDPIC) shared libraries for GDB, the GNU Debugger.
-   Copyright (C) 2004-2022 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -30,9 +30,6 @@
 #include "gdbcmd.h"
 #include "elf/frv.h"
 #include "gdb_bfd.h"
-
-/* Flag which indicates whether internal debug messages should be printed.  */
-static unsigned int solib_frv_debug;
 
 /* FR-V pointers are four bytes wide.  */
 enum { FRV_PTR_SIZE = 4 };
@@ -290,27 +287,21 @@ lm_base (void)
 				   current_program_space->symfile_object_file);
   if (got_sym.minsym == 0)
     {
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "lm_base: _GLOBAL_OFFSET_TABLE_ not found.\n");
+      solib_debug_printf ("_GLOBAL_OFFSET_TABLE_ not found.");
       return 0;
     }
 
   addr = got_sym.value_address () + 8;
 
-  if (solib_frv_debug)
-    gdb_printf (gdb_stdlog,
-		"lm_base: _GLOBAL_OFFSET_TABLE_ + 8 = %s\n",
-		hex_string_custom (addr, 8));
+  solib_debug_printf ("_GLOBAL_OFFSET_TABLE_ + 8 = %s",
+		      hex_string_custom (addr, 8));
 
   if (target_read_memory (addr, buf, sizeof buf) != 0)
     return 0;
   lm_base_cache = extract_unsigned_integer (buf, sizeof buf, byte_order);
 
-  if (solib_frv_debug)
-    gdb_printf (gdb_stdlog,
-		"lm_base: lm_base_cache = %s\n",
-		hex_string_custom (lm_base_cache, 8));
+  solib_debug_printf ("lm_base_cache = %s",
+		      hex_string_custom (lm_base_cache, 8));
 
   return lm_base_cache;
 }
@@ -354,10 +345,8 @@ frv_current_sos (void)
       struct ext_link_map lm_buf;
       CORE_ADDR got_addr;
 
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "current_sos: reading link_map entry at %s\n",
-		    hex_string_custom (lm_addr, 8));
+      solib_debug_printf ("reading link_map entry at %s",
+			  hex_string_custom (lm_addr, 8));
 
       if (target_read_memory (lm_addr, (gdb_byte *) &lm_buf,
 			      sizeof (lm_buf)) != 0)
@@ -405,10 +394,8 @@ frv_current_sos (void)
 	  gdb::unique_xmalloc_ptr<char> name_buf
 	    = target_read_string (addr, SO_NAME_MAX_PATH_SIZE - 1);
 
-	  if (solib_frv_debug)
-	    gdb_printf (gdb_stdlog, "current_sos: name = %s\n",
-			name_buf.get ());
-	  
+	  solib_debug_printf ("name = %s", name_buf.get ());
+
 	  if (name_buf == nullptr)
 	    warning (_("Can't read pathname for link map entry."));
 	  else
@@ -483,14 +470,6 @@ enable_break_failure_warning (void)
   warning (_("Unable to find dynamic linker breakpoint function.\n"
 	   "GDB will be unable to debug shared library initializers\n"
 	   "and track explicitly loaded dynamic code."));
-}
-
-/* Helper function for gdb_bfd_lookup_symbol.  */
-
-static int
-cmp_name (const asymbol *sym, const void *data)
-{
-  return (strcmp (sym->name, (const char *) data) == 0);
 }
 
 /* Arrange for dynamic linker to hit breakpoint.
@@ -582,10 +561,8 @@ enable_break2 (void)
 	  return 0;
 	}
 
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "enable_break: interp_loadmap_addr = %s\n",
-		    hex_string_custom (interp_loadmap_addr, 8));
+      solib_debug_printf ("interp_loadmap_addr = %s",
+			  hex_string_custom (interp_loadmap_addr, 8));
 
       ldm = fetch_loadmap (interp_loadmap_addr);
       if (ldm == NULL)
@@ -617,7 +594,12 @@ enable_break2 (void)
 	    interp_plt_sect_low + bfd_section_size (interp_sect);
 	}
 
-      addr = gdb_bfd_lookup_symbol (tmp_bfd.get (), cmp_name, "_dl_debug_addr");
+      addr = (gdb_bfd_lookup_symbol
+	      (tmp_bfd.get (),
+	       [] (const asymbol *sym)
+	       {
+		 return strcmp (sym->name, "_dl_debug_addr") == 0;
+	       }));
 
       if (addr == 0)
 	{
@@ -627,19 +609,13 @@ enable_break2 (void)
 	  return 0;
 	}
 
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "enable_break: _dl_debug_addr "
-		    "(prior to relocation) = %s\n",
-		    hex_string_custom (addr, 8));
+      solib_debug_printf ("_dl_debug_addr (prior to relocation) = %s",
+			  hex_string_custom (addr, 8));
 
       addr += displacement_from_map (ldm, addr);
 
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "enable_break: _dl_debug_addr "
-		    "(after relocation) = %s\n",
-		    hex_string_custom (addr, 8));
+      solib_debug_printf ("_dl_debug_addr (after relocation) = %s",
+			  hex_string_custom (addr, 8));
 
       /* Fetch the address of the r_debug struct.  */
       if (target_read_memory (addr, addr_buf, sizeof addr_buf) != 0)
@@ -650,18 +626,14 @@ enable_break2 (void)
 	}
       addr = extract_unsigned_integer (addr_buf, sizeof addr_buf, byte_order);
 
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "enable_break: _dl_debug_addr[0..3] = %s\n",
-		    hex_string_custom (addr, 8));
+      solib_debug_printf ("_dl_debug_addr[0..3] = %s",
+			  hex_string_custom (addr, 8));
 
       /* If it's zero, then the ldso hasn't initialized yet, and so
 	 there are no shared libs yet loaded.  */
       if (addr == 0)
 	{
-	  if (solib_frv_debug)
-	    gdb_printf (gdb_stdlog,
-			"enable_break: ldso not yet initialized\n");
+	  solib_debug_printf ("ldso not yet initialized");
 	  /* Do not warn, but mark to run again.  */
 	  return 0;
 	}
@@ -719,17 +691,13 @@ enable_break (void)
 
   if (current_program_space->symfile_object_file == NULL)
     {
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "enable_break: No symbol file found.\n");
+      solib_debug_printf ("No symbol file found.");
       return 0;
     }
 
   if (!entry_point_address_query (&entry_point))
     {
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "enable_break: Symbol file has no entry point.\n");
+      solib_debug_printf ("Symbol file has no entry point.");
       return 0;
     }
 
@@ -741,19 +709,14 @@ enable_break (void)
 
   if (interp_sect == NULL)
     {
-      if (solib_frv_debug)
-	gdb_printf (gdb_stdlog,
-		    "enable_break: No .interp section found.\n");
+      solib_debug_printf ("No .interp section found.");
       return 0;
     }
 
   create_solib_event_breakpoint (target_gdbarch (), entry_point);
 
-  if (solib_frv_debug)
-    gdb_printf (gdb_stdlog,
-		"enable_break: solib event breakpoint "
-		"placed at entry point: %s\n",
-		hex_string_custom (entry_point, 8));
+  solib_debug_printf ("solib event breakpoint placed at entry point: %s",
+		      hex_string_custom (entry_point, 8));
   return 1;
 }
 
@@ -764,7 +727,6 @@ frv_relocate_main_executable (void)
   CORE_ADDR exec_addr, interp_addr;
   struct int_elf32_fdpic_loadmap *ldm;
   int changed;
-  struct obj_section *osect;
 
   status = frv_fdpic_loadmap_addresses (target_gdbarch (),
 					&interp_addr, &exec_addr);
@@ -788,13 +750,13 @@ frv_relocate_main_executable (void)
   section_offsets new_offsets (objf->section_offsets.size ());
   changed = 0;
 
-  ALL_OBJFILE_OSECTIONS (objf, osect)
+  for (obj_section *osect : objf->sections ())
     {
       CORE_ADDR orig_addr, addr, offset;
       int osect_idx;
       int seg;
       
-      osect_idx = osect - objf->sections;
+      osect_idx = osect - objf->sections_start;
 
       /* Current address of section.  */
       addr = osect->addr ();
@@ -1141,18 +1103,3 @@ const struct target_so_ops frv_so_ops =
   frv_in_dynsym_resolve_code,
   solib_bfd_open,
 };
-
-void _initialize_frv_solib ();
-void
-_initialize_frv_solib ()
-{
-  /* Debug this file's internals.  */
-  add_setshow_zuinteger_cmd ("solib-frv", class_maintenance,
-			     &solib_frv_debug, _("\
-Set internal debugging of shared library code for FR-V."), _("\
-Show internal debugging of shared library code for FR-V."), _("\
-When non-zero, FR-V solib specific internal debugging is enabled."),
-			     NULL,
-			     NULL, /* FIXME: i18n: */
-			     &setdebuglist, &showdebuglist);
-}

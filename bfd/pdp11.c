@@ -1,5 +1,5 @@
 /* BFD back-end for PDP-11 a.out binaries.
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -280,9 +280,9 @@ static bool separate_i_d = false;
 reloc_howto_type howto_table_pdp11[] =
 {
   /* type	       rs size bsz  pcrel bitpos ovrf			  sf name     part_inpl readmask  setmask    pcdone */
-HOWTO( 0,	       0,  2,  16,  false, 0, complain_overflow_signed,0,"16",	true, 0x0000ffff,0x0000ffff, false),
-HOWTO( 1,	       0,  2,  16,  true,  0, complain_overflow_signed,0,"DISP16",	true, 0x0000ffff,0x0000ffff, false),
-HOWTO( 2,	       0,  4,  32,  false, 0, complain_overflow_signed,0,"32",	true, 0x0000ffff,0x0000ffff, false),
+HOWTO( 0,	       0,  2,  16,  false, 0, complain_overflow_dont,0,"16",	true, 0x0000ffff,0x0000ffff, false),
+HOWTO( 1,	       0,  2,  16,  true,  0, complain_overflow_dont,0,"DISP16",	true, 0x0000ffff,0x0000ffff, false),
+HOWTO( 2,	       0,  4,  32,  false, 0, complain_overflow_dont,0,"32",	true, 0x0000ffff,0x0000ffff, false),
 };
 
 #define TABLE_SIZE(TABLE)	(sizeof(TABLE)/sizeof(TABLE[0]))
@@ -2539,12 +2539,13 @@ NAME (aout, bfd_free_cached_info) (bfd *abfd)
 {
   asection *o;
 
-  if (bfd_get_format (abfd) != bfd_object)
+  if (bfd_get_format (abfd) != bfd_object
+      || abfd->tdata.aout_data == NULL)
     return true;
 
 #define BFCI_FREE(x) do { free (x); x = NULL; } while (0)
+  BFCI_FREE (adata (abfd).line_buf);
   BFCI_FREE (obj_aout_symbols (abfd));
-
 #ifdef USE_MMAP
   obj_aout_external_syms (abfd) = 0;
   bfd_free_window (&obj_aout_sym_window (abfd));

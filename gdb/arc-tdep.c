@@ -1,6 +1,6 @@
 /* Target dependent code for ARC architecture, for GDB.
 
-   Copyright 2005-2022 Free Software Foundation, Inc.
+   Copyright 2005-2023 Free Software Foundation, Inc.
    Contributed by Synopsys Inc.
 
    This file is part of GDB.
@@ -761,7 +761,7 @@ arc_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	 argument's size up to an integral number of words.  */
       for (int i = 0; i < nargs; i++)
 	{
-	  unsigned int len = value_type (args[i])->length ();
+	  unsigned int len = args[i]->type ()->length ();
 	  unsigned int space = align_up (len, 4);
 
 	  total_space += space;
@@ -776,12 +776,12 @@ arc_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       gdb_byte *data = memory_image;
       for (int i = 0; i < nargs; i++)
 	{
-	  unsigned int len = value_type (args[i])->length ();
+	  unsigned int len = args[i]->type ()->length ();
 	  unsigned int space = align_up (len, 4);
 
-	  memcpy (data, value_contents (args[i]).data (), (size_t) len);
+	  memcpy (data, args[i]->contents ().data (), (size_t) len);
 	  arc_debug_printf ("copying arg %d, val 0x%08x, len %d to mem",
-			    i, *((int *) value_contents (args[i]).data ()),
+			    i, *((int *) args[i]->contents ().data ()),
 			    len);
 
 	  data += space;
@@ -2256,11 +2256,11 @@ arc_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   /* Allocate the ARC-private target-dependent information structure, and the
      GDB target-independent information structure.  */
-  std::unique_ptr<arc_gdbarch_tdep> tdep_holder (new arc_gdbarch_tdep);
-  arc_gdbarch_tdep *tdep = tdep_holder.get ();
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new arc_gdbarch_tdep));
+  arc_gdbarch_tdep *tdep = gdbarch_tdep<arc_gdbarch_tdep> (gdbarch);
   tdep->jb_pc = -1; /* No longjmp support by default.  */
   tdep->has_hw_loops = arc_check_for_hw_loops (tdesc, tdesc_data.get ());
-  struct gdbarch *gdbarch = gdbarch_alloc (&info, tdep_holder.release ());
 
   /* Data types.  */
   set_gdbarch_short_bit (gdbarch, 16);
@@ -2434,10 +2434,10 @@ dump_arc_instruction_command (const char *args, int from_tty)
 {
   struct value *val;
   if (args != NULL && strlen (args) > 0)
-    val = evaluate_expression (parse_expression (args).get ());
+    val = parse_expression (args)->evaluate ();
   else
     val = access_value_history (0);
-  record_latest_value (val);
+  val->record_latest ();
 
   CORE_ADDR address = value_as_address (val);
   struct arc_instruction insn;

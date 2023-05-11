@@ -1,6 +1,6 @@
 /* Perform an inferior function call, for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -38,6 +38,7 @@
 #include "event-top.h"
 #include "observable.h"
 #include "top.h"
+#include "ui.h"
 #include "interps.h"
 #include "thread-fsm.h"
 #include <algorithm>
@@ -181,7 +182,7 @@ value_arg_coerce (struct gdbarch *gdbarch, struct value *arg,
 		  struct type *param_type, int is_prototyped)
 {
   const struct builtin_type *builtin = builtin_type (gdbarch);
-  struct type *arg_type = check_typedef (value_type (arg));
+  struct type *arg_type = check_typedef (arg->type ());
   struct type *type
     = param_type ? check_typedef (param_type) : arg_type;
 
@@ -278,7 +279,7 @@ find_function_addr (struct value *function,
 		    struct type **retval_type,
 		    struct type **function_type)
 {
-  struct type *ftype = check_typedef (value_type (function));
+  struct type *ftype = check_typedef (function->type ());
   struct gdbarch *gdbarch = ftype->arch ();
   struct type *value_type = NULL;
   /* Initialize it just to avoid a GCC false warning.  */
@@ -290,7 +291,7 @@ find_function_addr (struct value *function,
   /* Determine address to call.  */
   if (ftype->code () == TYPE_CODE_FUNC
       || ftype->code () == TYPE_CODE_METHOD)
-    funaddr = value_address (function);
+    funaddr = function->address ();
   else if (ftype->code () == TYPE_CODE_PTR)
     {
       funaddr = value_as_address (function);
@@ -343,7 +344,7 @@ find_function_addr (struct value *function,
 	  int found_descriptor = 0;
 
 	  funaddr = 0;	/* pacify "gcc -Werror" */
-	  if (VALUE_LVAL (function) == lval_memory)
+	  if (function->lval () == lval_memory)
 	    {
 	      CORE_ADDR nfunaddr;
 
@@ -466,7 +467,7 @@ get_call_return_value (struct call_return_meta_info *ri)
   bool stack_temporaries = thread_stack_temporaries_enabled_p (thr);
 
   if (ri->value_type->code () == TYPE_CODE_VOID)
-    retval = allocate_value (ri->value_type);
+    retval = value::allocate (ri->value_type);
   else if (ri->struct_return_p)
     {
       if (stack_temporaries)
@@ -476,19 +477,13 @@ get_call_return_value (struct call_return_meta_info *ri)
 	  push_thread_stack_temporary (thr, retval);
 	}
       else
-	{
-	  retval = allocate_value (ri->value_type);
-	  read_value_memory (retval, 0, 1, ri->struct_addr,
-			     value_contents_raw (retval).data (),
-			     ri->value_type->length ());
-	}
+	retval = value_at_non_lval (ri->value_type, ri->struct_addr);
     }
   else
     {
-      retval = allocate_value (ri->value_type);
-      gdbarch_return_value (ri->gdbarch, ri->function, ri->value_type,
-			    get_current_regcache (),
-			    value_contents_raw (retval).data (), NULL);
+      gdbarch_return_value_as_value (ri->gdbarch, ri->function, ri->value_type,
+				     get_current_regcache (),
+				     &retval, NULL);
       if (stack_temporaries && class_or_union_p (ri->value_type))
 	{
 	  /* Values of class type returned in registers are copied onto
@@ -498,7 +493,7 @@ get_call_return_value (struct call_return_meta_info *ri)
 	     requiring GDB to evaluate the "this" pointer.  To evaluate
 	     the this pointer, GDB needs the memory address of the
 	     value.  */
-	  value_force_lval (retval, ri->struct_addr);
+	  retval->force_lval (ri->struct_addr);
 	  push_thread_stack_temporary (thr, retval);
 	}
     }
@@ -968,7 +963,7 @@ call_function_by_hand_dummy (struct value *function,
 	lastval = get_last_thread_stack_temporary (call_thread.get ());
 	if (lastval != NULL)
 	  {
-	    CORE_ADDR lastval_addr = value_address (lastval);
+	    CORE_ADDR lastval_addr = lastval->address ();
 
 	    if (gdbarch_inner_than (gdbarch, 1, 2))
 	      {
@@ -978,7 +973,7 @@ call_function_by_hand_dummy (struct value *function,
 	    else
 	      {
 		gdb_assert (sp <= lastval_addr);
-		sp = lastval_addr + value_type (lastval)->length ();
+		sp = lastval_addr + lastval->type ()->length ();
 	      }
 
 	    if (gdbarch_frame_align_p (gdbarch))
@@ -1136,7 +1131,7 @@ call_function_by_hand_dummy (struct value *function,
       if (info.trivially_copy_constructible)
 	{
 	  int length = param_type->length ();
-	  write_memory (addr, value_contents (args[i]).data (), length);
+	  write_memory (addr, args[i]->contents ().data (), length);
 	}
       else
 	{
@@ -1298,6 +1293,15 @@ call_function_by_hand_dummy (struct value *function,
 
   /* Register a clean-up for unwind_on_terminating_exception_breakpoint.  */
   SCOPE_EXIT { delete_std_terminate_breakpoint (); };
+
+  /* The stopped_by_random_signal variable is global.  If we are here
+     as part of a breakpoint condition check then the global will have
+     already been setup as part of the original breakpoint stop.  By
+     making the inferior call the global will be changed when GDB
+     handles the stop after the inferior call.  Avoid confusion by
+     restoring the current value after the inferior call.  */
+  scoped_restore restore_stopped_by_random_signal
+    = make_scoped_restore (&stopped_by_random_signal, 0);
 
   /* - SNIP - SNIP - SNIP - SNIP - SNIP - SNIP - SNIP - SNIP - SNIP -
      If you're looking to implement asynchronous dummy-frames, then

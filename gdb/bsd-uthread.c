@@ -1,6 +1,6 @@
 /* BSD user-level threads support.
 
-   Copyright (C) 2005-2022 Free Software Foundation, Inc.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -415,7 +415,7 @@ bsd_uthread_target::wait (ptid_t ptid, struct target_waitstatus *status,
     thread_change_ptid (beneath, inferior_ptid, ptid);
 
   /* Don't let the core see a ptid without a corresponding thread.  */
-  thread_info *thread = find_thread_ptid (beneath, ptid);
+  thread_info *thread = beneath->find_thread (ptid);
   if (thread == NULL || thread->state == THREAD_EXITED)
     add_thread (beneath, ptid);
 
@@ -466,7 +466,7 @@ bsd_uthread_target::update_thread_list ()
 
       process_stratum_target *proc_target
 	= as_process_stratum_target (this->beneath ());
-      thread_info *thread = find_thread_ptid (proc_target, ptid);
+      thread_info *thread = proc_target->find_thread (ptid);
       if (thread == nullptr || thread->state == THREAD_EXITED)
 	{
 	  /* If INFERIOR_PTID doesn't have a tid member yet, then ptid

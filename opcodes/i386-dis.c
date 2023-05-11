@@ -1,5 +1,5 @@
 /* Print i386 instructions for GDB, the GNU debugger.
-   Copyright (C) 1988-2022 Free Software Foundation, Inc.
+   Copyright (C) 1988-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -39,82 +39,86 @@
 #include "libiberty.h"
 #include "safe-ctype.h"
 
-#include <setjmp.h>
 typedef struct instr_info instr_info;
 
-static void dofloat (instr_info *, int);
-static void OP_ST (instr_info *, int, int);
-static void OP_STi (instr_info *, int, int);
+static bool dofloat (instr_info *, int);
 static int putop (instr_info *, const char *, int);
 static void oappend_with_style (instr_info *, const char *,
 				enum disassembler_style);
 static void oappend (instr_info *, const char *);
 static void append_seg (instr_info *);
-static void OP_indirE (instr_info *, int, int);
-static void OP_E_memory (instr_info *, int, int);
-static void OP_E (instr_info *, int, int);
-static void OP_G (instr_info *, int, int);
-static bfd_vma get64 (instr_info *);
-static bfd_signed_vma get32 (instr_info *);
-static bfd_signed_vma get32s (instr_info *);
-static int get16 (instr_info *);
+static bool get32s (instr_info *, bfd_vma *);
+static bool get16 (instr_info *, bfd_vma *);
+static bool get16s (instr_info *, bfd_vma *);
+static bool get8s (instr_info *, bfd_vma *);
 static void set_op (instr_info *, bfd_vma, bool);
-static void OP_Skip_MODRM (instr_info *, int, int);
-static void OP_REG (instr_info *, int, int);
-static void OP_IMREG (instr_info *, int, int);
-static void OP_I (instr_info *, int, int);
-static void OP_I64 (instr_info *, int, int);
-static void OP_sI (instr_info *, int, int);
-static void OP_J (instr_info *, int, int);
-static void OP_SEG (instr_info *, int, int);
-static void OP_DIR (instr_info *, int, int);
-static void OP_OFF (instr_info *, int, int);
-static void OP_OFF64 (instr_info *, int, int);
-static void ptr_reg (instr_info *, int, int);
-static void OP_ESreg (instr_info *, int, int);
-static void OP_DSreg (instr_info *, int, int);
-static void OP_C (instr_info *, int, int);
-static void OP_D (instr_info *, int, int);
-static void OP_T (instr_info *, int, int);
-static void OP_MMX (instr_info *, int, int);
-static void OP_XMM (instr_info *, int, int);
-static void OP_EM (instr_info *, int, int);
-static void OP_EX (instr_info *, int, int);
-static void OP_EMC (instr_info *, int,int);
-static void OP_MXC (instr_info *, int,int);
-static void OP_MS (instr_info *, int, int);
-static void OP_XS (instr_info *, int, int);
-static void OP_M (instr_info *, int, int);
-static void OP_VEX (instr_info *, int, int);
-static void OP_VexR (instr_info *, int, int);
-static void OP_VexW (instr_info *, int, int);
-static void OP_Rounding (instr_info *, int, int);
-static void OP_REG_VexI4 (instr_info *, int, int);
-static void OP_VexI4 (instr_info *, int, int);
-static void PCLMUL_Fixup (instr_info *, int, int);
-static void VPCMP_Fixup (instr_info *, int, int);
-static void VPCOM_Fixup (instr_info *, int, int);
-static void OP_0f07 (instr_info *, int, int);
-static void OP_Monitor (instr_info *, int, int);
-static void OP_Mwait (instr_info *, int, int);
-static void NOP_Fixup (instr_info *, int, int);
-static void OP_3DNowSuffix (instr_info *, int, int);
-static void CMP_Fixup (instr_info *, int, int);
-static void BadOp (instr_info *);
-static void REP_Fixup (instr_info *, int, int);
-static void SEP_Fixup (instr_info *, int, int);
-static void BND_Fixup (instr_info *, int, int);
-static void NOTRACK_Fixup (instr_info *, int, int);
-static void HLE_Fixup1 (instr_info *, int, int);
-static void HLE_Fixup2 (instr_info *, int, int);
-static void HLE_Fixup3 (instr_info *, int, int);
-static void CMPXCHG8B_Fixup (instr_info *, int, int);
-static void XMM_Fixup (instr_info *, int, int);
-static void FXSAVE_Fixup (instr_info *, int, int);
 
-static void MOVSXD_Fixup (instr_info *, int, int);
-static void DistinctDest_Fixup (instr_info *, int, int);
-static void PREFETCHI_Fixup (instr_info *, int, int);
+static bool OP_E (instr_info *, int, int);
+static bool OP_E_memory (instr_info *, int, int);
+static bool OP_indirE (instr_info *, int, int);
+static bool OP_G (instr_info *, int, int);
+static bool OP_ST (instr_info *, int, int);
+static bool OP_STi (instr_info *, int, int);
+static bool OP_Skip_MODRM (instr_info *, int, int);
+static bool OP_REG (instr_info *, int, int);
+static bool OP_IMREG (instr_info *, int, int);
+static bool OP_I (instr_info *, int, int);
+static bool OP_I64 (instr_info *, int, int);
+static bool OP_sI (instr_info *, int, int);
+static bool OP_J (instr_info *, int, int);
+static bool OP_SEG (instr_info *, int, int);
+static bool OP_DIR (instr_info *, int, int);
+static bool OP_OFF (instr_info *, int, int);
+static bool OP_OFF64 (instr_info *, int, int);
+static bool OP_ESreg (instr_info *, int, int);
+static bool OP_DSreg (instr_info *, int, int);
+static bool OP_C (instr_info *, int, int);
+static bool OP_D (instr_info *, int, int);
+static bool OP_T (instr_info *, int, int);
+static bool OP_MMX (instr_info *, int, int);
+static bool OP_XMM (instr_info *, int, int);
+static bool OP_EM (instr_info *, int, int);
+static bool OP_EX (instr_info *, int, int);
+static bool OP_EMC (instr_info *, int,int);
+static bool OP_MXC (instr_info *, int,int);
+static bool OP_MS (instr_info *, int, int);
+static bool OP_XS (instr_info *, int, int);
+static bool OP_M (instr_info *, int, int);
+static bool OP_VEX (instr_info *, int, int);
+static bool OP_VexR (instr_info *, int, int);
+static bool OP_VexW (instr_info *, int, int);
+static bool OP_Rounding (instr_info *, int, int);
+static bool OP_REG_VexI4 (instr_info *, int, int);
+static bool OP_VexI4 (instr_info *, int, int);
+static bool OP_0f07 (instr_info *, int, int);
+static bool OP_Monitor (instr_info *, int, int);
+static bool OP_Mwait (instr_info *, int, int);
+
+static bool BadOp (instr_info *);
+
+static bool PCLMUL_Fixup (instr_info *, int, int);
+static bool VPCMP_Fixup (instr_info *, int, int);
+static bool VPCOM_Fixup (instr_info *, int, int);
+static bool NOP_Fixup (instr_info *, int, int);
+static bool OP_3DNowSuffix (instr_info *, int, int);
+static bool CMP_Fixup (instr_info *, int, int);
+static bool REP_Fixup (instr_info *, int, int);
+static bool SEP_Fixup (instr_info *, int, int);
+static bool BND_Fixup (instr_info *, int, int);
+static bool NOTRACK_Fixup (instr_info *, int, int);
+static bool HLE_Fixup1 (instr_info *, int, int);
+static bool HLE_Fixup2 (instr_info *, int, int);
+static bool HLE_Fixup3 (instr_info *, int, int);
+static bool CMPXCHG8B_Fixup (instr_info *, int, int);
+static bool XMM_Fixup (instr_info *, int, int);
+static bool FXSAVE_Fixup (instr_info *, int, int);
+static bool MOVSXD_Fixup (instr_info *, int, int);
+static bool DistinctDest_Fixup (instr_info *, int, int);
+static bool PREFETCHI_Fixup (instr_info *, int, int);
+
+static void ATTRIBUTE_PRINTF_3 i386_dis_printf (const disassemble_info *,
+						enum disassembler_style,
+						const char *, ...);
 
 /* This character is used to encode style information within the output
    buffers.  See oappend_insert_style for more details.  */
@@ -129,7 +133,6 @@ struct dis_private {
   bfd_byte the_buffer[MAX_MNEM_SIZE];
   bfd_vma insn_start;
   int orig_sizeflag;
-  OPCODES_SIGJMP_BUF bailout;
 };
 
 enum address_mode
@@ -138,6 +141,8 @@ enum address_mode
   mode_32bit,
   mode_64bit
 };
+
+static const char *prefix_name (enum address_mode, int, int);
 
 enum x86_64_isa
 {
@@ -289,26 +294,23 @@ struct instr_info
 #define PREFIX_FWAIT 0x800
 
 /* Make sure that bytes from INFO->PRIVATE_DATA->BUFFER (inclusive)
-   to ADDR (exclusive) are valid.  Returns 1 for success, longjmps
+   to ADDR (exclusive) are valid.  Returns true for success, false
    on error.  */
-#define FETCH_DATA(info, addr) \
-  ((addr) <= ((struct dis_private *) (info->private_data))->max_fetched \
-   ? 1 : fetch_data ((info), (addr)))
-
-static int
-fetch_data (struct disassemble_info *info, bfd_byte *addr)
+static bool
+fetch_code (struct disassemble_info *info, bfd_byte *until)
 {
-  int status;
-  struct dis_private *priv = (struct dis_private *) info->private_data;
+  int status = -1;
+  struct dis_private *priv = info->private_data;
   bfd_vma start = priv->insn_start + (priv->max_fetched - priv->the_buffer);
 
-  if (addr <= priv->the_buffer + MAX_MNEM_SIZE)
+  if (until <= priv->max_fetched)
+    return true;
+
+  if (until <= priv->the_buffer + MAX_MNEM_SIZE)
     status = (*info->read_memory_func) (start,
 					priv->max_fetched,
-					addr - priv->max_fetched,
+					until - priv->max_fetched,
 					info);
-  else
-    status = -1;
   if (status != 0)
     {
       /* If we did manage to read at least one byte, then
@@ -317,10 +319,51 @@ fetch_data (struct disassemble_info *info, bfd_byte *addr)
 	 STATUS.  */
       if (priv->max_fetched == priv->the_buffer)
 	(*info->memory_error_func) (status, start, info);
-      OPCODES_SIGLONGJMP (priv->bailout, 1);
+      return false;
     }
+
+  priv->max_fetched = until;
+  return true;
+}
+
+static bool
+fetch_modrm (instr_info *ins)
+{
+  if (!fetch_code (ins->info, ins->codep + 1))
+    return false;
+
+  ins->modrm.mod = (*ins->codep >> 6) & 3;
+  ins->modrm.reg = (*ins->codep >> 3) & 7;
+  ins->modrm.rm = *ins->codep & 7;
+
+  return true;
+}
+
+static int
+fetch_error (const instr_info *ins)
+{
+  /* Getting here means we tried for data but didn't get it.  That
+     means we have an incomplete instruction of some sort.  Just
+     print the first byte as a prefix or a .byte pseudo-op.  */
+  const struct dis_private *priv = ins->info->private_data;
+  const char *name = NULL;
+
+  if (ins->codep <= priv->the_buffer)
+    return -1;
+
+  if (ins->prefixes || ins->fwait_prefix >= 0 || (ins->rex & REX_OPCODE))
+    name = prefix_name (ins->address_mode, priv->the_buffer[0],
+			priv->orig_sizeflag);
+  if (name != NULL)
+    i386_dis_printf (ins->info, dis_style_mnemonic, "%s", name);
   else
-    priv->max_fetched = addr;
+    {
+      /* Just print the first byte as a .byte instruction.  */
+      i386_dis_printf (ins->info, dis_style_assembler_directive, ".byte ");
+      i386_dis_printf (ins->info, dis_style_immediate, "%#x",
+		       (unsigned int) priv->the_buffer[0]);
+    }
+
   return 1;
 }
 
@@ -802,7 +845,7 @@ enum
   REG_VEX_0F72_M_0,
   REG_VEX_0F73_M_0,
   REG_VEX_0FAE,
-  REG_VEX_0F3849_X86_64_P_0_W_0_M_1,
+  REG_VEX_0F3849_X86_64_L_0_W_0_M_1_P_0,
   REG_VEX_0F38F3_L_0,
 
   REG_XOP_09_01_L_0,
@@ -930,19 +973,12 @@ enum
   MOD_VEX_0F382D,
   MOD_VEX_0F382E,
   MOD_VEX_0F382F,
-  MOD_VEX_0F3849_X86_64_P_0_W_0,
-  MOD_VEX_0F3849_X86_64_P_2_W_0,
-  MOD_VEX_0F3849_X86_64_P_3_W_0,
-  MOD_VEX_0F384B_X86_64_P_1_W_0,
-  MOD_VEX_0F384B_X86_64_P_2_W_0,
-  MOD_VEX_0F384B_X86_64_P_3_W_0,
+  MOD_VEX_0F3849_X86_64_L_0_W_0,
+  MOD_VEX_0F384B_X86_64_L_0_W_0,
   MOD_VEX_0F385A,
-  MOD_VEX_0F385C_X86_64_P_1_W_0,
-  MOD_VEX_0F385C_X86_64_P_3_W_0,
-  MOD_VEX_0F385E_X86_64_P_0_W_0,
-  MOD_VEX_0F385E_X86_64_P_1_W_0,
-  MOD_VEX_0F385E_X86_64_P_2_W_0,
-  MOD_VEX_0F385E_X86_64_P_3_W_0,
+  MOD_VEX_0F385C_X86_64,
+  MOD_VEX_0F385E_X86_64,
+  MOD_VEX_0F386C_X86_64,
   MOD_VEX_0F388C,
   MOD_VEX_0F388E,
   MOD_VEX_0F3A30_L_0,
@@ -982,7 +1018,8 @@ enum
   RM_0FAE_REG_7_MOD_3,
   RM_0F3A0F_P_1_MOD_3_REG_0,
 
-  RM_VEX_0F3849_X86_64_P_0_W_0_M_1_R_0
+  RM_VEX_0F3849_X86_64_L_0_W_0_M_1_P_0_R_0,
+  RM_VEX_0F3849_X86_64_L_0_W_0_M_1_P_3,
 };
 
 enum
@@ -1139,12 +1176,14 @@ enum
   PREFIX_VEX_0FD0,
   PREFIX_VEX_0FE6,
   PREFIX_VEX_0FF0,
-  PREFIX_VEX_0F3849_X86_64,
-  PREFIX_VEX_0F384B_X86_64,
+  PREFIX_VEX_0F3849_X86_64_L_0_W_0_M_0,
+  PREFIX_VEX_0F3849_X86_64_L_0_W_0_M_1,
+  PREFIX_VEX_0F384B_X86_64_L_0_W_0_M_0,
   PREFIX_VEX_0F3850_W_0,
   PREFIX_VEX_0F3851_W_0,
-  PREFIX_VEX_0F385C_X86_64,
-  PREFIX_VEX_0F385E_X86_64,
+  PREFIX_VEX_0F385C_X86_64_M_1_L_0_W_0,
+  PREFIX_VEX_0F385E_X86_64_M_1_L_0_W_0,
+  PREFIX_VEX_0F386C_X86_64_M_1_L_0_W_0,
   PREFIX_VEX_0F3872,
   PREFIX_VEX_0F38B0_W_0,
   PREFIX_VEX_0F38B1_W_0,
@@ -1298,6 +1337,7 @@ enum
   X86_64_VEX_0F384B,
   X86_64_VEX_0F385C,
   X86_64_VEX_0F385E,
+  X86_64_VEX_0F386C,
   X86_64_VEX_0F38E0,
   X86_64_VEX_0F38E1,
   X86_64_VEX_0F38E2,
@@ -1384,20 +1424,12 @@ enum
   VEX_LEN_0F381A_M_0,
   VEX_LEN_0F3836,
   VEX_LEN_0F3841,
-  VEX_LEN_0F3849_X86_64_P_0_W_0_M_0,
-  VEX_LEN_0F3849_X86_64_P_0_W_0_M_1_REG_0_RM_0,
-  VEX_LEN_0F3849_X86_64_P_2_W_0_M_0,
-  VEX_LEN_0F3849_X86_64_P_3_W_0_M_0,
-  VEX_LEN_0F384B_X86_64_P_1_W_0_M_0,
-  VEX_LEN_0F384B_X86_64_P_2_W_0_M_0,
-  VEX_LEN_0F384B_X86_64_P_3_W_0_M_0,
+  VEX_LEN_0F3849_X86_64,
+  VEX_LEN_0F384B_X86_64,
   VEX_LEN_0F385A_M_0,
-  VEX_LEN_0F385C_X86_64_P_1_W_0_M_0,
-  VEX_LEN_0F385C_X86_64_P_3_W_0_M_0,
-  VEX_LEN_0F385E_X86_64_P_0_W_0_M_0,
-  VEX_LEN_0F385E_X86_64_P_1_W_0_M_0,
-  VEX_LEN_0F385E_X86_64_P_2_W_0_M_0,
-  VEX_LEN_0F385E_X86_64_P_3_W_0_M_0,
+  VEX_LEN_0F385C_X86_64_M_1,
+  VEX_LEN_0F385E_X86_64_M_1,
+  VEX_LEN_0F386C_X86_64_M_1,
   VEX_LEN_0F38DB,
   VEX_LEN_0F38F2,
   VEX_LEN_0F38F3,
@@ -1546,12 +1578,8 @@ enum
   VEX_W_0F382F_M_0,
   VEX_W_0F3836,
   VEX_W_0F3846,
-  VEX_W_0F3849_X86_64_P_0,
-  VEX_W_0F3849_X86_64_P_2,
-  VEX_W_0F3849_X86_64_P_3,
-  VEX_W_0F384B_X86_64_P_1,
-  VEX_W_0F384B_X86_64_P_2,
-  VEX_W_0F384B_X86_64_P_3,
+  VEX_W_0F3849_X86_64_L_0,
+  VEX_W_0F384B_X86_64_L_0,
   VEX_W_0F3850,
   VEX_W_0F3851,
   VEX_W_0F3852,
@@ -1559,12 +1587,9 @@ enum
   VEX_W_0F3858,
   VEX_W_0F3859,
   VEX_W_0F385A_M_0_L_0,
-  VEX_W_0F385C_X86_64_P_1,
-  VEX_W_0F385C_X86_64_P_3,
-  VEX_W_0F385E_X86_64_P_0,
-  VEX_W_0F385E_X86_64_P_1,
-  VEX_W_0F385E_X86_64_P_2,
-  VEX_W_0F385E_X86_64_P_3,
+  VEX_W_0F385C_X86_64_M_1_L_0,
+  VEX_W_0F385E_X86_64_M_1_L_0,
+  VEX_W_0F386C_X86_64_M_1_L_0,
   VEX_W_0F3872_P_1,
   VEX_W_0F3878,
   VEX_W_0F3879,
@@ -1740,7 +1765,7 @@ enum
   EVEX_W_MAP5_7A_P_3,
 };
 
-typedef void (*op_rtn) (instr_info *ins, int bytemode, int sizeflag);
+typedef bool (*op_rtn) (instr_info *ins, int bytemode, int sizeflag);
 
 struct dis386 {
   const char *name;
@@ -2462,48 +2487,48 @@ struct op
    need to update onebyte_has_modrm or twobyte_has_modrm.  */
 #define MODRM_CHECK  if (!ins->need_modrm) abort ()
 
-static const char *const intel_index16[] = {
+static const char intel_index16[][6] = {
   "bx+si", "bx+di", "bp+si", "bp+di", "si", "di", "bp", "bx"
 };
 
-static const char *const att_names64[] = {
+static const char att_names64[][8] = {
   "%rax", "%rcx", "%rdx", "%rbx", "%rsp", "%rbp", "%rsi", "%rdi",
   "%r8", "%r9", "%r10", "%r11", "%r12", "%r13", "%r14", "%r15"
 };
-static const char *const att_names32[] = {
+static const char att_names32[][8] = {
   "%eax", "%ecx", "%edx", "%ebx", "%esp", "%ebp", "%esi", "%edi",
   "%r8d", "%r9d", "%r10d", "%r11d", "%r12d", "%r13d", "%r14d", "%r15d"
 };
-static const char *const att_names16[] = {
+static const char att_names16[][8] = {
   "%ax", "%cx", "%dx", "%bx", "%sp", "%bp", "%si", "%di",
   "%r8w", "%r9w", "%r10w", "%r11w", "%r12w", "%r13w", "%r14w", "%r15w"
 };
-static const char *const att_names8[] = {
+static const char att_names8[][8] = {
   "%al", "%cl", "%dl", "%bl", "%ah", "%ch", "%dh", "%bh",
 };
-static const char *const att_names8rex[] = {
+static const char att_names8rex[][8] = {
   "%al", "%cl", "%dl", "%bl", "%spl", "%bpl", "%sil", "%dil",
   "%r8b", "%r9b", "%r10b", "%r11b", "%r12b", "%r13b", "%r14b", "%r15b"
 };
-static const char *const att_names_seg[] = {
+static const char att_names_seg[][4] = {
   "%es", "%cs", "%ss", "%ds", "%fs", "%gs", "%?", "%?",
 };
 static const char att_index64[] = "%riz";
 static const char att_index32[] = "%eiz";
-static const char *const att_index16[] = {
+static const char att_index16[][8] = {
   "%bx,%si", "%bx,%di", "%bp,%si", "%bp,%di", "%si", "%di", "%bp", "%bx"
 };
 
-static const char *const att_names_mm[] = {
+static const char att_names_mm[][8] = {
   "%mm0", "%mm1", "%mm2", "%mm3",
   "%mm4", "%mm5", "%mm6", "%mm7"
 };
 
-static const char *const att_names_bnd[] = {
+static const char att_names_bnd[][8] = {
   "%bnd0", "%bnd1", "%bnd2", "%bnd3"
 };
 
-static const char *const att_names_xmm[] = {
+static const char att_names_xmm[][8] = {
   "%xmm0", "%xmm1", "%xmm2", "%xmm3",
   "%xmm4", "%xmm5", "%xmm6", "%xmm7",
   "%xmm8", "%xmm9", "%xmm10", "%xmm11",
@@ -2514,7 +2539,7 @@ static const char *const att_names_xmm[] = {
   "%xmm28", "%xmm29", "%xmm30", "%xmm31"
 };
 
-static const char *const att_names_ymm[] = {
+static const char att_names_ymm[][8] = {
   "%ymm0", "%ymm1", "%ymm2", "%ymm3",
   "%ymm4", "%ymm5", "%ymm6", "%ymm7",
   "%ymm8", "%ymm9", "%ymm10", "%ymm11",
@@ -2525,7 +2550,7 @@ static const char *const att_names_ymm[] = {
   "%ymm28", "%ymm29", "%ymm30", "%ymm31"
 };
 
-static const char *const att_names_zmm[] = {
+static const char att_names_zmm[][8] = {
   "%zmm0", "%zmm1", "%zmm2", "%zmm3",
   "%zmm4", "%zmm5", "%zmm6", "%zmm7",
   "%zmm8", "%zmm9", "%zmm10", "%zmm11",
@@ -2536,12 +2561,12 @@ static const char *const att_names_zmm[] = {
   "%zmm28", "%zmm29", "%zmm30", "%zmm31"
 };
 
-static const char *const att_names_tmm[] = {
+static const char att_names_tmm[][8] = {
   "%tmm0", "%tmm1", "%tmm2", "%tmm3",
   "%tmm4", "%tmm5", "%tmm6", "%tmm7"
 };
 
-static const char *const att_names_mask[] = {
+static const char att_names_mask[][8] = {
   "%k0", "%k1", "%k2", "%k3", "%k4", "%k5", "%k6", "%k7"
 };
 
@@ -2916,9 +2941,9 @@ static const struct dis386 reg_table[][8] = {
     { MOD_TABLE (MOD_VEX_0FAE_REG_2) },
     { MOD_TABLE (MOD_VEX_0FAE_REG_3) },
   },
-  /* REG_VEX_0F3849_X86_64_P_0_W_0_M_1 */
+  /* REG_VEX_0F3849_X86_64_L_0_W_0_M_1_P_0 */
   {
-    { RM_TABLE (RM_VEX_0F3849_X86_64_P_0_W_0_M_1_R_0) },
+    { RM_TABLE (RM_VEX_0F3849_X86_64_L_0_W_0_M_1_P_0_R_0) },
   },
   /* REG_VEX_0F38F3_L_0 */
   {
@@ -4072,20 +4097,27 @@ static const struct dis386 prefix_table[][4] = {
     { MOD_TABLE (MOD_VEX_0FF0_PREFIX_3) },
   },
 
-  /* PREFIX_VEX_0F3849_X86_64 */
+  /* PREFIX_VEX_0F3849_X86_64_L_0_W_0_M_0 */
   {
-    { VEX_W_TABLE (VEX_W_0F3849_X86_64_P_0) },
+    { "ldtilecfg", { M }, 0 },
     { Bad_Opcode },
-    { VEX_W_TABLE (VEX_W_0F3849_X86_64_P_2) },
-    { VEX_W_TABLE (VEX_W_0F3849_X86_64_P_3) },
+    { "sttilecfg", { M }, 0 },
   },
 
-  /* PREFIX_VEX_0F384B_X86_64 */
+  /* PREFIX_VEX_0F3849_X86_64_L_0_W_0_M_1 */
+  {
+    { REG_TABLE (REG_VEX_0F3849_X86_64_L_0_W_0_M_1_P_0) },
+    { Bad_Opcode },
+    { Bad_Opcode },
+    { RM_TABLE (RM_VEX_0F3849_X86_64_L_0_W_0_M_1_P_3) },
+  },
+
+  /* PREFIX_VEX_0F384B_X86_64_L_0_W_0_M_0 */
   {
     { Bad_Opcode },
-    { VEX_W_TABLE (VEX_W_0F384B_X86_64_P_1) },
-    { VEX_W_TABLE (VEX_W_0F384B_X86_64_P_2) },
-    { VEX_W_TABLE (VEX_W_0F384B_X86_64_P_3) },
+    { "tilestored",	{ MVexSIBMEM, TMM }, 0 },
+    { "tileloaddt1",	{ TMM, MVexSIBMEM }, 0 },
+    { "tileloadd",	{ TMM, MVexSIBMEM }, 0 },
   },
 
   /* PREFIX_VEX_0F3850_W_0 */
@@ -4103,20 +4135,27 @@ static const struct dis386 prefix_table[][4] = {
     { "%XVvpdpbusds",	{ XM, Vex, EXx }, 0 },
     { "vpdpbssds",	{ XM, Vex, EXx }, 0 },
   },
-  /* PREFIX_VEX_0F385C_X86_64 */
+  /* PREFIX_VEX_0F385C_X86_64_M_1_L_0_W_0 */
   {
     { Bad_Opcode },
-    { VEX_W_TABLE (VEX_W_0F385C_X86_64_P_1) },
+    { "tdpbf16ps", { TMM, EXtmm, VexTmm }, 0 },
     { Bad_Opcode },
-    { VEX_W_TABLE (VEX_W_0F385C_X86_64_P_3) },
+    { "tdpfp16ps", { TMM, EXtmm, VexTmm }, 0 },
   },
 
-  /* PREFIX_VEX_0F385E_X86_64 */
+  /* PREFIX_VEX_0F385E_X86_64_M_1_L_0_W_0 */
   {
-    { VEX_W_TABLE (VEX_W_0F385E_X86_64_P_0) },
-    { VEX_W_TABLE (VEX_W_0F385E_X86_64_P_1) },
-    { VEX_W_TABLE (VEX_W_0F385E_X86_64_P_2) },
-    { VEX_W_TABLE (VEX_W_0F385E_X86_64_P_3) },
+    { "tdpbuud", {TMM, EXtmm, VexTmm }, 0 },
+    { "tdpbsud", {TMM, EXtmm, VexTmm }, 0 },
+    { "tdpbusd", {TMM, EXtmm, VexTmm }, 0 },
+    { "tdpbssd", {TMM, EXtmm, VexTmm }, 0 },
+  },
+
+  /* PREFIX_VEX_0F386C_X86_64_M_1_L_0_W_0 */
+  {
+    { "tcmmrlfp16ps", { TMM, EXtmm, VexTmm }, 0 },
+    { Bad_Opcode },
+    { "tcmmimfp16ps", { TMM, EXtmm, VexTmm }, 0 },
   },
 
   /* PREFIX_VEX_0F3872 */
@@ -4465,25 +4504,31 @@ static const struct dis386 x86_64_table[][2] = {
   /* X86_64_VEX_0F3849 */
   {
     { Bad_Opcode },
-    { PREFIX_TABLE (PREFIX_VEX_0F3849_X86_64) },
+    { VEX_LEN_TABLE (VEX_LEN_0F3849_X86_64) },
   },
 
   /* X86_64_VEX_0F384B */
   {
     { Bad_Opcode },
-    { PREFIX_TABLE (PREFIX_VEX_0F384B_X86_64) },
+    { VEX_LEN_TABLE (VEX_LEN_0F384B_X86_64) },
   },
 
   /* X86_64_VEX_0F385C */
   {
     { Bad_Opcode },
-    { PREFIX_TABLE (PREFIX_VEX_0F385C_X86_64) },
+    { MOD_TABLE (MOD_VEX_0F385C_X86_64) },
   },
 
   /* X86_64_VEX_0F385E */
   {
     { Bad_Opcode },
-    { PREFIX_TABLE (PREFIX_VEX_0F385E_X86_64) },
+    { MOD_TABLE (MOD_VEX_0F385E_X86_64) },
+  },
+
+  /* X86_64_VEX_0F386C */
+  {
+    { Bad_Opcode },
+    { MOD_TABLE (MOD_VEX_0F386C_X86_64) },
   },
 
   /* X86_64_VEX_0F38E0 */
@@ -6461,7 +6506,7 @@ static const struct dis386 vex_table[][256] = {
     { Bad_Opcode },
     { Bad_Opcode },
     { Bad_Opcode },
-    { Bad_Opcode },
+    { X86_64_TABLE (X86_64_VEX_0F386C) },
     { Bad_Opcode },
     { Bad_Opcode },
     { Bad_Opcode },
@@ -7111,38 +7156,14 @@ static const struct dis386 vex_len_table[][2] = {
     { "vphminposuw",	{ XM, EXx }, PREFIX_DATA },
   },
 
-   /* VEX_LEN_0F3849_X86_64_P_0_W_0_M_0 */
+  /* VEX_LEN_0F3849_X86_64 */
   {
-    { "ldtilecfg", { M }, 0 },
+    { VEX_W_TABLE (VEX_W_0F3849_X86_64_L_0) },
   },
 
-  /* VEX_LEN_0F3849_X86_64_P_0_W_0_M_1_REG_0_RM_0 */
+  /* VEX_LEN_0F384B_X86_64 */
   {
-    { "tilerelease", { Skip_MODRM }, 0 },
-  },
-
-  /* VEX_LEN_0F3849_X86_64_P_2_W_0_M_0 */
-  {
-    { "sttilecfg", { M }, 0 },
-  },
-
-  /* VEX_LEN_0F3849_X86_64_P_3_W_0_M_0 */
-  {
-    { "tilezero", { TMM, Skip_MODRM }, 0 },
-  },
-
-  /* VEX_LEN_0F384B_X86_64_P_1_W_0_M_0 */
-  {
-    { "tilestored", { MVexSIBMEM, TMM }, 0 },
-  },
-  /* VEX_LEN_0F384B_X86_64_P_2_W_0_M_0 */
-  {
-    { "tileloaddt1", { TMM, MVexSIBMEM }, 0 },
-  },
-
-  /* VEX_LEN_0F384B_X86_64_P_3_W_0_M_0 */
-  {
-    { "tileloadd", { TMM, MVexSIBMEM }, 0 },
+    { VEX_W_TABLE (VEX_W_0F384B_X86_64_L_0) },
   },
 
   /* VEX_LEN_0F385A_M_0 */
@@ -7151,34 +7172,19 @@ static const struct dis386 vex_len_table[][2] = {
     { VEX_W_TABLE (VEX_W_0F385A_M_0_L_0) },
   },
 
-  /* VEX_LEN_0F385C_X86_64_P_1_W_0_M_0 */
+  /* VEX_LEN_0F385C_X86_64_M_1 */
   {
-    { "tdpbf16ps", { TMM, EXtmm, VexTmm }, 0 },
+    { VEX_W_TABLE (VEX_W_0F385C_X86_64_M_1_L_0) },
   },
 
-  /* VEX_LEN_0F385C_X86_64_P_3_W_0_M_0 */
+  /* VEX_LEN_0F385E_X86_64_M_1 */
   {
-    { "tdpfp16ps", { TMM, EXtmm, VexTmm }, 0 },
+    { VEX_W_TABLE (VEX_W_0F385E_X86_64_M_1_L_0) },
   },
 
-  /* VEX_LEN_0F385E_X86_64_P_0_W_0_M_0 */
+  /* VEX_LEN_0F386C_X86_64_M_1 */
   {
-    { "tdpbuud", {TMM, EXtmm, VexTmm }, 0 },
-  },
-
-  /* VEX_LEN_0F385E_X86_64_P_1_W_0_M_0 */
-  {
-    { "tdpbsud", {TMM, EXtmm, VexTmm }, 0 },
-  },
-
-  /* VEX_LEN_0F385E_X86_64_P_2_W_0_M_0 */
-  {
-    { "tdpbusd", {TMM, EXtmm, VexTmm }, 0 },
-  },
-
-  /* VEX_LEN_0F385E_X86_64_P_3_W_0_M_0 */
-  {
-    { "tdpbssd", {TMM, EXtmm, VexTmm }, 0 },
+    { VEX_W_TABLE (VEX_W_0F386C_X86_64_M_1_L_0) },
   },
 
   /* VEX_LEN_0F38DB */
@@ -7774,28 +7780,12 @@ static const struct dis386 vex_w_table[][2] = {
     { "vpsravd",	{ XM, Vex, EXx }, PREFIX_DATA },
   },
   {
-    /* VEX_W_0F3849_X86_64_P_0 */
-    { MOD_TABLE (MOD_VEX_0F3849_X86_64_P_0_W_0) },
+    /* VEX_W_0F3849_X86_64_L_0 */
+    { MOD_TABLE (MOD_VEX_0F3849_X86_64_L_0_W_0) },
   },
   {
-    /* VEX_W_0F3849_X86_64_P_2 */
-    { MOD_TABLE (MOD_VEX_0F3849_X86_64_P_2_W_0) },
-  },
-  {
-    /* VEX_W_0F3849_X86_64_P_3 */
-    { MOD_TABLE (MOD_VEX_0F3849_X86_64_P_3_W_0) },
-  },
-  {
-    /* VEX_W_0F384B_X86_64_P_1 */
-    { MOD_TABLE (MOD_VEX_0F384B_X86_64_P_1_W_0) },
-  },
-  {
-    /* VEX_W_0F384B_X86_64_P_2 */
-    { MOD_TABLE (MOD_VEX_0F384B_X86_64_P_2_W_0) },
-  },
-  {
-    /* VEX_W_0F384B_X86_64_P_3 */
-    { MOD_TABLE (MOD_VEX_0F384B_X86_64_P_3_W_0) },
+    /* VEX_W_0F384B_X86_64_L_0 */
+    { MOD_TABLE (MOD_VEX_0F384B_X86_64_L_0_W_0) },
   },
   {
     /* VEX_W_0F3850 */
@@ -7826,28 +7816,16 @@ static const struct dis386 vex_w_table[][2] = {
     { "vbroadcasti128", { XM, Mxmm }, PREFIX_DATA },
   },
   {
-    /* VEX_W_0F385C_X86_64_P_1 */
-    { MOD_TABLE (MOD_VEX_0F385C_X86_64_P_1_W_0) },
+    /* VEX_W_0F385C_X86_64_M_1_L_0 */
+    { PREFIX_TABLE (PREFIX_VEX_0F385C_X86_64_M_1_L_0_W_0) },
   },
   {
-    /* VEX_W_0F385C_X86_64_P_3 */
-    { MOD_TABLE (MOD_VEX_0F385C_X86_64_P_3_W_0) },
+    /* VEX_W_0F385E_X86_64_M_1_L_0 */
+    { PREFIX_TABLE (PREFIX_VEX_0F385E_X86_64_M_1_L_0_W_0) },
   },
   {
-    /* VEX_W_0F385E_X86_64_P_0 */
-    { MOD_TABLE (MOD_VEX_0F385E_X86_64_P_0_W_0) },
-  },
-  {
-    /* VEX_W_0F385E_X86_64_P_1 */
-    { MOD_TABLE (MOD_VEX_0F385E_X86_64_P_1_W_0) },
-  },
-  {
-    /* VEX_W_0F385E_X86_64_P_2 */
-    { MOD_TABLE (MOD_VEX_0F385E_X86_64_P_2_W_0) },
-  },
-  {
-    /* VEX_W_0F385E_X86_64_P_3 */
-    { MOD_TABLE (MOD_VEX_0F385E_X86_64_P_3_W_0) },
+    /* VEX_W_0F386C_X86_64_M_1_L_0 */
+    { PREFIX_TABLE (PREFIX_VEX_0F386C_X86_64_M_1_L_0_W_0) },
   },
   {
     /* VEX_W_0F3872_P_1 */
@@ -8637,64 +8615,32 @@ static const struct dis386 mod_table[][2] = {
     { VEX_W_TABLE (VEX_W_0F382F_M_0) },
   },
   {
-    /* MOD_VEX_0F3849_X86_64_P_0_W_0 */
-    { VEX_LEN_TABLE (VEX_LEN_0F3849_X86_64_P_0_W_0_M_0) },
-    { REG_TABLE (REG_VEX_0F3849_X86_64_P_0_W_0_M_1) },
+    /* MOD_VEX_0F3849_X86_64_L_0_W_0 */
+    { PREFIX_TABLE (PREFIX_VEX_0F3849_X86_64_L_0_W_0_M_0) },
+    { PREFIX_TABLE (PREFIX_VEX_0F3849_X86_64_L_0_W_0_M_1) },
   },
   {
-    /* MOD_VEX_0F3849_X86_64_P_2_W_0 */
-    { VEX_LEN_TABLE (VEX_LEN_0F3849_X86_64_P_2_W_0_M_0) },
-  },
-  {
-    /* MOD_VEX_0F3849_X86_64_P_3_W_0 */
-    { Bad_Opcode },
-    { VEX_LEN_TABLE (VEX_LEN_0F3849_X86_64_P_3_W_0_M_0) },
-  },
-  {
-    /* MOD_VEX_0F384B_X86_64_P_1_W_0 */
-    { VEX_LEN_TABLE (VEX_LEN_0F384B_X86_64_P_1_W_0_M_0) },
-  },
-  {
-    /* MOD_VEX_0F384B_X86_64_P_2_W_0 */
-    { VEX_LEN_TABLE (VEX_LEN_0F384B_X86_64_P_2_W_0_M_0) },
-  },
-  {
-    /* MOD_VEX_0F384B_X86_64_P_3_W_0 */
-    { VEX_LEN_TABLE (VEX_LEN_0F384B_X86_64_P_3_W_0_M_0) },
+    /* MOD_VEX_0F384B_X86_64_L_0_W_0 */
+    { PREFIX_TABLE (PREFIX_VEX_0F384B_X86_64_L_0_W_0_M_0) },
   },
   {
     /* MOD_VEX_0F385A */
     { VEX_LEN_TABLE (VEX_LEN_0F385A_M_0) },
   },
   {
-    /* MOD_VEX_0F385C_X86_64_P_1_W_0 */
+    /* MOD_VEX_0F385C_X86_64 */
     { Bad_Opcode },
-    { VEX_LEN_TABLE (VEX_LEN_0F385C_X86_64_P_1_W_0_M_0) },
+    { VEX_LEN_TABLE (VEX_LEN_0F385C_X86_64_M_1) },
   },
   {
-    /* MOD_VEX_0F385C_X86_64_P_3_W_0 */
+    /* MOD_VEX_0F385E_X86_64 */
     { Bad_Opcode },
-    { VEX_LEN_TABLE (VEX_LEN_0F385C_X86_64_P_3_W_0_M_0) },
+    { VEX_LEN_TABLE (VEX_LEN_0F385E_X86_64_M_1) },
   },
   {
-    /* MOD_VEX_0F385E_X86_64_P_0_W_0 */
+    /* MOD_VEX_0F386C_X86_64 */
     { Bad_Opcode },
-    { VEX_LEN_TABLE (VEX_LEN_0F385E_X86_64_P_0_W_0_M_0) },
-  },
-  {
-    /* MOD_VEX_0F385E_X86_64_P_1_W_0 */
-    { Bad_Opcode },
-    { VEX_LEN_TABLE (VEX_LEN_0F385E_X86_64_P_1_W_0_M_0) },
-  },
-  {
-    /* MOD_VEX_0F385E_X86_64_P_2_W_0 */
-    { Bad_Opcode },
-    { VEX_LEN_TABLE (VEX_LEN_0F385E_X86_64_P_2_W_0_M_0) },
-  },
-  {
-    /* MOD_VEX_0F385E_X86_64_P_3_W_0 */
-    { Bad_Opcode },
-    { VEX_LEN_TABLE (VEX_LEN_0F385E_X86_64_P_3_W_0_M_0) },
+    { VEX_LEN_TABLE (VEX_LEN_0F386C_X86_64_M_1) },
   },
   {
     /* MOD_VEX_0F388C */
@@ -8831,8 +8777,12 @@ static const struct dis386 rm_table[][8] = {
     { "hreset",		{ Skip_MODRM, Ib }, 0 },
   },
   {
-    /* RM_VEX_0F3849_X86_64_P_0_W_0_M_1_R_0 */
-    { VEX_LEN_TABLE (VEX_LEN_0F3849_X86_64_P_0_W_0_M_1_REG_0_RM_0) },
+    /* RM_VEX_0F3849_X86_64_L_0_W_0_M_1_P_0_R_0 */
+    { "tilerelease",	{ Skip_MODRM }, 0 },
+  },
+  {
+    /* RM_VEX_0F3849_X86_64_L_0_W_0_M_1_P_3 */
+    { "tilezero",	{ TMM, Skip_MODRM }, 0 },
   },
 };
 
@@ -8846,7 +8796,11 @@ static const struct dis386 rm_table[][8] = {
 #define BND_PREFIX	0x04
 #define NOTRACK_PREFIX	0x05
 
-static int
+static enum {
+  ckp_okay,
+  ckp_bogus,
+  ckp_fetch_error,
+}
 ckprefix (instr_info *ins)
 {
   int newrex, i, length;
@@ -8856,9 +8810,10 @@ ckprefix (instr_info *ins)
   /* The maximum instruction length is 15bytes.  */
   while (length < MAX_CODE_LENGTH - 1)
     {
-      FETCH_DATA (ins->info, ins->codep + 1);
+      if (!fetch_code (ins->info, ins->codep + 1))
+	return ckp_fetch_error;
       newrex = 0;
-      switch (*ins->codep)
+      switch (*ins->codep & 0xff)
 	{
 	/* REX prefixes family.  */
 	case 0x40:
@@ -8878,9 +8833,9 @@ ckprefix (instr_info *ins)
 	case 0x4e:
 	case 0x4f:
 	  if (ins->address_mode == mode_64bit)
-	    newrex = *ins->codep;
+	    newrex = *ins->codep & 0xff;
 	  else
-	    return 1;
+	    return ckp_okay;
 	  ins->last_rex_prefix = i;
 	  break;
 	case 0xf3:
@@ -8948,34 +8903,30 @@ ckprefix (instr_info *ins)
 	      ins->codep++;
 	      /* This ensures that the previous REX prefixes are noticed
 		 as unused prefixes, as in the return case below.  */
-	      ins->rex_used = ins->rex;
-	      return 1;
+	      return ins->rex ? ckp_bogus : ckp_okay;
 	    }
 	  ins->prefixes = PREFIX_FWAIT;
 	  break;
 	default:
-	  return 1;
+	  return ckp_okay;
 	}
       /* Rex is ignored when followed by another prefix.  */
       if (ins->rex)
-	{
-	  ins->rex_used = ins->rex;
-	  return 1;
-	}
-      if (*ins->codep != FWAIT_OPCODE)
-	ins->all_prefixes[i++] = *ins->codep;
+	return ckp_bogus;
+      if ((*ins->codep & 0xff) != FWAIT_OPCODE)
+	ins->all_prefixes[i++] = *ins->codep & 0xff;
       ins->rex = newrex;
       ins->codep++;
       length++;
     }
-  return 0;
+  return ckp_bogus;
 }
 
 /* Return the name of the prefix byte PREF, or NULL if PREF is not a
    prefix byte.  */
 
 static const char *
-prefix_name (instr_info *ins, int pref, int sizeflag)
+prefix_name (enum address_mode mode, int pref, int sizeflag)
 {
   static const char *rexes [16] =
     {
@@ -9038,7 +8989,7 @@ prefix_name (instr_info *ins, int pref, int sizeflag)
     case 0x66:
       return (sizeflag & DFLAG) ? "data16" : "data32";
     case 0x67:
-      if (ins->address_mode == mode_64bit)
+      if (mode == mode_64bit)
 	return (sizeflag & AFLAG) ? "addr32" : "addr64";
       else
 	return (sizeflag & AFLAG) ? "addr16" : "addr32";
@@ -9087,6 +9038,9 @@ with the -M switch (multiple options should be separated by commas):\n"));
 
 /* Bad opcode.  */
 static const struct dis386 bad_opcode = { "(bad)", { XX }, 0 };
+
+/* Fetch error indicator.  */
+static const struct dis386 err_opcode = { NULL, { XX }, 0 };
 
 /* Get a pointer to struct dis386 with a valid name.  */
 
@@ -9189,13 +9143,13 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
       break;
 
     case USE_3BYTE_TABLE:
-      FETCH_DATA (ins->info, ins->codep + 2);
-      vindex = *ins->codep++;
+      if (!fetch_code (ins->info, ins->codep + 2))
+	return &err_opcode;
+      vindex = *ins->codep++ & 0xff;
       dp = &three_byte_table[dp->op[1].bytemode][vindex];
       ins->end_codep = ins->codep;
-      ins->modrm.mod = (*ins->codep >> 6) & 3;
-      ins->modrm.reg = (*ins->codep >> 3) & 7;
-      ins->modrm.rm = *ins->codep & 7;
+      if (!fetch_modrm (ins))
+	return &err_opcode;
       break;
 
     case USE_VEX_LEN_TABLE:
@@ -9249,7 +9203,8 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
       break;
 
     case USE_XOP_8F_TABLE:
-      FETCH_DATA (ins->info, ins->codep + 3);
+      if (!fetch_code (ins->info, ins->codep + 3))
+	return &err_opcode;
       ins->rex = ~(*ins->codep >> 5) & 0x7;
 
       /* VEX_TABLE_INDEX is the mmmmm part of the XOP byte 1 "RCB.mmmmm".  */
@@ -9297,14 +9252,12 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
 	}
       ins->need_vex = true;
       ins->codep++;
-      vindex = *ins->codep++;
+      vindex = *ins->codep++ & 0xff;
       dp = &xop_table[vex_table_index][vindex];
 
       ins->end_codep = ins->codep;
-      FETCH_DATA (ins->info, ins->codep + 1);
-      ins->modrm.mod = (*ins->codep >> 6) & 3;
-      ins->modrm.reg = (*ins->codep >> 3) & 7;
-      ins->modrm.rm = *ins->codep & 7;
+      if (!fetch_modrm (ins))
+	return &err_opcode;
 
       /* No XOP encoding so far allows for a non-zero embedded prefix. Avoid
 	 having to decode the bits for every otherwise valid encoding.  */
@@ -9314,7 +9267,8 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
 
     case USE_VEX_C4_TABLE:
       /* VEX prefix.  */
-      FETCH_DATA (ins->info, ins->codep + 3);
+      if (!fetch_code (ins->info, ins->codep + 3))
+	return &err_opcode;
       ins->rex = ~(*ins->codep >> 5) & 0x7;
       switch ((*ins->codep & 0x1f))
 	{
@@ -9363,22 +9317,19 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
 	}
       ins->need_vex = true;
       ins->codep++;
-      vindex = *ins->codep++;
+      vindex = *ins->codep++ & 0xff;
       dp = &vex_table[vex_table_index][vindex];
       ins->end_codep = ins->codep;
       /* There is no MODRM byte for VEX0F 77.  */
-      if (vex_table_index != VEX_0F || vindex != 0x77)
-	{
-	  FETCH_DATA (ins->info, ins->codep + 1);
-	  ins->modrm.mod = (*ins->codep >> 6) & 3;
-	  ins->modrm.reg = (*ins->codep >> 3) & 7;
-	  ins->modrm.rm = *ins->codep & 7;
-	}
+      if ((vex_table_index != VEX_0F || vindex != 0x77)
+	  && !fetch_modrm (ins))
+	return &err_opcode;
       break;
 
     case USE_VEX_C5_TABLE:
       /* VEX prefix.  */
-      FETCH_DATA (ins->info, ins->codep + 2);
+      if (!fetch_code (ins->info, ins->codep + 2))
+	return &err_opcode;
       ins->rex = (*ins->codep & 0x80) ? 0 : REX_R;
 
       /* For the 2-byte VEX prefix in 32-bit mode, the highest bit in
@@ -9401,17 +9352,12 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
 	}
       ins->need_vex = true;
       ins->codep++;
-      vindex = *ins->codep++;
+      vindex = *ins->codep++ & 0xff;
       dp = &vex_table[dp->op[1].bytemode][vindex];
       ins->end_codep = ins->codep;
       /* There is no MODRM byte for VEX 77.  */
-      if (vindex != 0x77)
-	{
-	  FETCH_DATA (ins->info, ins->codep + 1);
-	  ins->modrm.mod = (*ins->codep >> 6) & 3;
-	  ins->modrm.reg = (*ins->codep >> 3) & 7;
-	  ins->modrm.rm = *ins->codep & 7;
-	}
+      if (vindex != 0x77 && !fetch_modrm (ins))
+	return &err_opcode;
       break;
 
     case USE_VEX_W_TABLE:
@@ -9425,7 +9371,8 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
       ins->two_source_ops = false;
       /* EVEX prefix.  */
       ins->vex.evex = true;
-      FETCH_DATA (ins->info, ins->codep + 4);
+      if (!fetch_code (ins->info, ins->codep + 4))
+	return &err_opcode;
       /* The first byte after 0x62.  */
       ins->rex = ~(*ins->codep >> 5) & 0x7;
       ins->vex.r = *ins->codep & 0x10;
@@ -9497,13 +9444,11 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
 
       ins->need_vex = true;
       ins->codep++;
-      vindex = *ins->codep++;
+      vindex = *ins->codep++ & 0xff;
       dp = &evex_table[vex_table_index][vindex];
       ins->end_codep = ins->codep;
-      FETCH_DATA (ins->info, ins->codep + 1);
-      ins->modrm.mod = (*ins->codep >> 6) & 3;
-      ins->modrm.reg = (*ins->codep >> 3) & 7;
-      ins->modrm.rm = *ins->codep & 7;
+      if (!fetch_modrm (ins))
+	return &err_opcode;
 
       /* Set vector length.  */
       if (ins->modrm.mod == 3 && ins->vex.b)
@@ -9541,7 +9486,7 @@ get_valid_dis386 (const struct dis386 *dp, instr_info *ins)
     return get_valid_dis386 (dp, ins);
 }
 
-static void
+static bool
 get_sib (instr_info *ins, int sizeflag)
 {
   /* If modrm.mod == 3, operand must be register.  */
@@ -9550,7 +9495,8 @@ get_sib (instr_info *ins, int sizeflag)
       && ins->modrm.mod != 3
       && ins->modrm.rm == 4)
     {
-      FETCH_DATA (ins->info, ins->codep + 2);
+      if (!fetch_code (ins->info, ins->codep + 2))
+	return false;
       ins->sib.index = (ins->codep[1] >> 3) & 7;
       ins->sib.scale = (ins->codep[1] >> 6) & 3;
       ins->sib.base = ins->codep[1] & 7;
@@ -9558,6 +9504,8 @@ get_sib (instr_info *ins, int sizeflag)
     }
   else
     ins->has_sib = false;
+
+  return true;
 }
 
 /* Like oappend (below), but S is a string starting with '%'.  In
@@ -9576,7 +9524,7 @@ oappend_register (instr_info *ins, const char *s)
    used in the next fprintf_styled_func call.  */
 
 static void ATTRIBUTE_PRINTF_3
-i386_dis_printf (instr_info *ins, enum disassembler_style style,
+i386_dis_printf (const disassemble_info *info, enum disassembler_style style,
 		 const char *fmt, ...)
 {
   va_list ap;
@@ -9617,9 +9565,8 @@ i386_dis_printf (instr_info *ins, enum disassembler_style style,
 	{
 	  /* Output content between our START position and CURR.  */
 	  int len = curr - start;
-	  int n = (*ins->info->fprintf_styled_func) (ins->info->stream,
-						     curr_style,
-						     "%.*s", len, start);
+	  int n = (*info->fprintf_styled_func) (info->stream, curr_style,
+						"%.*s", len, start);
 	  if (n < 0)
 	    break;
 
@@ -9662,6 +9609,7 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
 {
   const struct dis386 *dp;
   int i;
+  int ret;
   char *op_txt[MAX_OPERANDS];
   int needcomma;
   bool intel_swap_2_3;
@@ -9770,7 +9718,7 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
 
   if (ins.address_mode == mode_64bit && sizeof (bfd_vma) < 8)
     {
-      i386_dis_printf (&ins, dis_style_text, _("64-bit address is disabled"));
+      i386_dis_printf (info, dis_style_text, _("64-bit address is disabled"));
       return -1;
     }
 
@@ -9803,80 +9751,71 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
       ins.op_out[i] = op_out[i];
     }
 
-  if (OPCODES_SIGSETJMP (priv.bailout) != 0)
-    {
-      /* Getting here means we tried for data but didn't get it.  That
-	 means we have an incomplete instruction of some sort.  Just
-	 print the first byte as a prefix or a .byte pseudo-op.  */
-      if (ins.codep > priv.the_buffer)
-	{
-	  const char *name = NULL;
-
-	  if (ins.prefixes || ins.fwait_prefix >= 0 || (ins.rex & REX_OPCODE))
-	    name = prefix_name (&ins, priv.the_buffer[0], priv.orig_sizeflag);
-	  if (name != NULL)
-	    i386_dis_printf (&ins, dis_style_mnemonic, "%s", name);
-	  else
-	    {
-	      /* Just print the first byte as a .byte instruction.  */
-	      i386_dis_printf (&ins, dis_style_assembler_directive,
-			       ".byte ");
-	      i386_dis_printf (&ins, dis_style_immediate, "0x%x",
-			       (unsigned int) priv.the_buffer[0]);
-	    }
-
-	  return 1;
-	}
-
-      return -1;
-    }
-
   sizeflag = priv.orig_sizeflag;
 
-  if (!ckprefix (&ins) || ins.rex_used)
+  switch (ckprefix (&ins))
     {
+    case ckp_okay:
+      break;
+
+    case ckp_bogus:
       /* Too many prefixes or unused REX prefixes.  */
       for (i = 0;
 	   i < (int) ARRAY_SIZE (ins.all_prefixes) && ins.all_prefixes[i];
 	   i++)
-	i386_dis_printf (&ins, dis_style_mnemonic, "%s%s",
+	i386_dis_printf (info, dis_style_mnemonic, "%s%s",
 			 (i == 0 ? "" : " "),
-			 prefix_name (&ins, ins.all_prefixes[i], sizeflag));
-      return i;
+			 prefix_name (ins.address_mode, ins.all_prefixes[i],
+				      sizeflag));
+      ret = i;
+      goto out;
+
+    case ckp_fetch_error:
+      goto fetch_error_out;
     }
 
   ins.insn_codep = ins.codep;
 
-  FETCH_DATA (info, ins.codep + 1);
-  ins.two_source_ops = (*ins.codep == 0x62) || (*ins.codep == 0xc8);
+  if (!fetch_code (info, ins.codep + 1))
+    {
+    fetch_error_out:
+      ret = fetch_error (&ins);
+      goto out;
+    }
 
-  if (((ins.prefixes & PREFIX_FWAIT)
-       && ((*ins.codep < 0xd8) || (*ins.codep > 0xdf))))
+  ins.two_source_ops = ((*ins.codep & 0xff) == 0x62
+			|| (*ins.codep & 0xff) == 0xc8);
+
+  if ((ins.prefixes & PREFIX_FWAIT)
+      && ((*ins.codep & 0xff) < 0xd8 || (*ins.codep & 0xff) > 0xdf))
     {
       /* Handle ins.prefixes before fwait.  */
       for (i = 0; i < ins.fwait_prefix && ins.all_prefixes[i];
 	   i++)
-	i386_dis_printf (&ins, dis_style_mnemonic, "%s ",
-			 prefix_name (&ins, ins.all_prefixes[i], sizeflag));
-      i386_dis_printf (&ins, dis_style_mnemonic, "fwait");
-      return i + 1;
+	i386_dis_printf (info, dis_style_mnemonic, "%s ",
+			 prefix_name (ins.address_mode, ins.all_prefixes[i],
+				      sizeflag));
+      i386_dis_printf (info, dis_style_mnemonic, "fwait");
+      ret = i + 1;
+      goto out;
     }
 
-  if (*ins.codep == 0x0f)
+  if ((*ins.codep & 0xff) == 0x0f)
     {
       unsigned char threebyte;
 
       ins.codep++;
-      FETCH_DATA (info, ins.codep + 1);
-      threebyte = *ins.codep;
+      if (!fetch_code (info, ins.codep + 1))
+	goto fetch_error_out;
+      threebyte = *ins.codep & 0xff;
       dp = &dis386_twobyte[threebyte];
       ins.need_modrm = twobyte_has_modrm[threebyte];
       ins.codep++;
     }
   else
     {
-      dp = &dis386[*ins.codep];
-      ins.need_modrm = onebyte_has_modrm[*ins.codep];
+      dp = &dis386[*ins.codep & 0xff];
+      ins.need_modrm = onebyte_has_modrm[*ins.codep & 0xff];
       ins.codep++;
     }
 
@@ -9890,31 +9829,31 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
     sizeflag ^= DFLAG;
 
   ins.end_codep = ins.codep;
-  if (ins.need_modrm)
-    {
-      FETCH_DATA (info, ins.codep + 1);
-      ins.modrm.mod = (*ins.codep >> 6) & 3;
-      ins.modrm.reg = (*ins.codep >> 3) & 7;
-      ins.modrm.rm = *ins.codep & 7;
-    }
+  if (ins.need_modrm && !fetch_modrm (&ins))
+    goto fetch_error_out;
 
   if (dp->name == NULL && dp->op[0].bytemode == FLOATCODE)
     {
-      get_sib (&ins, sizeflag);
-      dofloat (&ins, sizeflag);
+      if (!get_sib (&ins, sizeflag)
+	  || !dofloat (&ins, sizeflag))
+	goto fetch_error_out;
     }
   else
     {
       dp = get_valid_dis386 (dp, &ins);
+      if (dp == &err_opcode)
+	goto fetch_error_out;
       if (dp != NULL && putop (&ins, dp->name, sizeflag) == 0)
 	{
-	  get_sib (&ins, sizeflag);
+	  if (!get_sib (&ins, sizeflag))
+	    goto fetch_error_out;
 	  for (i = 0; i < MAX_OPERANDS; ++i)
 	    {
 	      ins.obufp = ins.op_out[i];
 	      ins.op_ad = MAX_OPERANDS - 1 - i;
-	      if (dp->op[i].rtn)
-		(*dp->op[i].rtn) (&ins, dp->op[i].bytemode, sizeflag);
+	      if (dp->op[i].rtn
+		  && !dp->op[i].rtn (&ins, dp->op[i].bytemode, sizeflag))
+		goto fetch_error_out;
 	      /* For EVEX instruction after the last operand masking
 		 should be printed.  */
 	      if (i == 0 && ins.vex.evex)
@@ -10003,15 +9942,17 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
      are all 0s in inverted form.  */
   if (ins.need_vex && ins.vex.register_specifier != 0)
     {
-      i386_dis_printf (&ins, dis_style_text, "(bad)");
-      return ins.end_codep - priv.the_buffer;
+      i386_dis_printf (info, dis_style_text, "(bad)");
+      ret = ins.end_codep - priv.the_buffer;
+      goto out;
     }
 
   /* If EVEX.z is set, there must be an actual mask register in use.  */
   if (ins.vex.zeroing && ins.vex.mask_register_specifier == 0)
     {
-      i386_dis_printf (&ins, dis_style_text, "(bad)");
-      return ins.end_codep - priv.the_buffer;
+      i386_dis_printf (info, dis_style_text, "(bad)");
+      ret = ins.end_codep - priv.the_buffer;
+      goto out;
     }
 
   switch (dp->prefix_requirement)
@@ -10021,8 +9962,9 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
 	 the encoding invalid.  Most other PREFIX_OPCODE rules still apply.  */
       if (ins.need_vex ? !ins.vex.prefix : !(ins.prefixes & PREFIX_DATA))
 	{
-	  i386_dis_printf (&ins, dis_style_text, "(bad)");
-	  return ins.end_codep - priv.the_buffer;
+	  i386_dis_printf (info, dis_style_text, "(bad)");
+	  ret = ins.end_codep - priv.the_buffer;
+	  goto out;
 	}
       ins.used_prefixes |= PREFIX_DATA;
       /* Fall through.  */
@@ -10048,8 +9990,9 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
 	  || (ins.vex.evex && dp->prefix_requirement != PREFIX_DATA
 	      && !ins.vex.w != !(ins.used_prefixes & PREFIX_DATA)))
 	{
-	  i386_dis_printf (&ins, dis_style_text, "(bad)");
-	  return ins.end_codep - priv.the_buffer;
+	  i386_dis_printf (info, dis_style_text, "(bad)");
+	  ret = ins.end_codep - priv.the_buffer;
+	  goto out;
 	}
       break;
 
@@ -10093,19 +10036,21 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
   for (i = 0; i < (int) ARRAY_SIZE (ins.all_prefixes); i++)
     if (ins.all_prefixes[i])
       {
-	const char *name;
-	name = prefix_name (&ins, ins.all_prefixes[i], orig_sizeflag);
+	const char *name = prefix_name (ins.address_mode, ins.all_prefixes[i],
+					orig_sizeflag);
+
 	if (name == NULL)
 	  abort ();
 	prefix_length += strlen (name) + 1;
-	i386_dis_printf (&ins, dis_style_mnemonic, "%s ", name);
+	i386_dis_printf (info, dis_style_mnemonic, "%s ", name);
       }
 
   /* Check maximum code length.  */
   if ((ins.codep - ins.start_codep) > MAX_CODE_LENGTH)
     {
-      i386_dis_printf (&ins, dis_style_text, "(bad)");
-      return MAX_CODE_LENGTH;
+      i386_dis_printf (info, dis_style_text, "(bad)");
+      ret = MAX_CODE_LENGTH;
+      goto out;
     }
 
   /* Calculate the number of operands this instruction has.  */
@@ -10128,7 +10073,7 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
     i = 0;
 
   /* Print the instruction mnemonic along with any trailing whitespace.  */
-  i386_dis_printf (&ins, dis_style_mnemonic, "%s%*s", ins.obuf, i, "");
+  i386_dis_printf (info, dis_style_mnemonic, "%s%*s", ins.obuf, i, "");
 
   /* The enter and bound instructions are printed with operands in the same
      order as the intel book; everything else is printed in reverse order.  */
@@ -10183,7 +10128,7 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
 	    break;
 	  }
 	if (needcomma)
-	  i386_dis_printf (&ins, dis_style_text, ",");
+	  i386_dis_printf (info, dis_style_text, ",");
 	if (ins.op_index[i] != -1 && !ins.op_riprel[i])
 	  {
 	    bfd_vma target = (bfd_vma) ins.op_address[ins.op_index[i]];
@@ -10199,21 +10144,24 @@ print_insn (bfd_vma pc, disassemble_info *info, int intel_syntax)
 	    (*info->print_address_func) (target, info);
 	  }
 	else
-	  i386_dis_printf (&ins, dis_style_text, "%s", op_txt[i]);
+	  i386_dis_printf (info, dis_style_text, "%s", op_txt[i]);
 	needcomma = 1;
       }
 
   for (i = 0; i < MAX_OPERANDS; i++)
     if (ins.op_index[i] != -1 && ins.op_riprel[i])
       {
-	i386_dis_printf (&ins, dis_style_comment_start, "        # ");
+	i386_dis_printf (info, dis_style_comment_start, "        # ");
 	(*info->print_address_func)
 	  ((bfd_vma)(ins.start_pc + (ins.codep - ins.start_codep)
 		     + ins.op_address[ins.op_index[i]]),
 	  info);
 	break;
       }
-  return ins.codep - priv.the_buffer;
+  ret = ins.codep - priv.the_buffer;
+ out:
+  info->private_data = NULL;
+  return ret;
 }
 
 /* Here for backwards compatibility.  When gdb stops using
@@ -10553,22 +10501,23 @@ swap_operand (instr_info *ins)
   ins->mnemonicendp += 2;
 }
 
-static void
+static bool
 OP_Skip_MODRM (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	       int sizeflag ATTRIBUTE_UNUSED)
 {
   /* Skip mod/rm byte.  */
   MODRM_CHECK;
   ins->codep++;
+  return true;
 }
 
-static void
+static bool
 dofloat (instr_info *ins, int sizeflag)
 {
   const struct dis386 *dp;
   unsigned char floatop;
 
-  floatop = ins->codep[-1];
+  floatop = ins->codep[-1] & 0xff;
 
   if (ins->modrm.mod != 3)
     {
@@ -10577,8 +10526,7 @@ dofloat (instr_info *ins, int sizeflag)
       putop (ins, float_mem[fp_indx], sizeflag);
       ins->obufp = ins->op_out[0];
       ins->op_ad = 2;
-      OP_E (ins, float_mem_mode[fp_indx], sizeflag);
-      return;
+      return OP_E (ins, float_mem_mode[fp_indx], sizeflag);
     }
   /* Skip mod/rm byte.  */
   MODRM_CHECK;
@@ -10590,7 +10538,7 @@ dofloat (instr_info *ins, int sizeflag)
       putop (ins, fgrps[dp->op[0].bytemode][ins->modrm.rm], sizeflag);
 
       /* Instruction fnstsw is only one with strange arg.  */
-      if (floatop == 0xdf && ins->codep[-1] == 0xe0)
+      if (floatop == 0xdf && (ins->codep[-1] & 0xff) == 0xe0)
 	strcpy (ins->op_out[0], att_names16[0] + ins->intel_syntax);
     }
   else
@@ -10599,24 +10547,28 @@ dofloat (instr_info *ins, int sizeflag)
 
       ins->obufp = ins->op_out[0];
       ins->op_ad = 2;
-      if (dp->op[0].rtn)
-	(*dp->op[0].rtn) (ins, dp->op[0].bytemode, sizeflag);
+      if (dp->op[0].rtn
+	  && !dp->op[0].rtn (ins, dp->op[0].bytemode, sizeflag))
+	return false;
 
       ins->obufp = ins->op_out[1];
       ins->op_ad = 1;
-      if (dp->op[1].rtn)
-	(*dp->op[1].rtn) (ins, dp->op[1].bytemode, sizeflag);
+      if (dp->op[1].rtn
+	  && !dp->op[1].rtn (ins, dp->op[1].bytemode, sizeflag))
+	return false;
     }
+  return true;
 }
 
-static void
+static bool
 OP_ST (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
        int sizeflag ATTRIBUTE_UNUSED)
 {
   oappend_register (ins, "%st");
+  return true;
 }
 
-static void
+static bool
 OP_STi (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	int sizeflag ATTRIBUTE_UNUSED)
 {
@@ -10626,6 +10578,7 @@ OP_STi (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
   if (res < 0 || (size_t) res >= ARRAY_SIZE (scratch))
     abort ();
   oappend_register (ins, scratch);
+  return true;
 }
 
 /* Capital letters in template are macros.  */
@@ -11291,22 +11244,22 @@ append_seg (instr_info *ins)
   switch (ins->active_seg_prefix)
     {
     case PREFIX_CS:
-      oappend_register (ins, "%cs");
+      oappend_register (ins, att_names_seg[1]);
       break;
     case PREFIX_DS:
-      oappend_register (ins, "%ds");
+      oappend_register (ins, att_names_seg[3]);
       break;
     case PREFIX_SS:
-      oappend_register (ins, "%ss");
+      oappend_register (ins, att_names_seg[2]);
       break;
     case PREFIX_ES:
-      oappend_register (ins, "%es");
+      oappend_register (ins, att_names_seg[0]);
       break;
     case PREFIX_FS:
-      oappend_register (ins, "%fs");
+      oappend_register (ins, att_names_seg[4]);
       break;
     case PREFIX_GS:
-      oappend_register (ins, "%gs");
+      oappend_register (ins, att_names_seg[5]);
       break;
     default:
       break;
@@ -11314,12 +11267,12 @@ append_seg (instr_info *ins)
   oappend_char (ins, ':');
 }
 
-static void
+static bool
 OP_indirE (instr_info *ins, int bytemode, int sizeflag)
 {
   if (!ins->intel_syntax)
     oappend (ins, "*");
-  OP_E (ins, bytemode, sizeflag);
+  return OP_E (ins, bytemode, sizeflag);
 }
 
 static void
@@ -11328,10 +11281,9 @@ print_operand_value (instr_info *ins, bfd_vma disp,
 {
   char tmp[30];
 
-  if (ins->address_mode == mode_64bit)
-    sprintf (tmp, "0x%" PRIx64, (uint64_t) disp);
-  else
-    sprintf (tmp, "0x%x", (unsigned int) disp);
+  if (ins->address_mode != mode_64bit)
+    disp &= 0xffffffff;
+  sprintf (tmp, "0x%" PRIx64, (uint64_t) disp);
   oappend_with_style (ins, tmp, style);
 }
 
@@ -11348,15 +11300,14 @@ oappend_immediate (instr_info *ins, bfd_vma imm)
 /* Put DISP in BUF as signed hex number.  */
 
 static void
-print_displacement (instr_info *ins, bfd_vma disp)
+print_displacement (instr_info *ins, bfd_signed_vma val)
 {
-  bfd_signed_vma val = disp;
   char tmp[30];
 
   if (val < 0)
     {
       oappend_char_with_style (ins, '-', dis_style_address_offset);
-      val = -disp;
+      val = (bfd_vma) 0 - val;
 
       /* Check for possible overflow.  */
       if (val < 0)
@@ -11649,7 +11600,7 @@ static void
 print_register (instr_info *ins, unsigned int reg, unsigned int rexmask,
 		int bytemode, int sizeflag)
 {
-  const char *const *names;
+  const char (*names)[8];
 
   USED_REX (rexmask);
   if (ins->rex & rexmask)
@@ -11763,10 +11714,9 @@ print_register (instr_info *ins, unsigned int reg, unsigned int rexmask,
   oappend_register (ins, names[reg]);
 }
 
-static void
+static bool
 OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
 {
-  bfd_vma disp = 0;
   int add = (ins->rex & REX_B) ? 8 : 0;
   int riprel = 0;
   int shift;
@@ -11875,6 +11825,7 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
   if ((sizeflag & AFLAG) || ins->address_mode == mode_64bit)
     {
       /* 32/64 bit address mode */
+      bfd_vma disp = 0;
       int havedisp;
       int havebase;
       int needindex;
@@ -11888,7 +11839,7 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
 			 || bytemode == bnd_mode
 			 || bytemode == bnd_swap_mode);
       bool check_gather = false;
-      const char *const *indexes = NULL;
+      const char (*indexes)[8] = NULL;
 
       havebase = 1;
       base = ins->modrm.rm;
@@ -11953,7 +11904,7 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
 	      || bytemode == vex_sibmem_mode)
 	    {
 	      oappend (ins, "(bad)");
-	      return;
+	      return true;
 	    }
 	}
       rbase = base + add;
@@ -11966,24 +11917,24 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
 	      havebase = 0;
 	      if (ins->address_mode == mode_64bit && !ins->has_sib)
 		riprel = 1;
-	      disp = get32s (ins);
+	      if (!get32s (ins, &disp))
+		return false;
 	      if (riprel && bytemode == v_bndmk_mode)
 		{
 		  oappend (ins, "(bad)");
-		  return;
+		  return true;
 		}
 	    }
 	  break;
 	case 1:
-	  FETCH_DATA (ins->info, ins->codep + 1);
-	  disp = *ins->codep++;
-	  if ((disp & 0x80) != 0)
-	    disp -= 0x100;
+	  if (!get8s (ins, &disp))
+	    return false;
 	  if (ins->vex.evex && shift > 0)
 	    disp <<= shift;
 	  break;
 	case 2:
-	  disp = get32s (ins);
+	  if (!get32s (ins, &disp))
+	    return false;
 	  break;
 	}
 
@@ -12000,7 +11951,7 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
 		{
 		  /* Without base nor index registers, zero-extend the
 		     lower 32-bit displacement to 64 bits.  */
-		  disp = (unsigned int) disp;
+		  disp &= 0xffffffff;
 		  needindex = 1;
 		}
 	      needaddr32 = 1;
@@ -12091,12 +12042,6 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
 	    {
 	      if (!havedisp || (bfd_signed_vma) disp >= 0)
 		  oappend_char (ins, '+');
-	      else if (ins->modrm.mod != 1 && disp != -disp)
-		{
-		  oappend_char (ins, '-');
-		  disp = -disp;
-		}
-
 	      if (havedisp)
 		print_displacement (ins, disp);
 	      else
@@ -12139,34 +12084,29 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
 	   || bytemode == vex_vsib_q_w_dq_mode)
     {
       oappend (ins, "(bad)");
-      return;
+      return true;
     }
   else
     {
       /* 16 bit address mode */
+      bfd_vma disp = 0;
+
       ins->used_prefixes |= ins->prefixes & PREFIX_ADDR;
       switch (ins->modrm.mod)
 	{
 	case 0:
 	  if (ins->modrm.rm == 6)
 	    {
-	      disp = get16 (ins);
-	      if ((disp & 0x8000) != 0)
-		disp -= 0x10000;
+	case 2:
+	      if (!get16s (ins, &disp))
+		return false;
 	    }
 	  break;
 	case 1:
-	  FETCH_DATA (ins->info, ins->codep + 1);
-	  disp = *ins->codep++;
-	  if ((disp & 0x80) != 0)
-	    disp -= 0x100;
+	  if (!get8s (ins, &disp))
+	    return false;
 	  if (ins->vex.evex && shift > 0)
 	    disp <<= shift;
-	  break;
-	case 2:
-	  disp = get16 (ins);
-	  if ((disp & 0x8000) != 0)
-	    disp -= 0x10000;
 	  break;
 	}
 
@@ -12177,19 +12117,13 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
       if (ins->modrm.mod != 0 || ins->modrm.rm != 6)
 	{
 	  oappend_char (ins, ins->open_char);
-	  oappend (ins, (ins->intel_syntax ? intel_index16
-			 : att_index16)[ins->modrm.rm]);
+	  oappend (ins, ins->intel_syntax ? intel_index16[ins->modrm.rm]
+					  : att_index16[ins->modrm.rm]);
 	  if (ins->intel_syntax
 	      && (disp || ins->modrm.mod != 0 || ins->modrm.rm == 6))
 	    {
 	      if ((bfd_signed_vma) disp >= 0)
 		oappend_char (ins, '+');
-	      else if (ins->modrm.mod != 1)
-		{
-		  oappend_char (ins, '-');
-		  disp = -disp;
-		}
-
 	      print_displacement (ins, disp);
 	    }
 
@@ -12218,24 +12152,19 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
 	{
 	  if (bytemode == xh_mode)
 	    {
-	      if (ins->vex.w)
-		oappend (ins, "{bad}");
-	      else
+	      switch (ins->vex.length)
 		{
-		  switch (ins->vex.length)
-		    {
-		    case 128:
-		      oappend (ins, "{1to8}");
-		      break;
-		    case 256:
-		      oappend (ins, "{1to16}");
-		      break;
-		    case 512:
-		      oappend (ins, "{1to32}");
-		      break;
-		    default:
-		      abort ();
-		    }
+		case 128:
+		  oappend (ins, "{1to8}");
+		  break;
+		case 256:
+		  oappend (ins, "{1to16}");
+		  break;
+		case 512:
+		  oappend (ins, "{1to32}");
+		  break;
+		default:
+		  abort ();
 		}
 	    }
 	  else if (bytemode == q_mode
@@ -12284,9 +12213,11 @@ OP_E_memory (instr_info *ins, int bytemode, int sizeflag)
       if (ins->vex.no_broadcast)
 	oappend (ins, "{bad}");
     }
+
+  return true;
 }
 
-static void
+static bool
 OP_E (instr_info *ins, int bytemode, int sizeflag)
 {
   /* Skip mod/rm byte.  */
@@ -12302,32 +12233,30 @@ OP_E (instr_info *ins, int bytemode, int sizeflag)
 	swap_operand (ins);
 
       print_register (ins, ins->modrm.rm, REX_B, bytemode, sizeflag);
+      return true;
     }
-  else
-    OP_E_memory (ins, bytemode, sizeflag);
+
+  return OP_E_memory (ins, bytemode, sizeflag);
 }
 
-static void
+static bool
 OP_G (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->vex.evex && !ins->vex.r && ins->address_mode == mode_64bit)
-    {
-      oappend (ins, "(bad)");
-      return;
-    }
-
-  print_register (ins, ins->modrm.reg, REX_R, bytemode, sizeflag);
+    oappend (ins, "(bad)");
+  else
+    print_register (ins, ins->modrm.reg, REX_R, bytemode, sizeflag);
+  return true;
 }
 
-#ifdef BFD64
-static bfd_vma
-get64 (instr_info *ins)
+static bool
+get64 (instr_info *ins, uint64_t *res)
 {
-  bfd_vma x;
   unsigned int a;
   unsigned int b;
 
-  FETCH_DATA (ins->info, ins->codep + 8);
+  if (!fetch_code (ins->info, ins->codep + 8))
+    return false;
   a = *ins->codep++ & 0xff;
   a |= (*ins->codep++ & 0xff) << 8;
   a |= (*ins->codep++ & 0xff) << 16;
@@ -12336,56 +12265,59 @@ get64 (instr_info *ins)
   b |= (*ins->codep++ & 0xff) << 8;
   b |= (*ins->codep++ & 0xff) << 16;
   b |= (*ins->codep++ & 0xffu) << 24;
-  x = a + ((bfd_vma) b << 32);
-  return x;
-}
-#else
-static bfd_vma
-get64 (instr_info *ins ATTRIBUTE_UNUSED)
-{
-  abort ();
-  return 0;
-}
-#endif
-
-static bfd_signed_vma
-get32 (instr_info *ins)
-{
-  bfd_vma x = 0;
-
-  FETCH_DATA (ins->info, ins->codep + 4);
-  x = *ins->codep++ & (bfd_vma) 0xff;
-  x |= (*ins->codep++ & (bfd_vma) 0xff) << 8;
-  x |= (*ins->codep++ & (bfd_vma) 0xff) << 16;
-  x |= (*ins->codep++ & (bfd_vma) 0xff) << 24;
-  return x;
+  *res = a + ((uint64_t) b << 32);
+  return true;
 }
 
-static bfd_signed_vma
-get32s (instr_info *ins)
+static bool
+get32 (instr_info *ins, bfd_vma *res)
 {
-  bfd_vma x = 0;
-
-  FETCH_DATA (ins->info, ins->codep + 4);
-  x = *ins->codep++ & (bfd_vma) 0xff;
-  x |= (*ins->codep++ & (bfd_vma) 0xff) << 8;
-  x |= (*ins->codep++ & (bfd_vma) 0xff) << 16;
-  x |= (*ins->codep++ & (bfd_vma) 0xff) << 24;
-
-  x = (x ^ ((bfd_vma) 1 << 31)) - ((bfd_vma) 1 << 31);
-
-  return x;
+  if (!fetch_code (ins->info, ins->codep + 4))
+    return false;
+  *res = *ins->codep++ & (bfd_vma) 0xff;
+  *res |= (*ins->codep++ & (bfd_vma) 0xff) << 8;
+  *res |= (*ins->codep++ & (bfd_vma) 0xff) << 16;
+  *res |= (*ins->codep++ & (bfd_vma) 0xff) << 24;
+  return true;
 }
 
-static int
-get16 (instr_info *ins)
+static bool
+get32s (instr_info *ins, bfd_vma *res)
 {
-  int x = 0;
+  if (!get32 (ins, res))
+    return false;
 
-  FETCH_DATA (ins->info, ins->codep + 2);
-  x = *ins->codep++ & 0xff;
-  x |= (*ins->codep++ & 0xff) << 8;
-  return x;
+  *res = (*res ^ ((bfd_vma) 1 << 31)) - ((bfd_vma) 1 << 31);
+
+  return true;
+}
+
+static bool
+get16 (instr_info *ins, bfd_vma *res)
+{
+  if (!fetch_code (ins->info, ins->codep + 2))
+    return false;
+  *res = (bfd_vma) *ins->codep++ & 0xff;
+  *res |= ((bfd_vma) *ins->codep++ & 0xff) << 8;
+  return true;
+}
+
+static bool
+get16s (instr_info *ins, bfd_vma *res)
+{
+  if (!get16 (ins, res))
+    return false;
+  *res = (*res ^ 0x8000) - 0x8000;
+  return true;
+}
+
+static bool
+get8s (instr_info *ins, bfd_vma *res)
+{
+  if (!fetch_code (ins->info, ins->codep + 1))
+    return false;
+  *res = (((bfd_vma) *ins->codep++ & 0xff) ^ 0x80) - 0x80;
+  return true;
 }
 
 static void
@@ -12399,7 +12331,7 @@ set_op (instr_info *ins, bfd_vma op, bool riprel)
   ins->op_riprel[ins->op_ad] = riprel;
 }
 
-static void
+static bool
 OP_REG (instr_info *ins, int code, int sizeflag)
 {
   const char *s;
@@ -12410,7 +12342,7 @@ OP_REG (instr_info *ins, int code, int sizeflag)
     case es_reg: case ss_reg: case cs_reg:
     case ds_reg: case fs_reg: case gs_reg:
       oappend_register (ins, att_names_seg[code - es_reg]);
-      return;
+      return true;
     }
 
   USED_REX (REX_B);
@@ -12460,12 +12392,13 @@ OP_REG (instr_info *ins, int code, int sizeflag)
       break;
     default:
       oappend (ins, INTERNAL_DISASSEMBLER_ERROR);
-      return;
+      return true;
     }
   oappend_register (ins, s);
+  return true;
 }
 
-static void
+static bool
 OP_IMREG (instr_info *ins, int code, int sizeflag)
 {
   const char *s;
@@ -12476,7 +12409,7 @@ OP_IMREG (instr_info *ins, int code, int sizeflag)
       if (!ins->intel_syntax)
 	{
 	  oappend (ins, "(%dx)");
-	  return;
+	  return true;
 	}
       s = att_names16[dx_reg - ax_reg];
       break;
@@ -12501,92 +12434,91 @@ OP_IMREG (instr_info *ins, int code, int sizeflag)
       break;
     default:
       oappend (ins, INTERNAL_DISASSEMBLER_ERROR);
-      return;
+      return true;
     }
   oappend_register (ins, s);
+  return true;
 }
 
-static void
+static bool
 OP_I (instr_info *ins, int bytemode, int sizeflag)
 {
-  bfd_signed_vma op;
-  bfd_signed_vma mask = -1;
+  bfd_vma op;
 
   switch (bytemode)
     {
     case b_mode:
-      FETCH_DATA (ins->info, ins->codep + 1);
-      op = *ins->codep++;
-      mask = 0xff;
+      if (!fetch_code (ins->info, ins->codep + 1))
+	return false;
+      op = *ins->codep++ & 0xff;
       break;
     case v_mode:
       USED_REX (REX_W);
       if (ins->rex & REX_W)
-	op = get32s (ins);
+	{
+	  if (!get32s (ins, &op))
+	    return false;
+	}
       else
 	{
+	  ins->used_prefixes |= (ins->prefixes & PREFIX_DATA);
 	  if (sizeflag & DFLAG)
 	    {
-	      op = get32 (ins);
-	      mask = 0xffffffff;
+    case d_mode:
+	      if (!get32 (ins, &op))
+		return false;
 	    }
 	  else
 	    {
-	      op = get16 (ins);
-	      mask = 0xfffff;
-	    }
-	  ins->used_prefixes |= (ins->prefixes & PREFIX_DATA);
-	}
-      break;
-    case d_mode:
-      mask = 0xffffffff;
-      op = get32 (ins);
-      break;
+	      /* Fall through.  */
     case w_mode:
-      mask = 0xfffff;
-      op = get16 (ins);
+	      if (!get16 (ins, &op))
+		return false;
+	    }
+	}
       break;
     case const_1_mode:
       if (ins->intel_syntax)
 	oappend (ins, "1");
-      return;
+      return true;
     default:
       oappend (ins, INTERNAL_DISASSEMBLER_ERROR);
-      return;
+      return true;
     }
 
-  op &= mask;
   oappend_immediate (ins, op);
+  return true;
 }
 
-static void
+static bool
 OP_I64 (instr_info *ins, int bytemode, int sizeflag)
 {
+  uint64_t op;
+
   if (bytemode != v_mode || ins->address_mode != mode_64bit
       || !(ins->rex & REX_W))
-    {
-      OP_I (ins, bytemode, sizeflag);
-      return;
-    }
+    return OP_I (ins, bytemode, sizeflag);
 
   USED_REX (REX_W);
 
-  oappend_immediate (ins, get64 (ins));
+  if (!get64 (ins, &op))
+    return false;
+
+  oappend_immediate (ins, op);
+  return true;
 }
 
-static void
+static bool
 OP_sI (instr_info *ins, int bytemode, int sizeflag)
 {
-  bfd_signed_vma op;
+  bfd_vma op;
 
   switch (bytemode)
     {
     case b_mode:
     case b_T_mode:
-      FETCH_DATA (ins->info, ins->codep + 1);
-      op = *ins->codep++;
-      if ((op & 0x80) != 0)
-	op -= 0x100;
+      if (!get8s (ins, &op))
+	return false;
       if (bytemode == b_T_mode)
 	{
 	  if (ins->address_mode != mode_64bit
@@ -12612,20 +12544,24 @@ OP_sI (instr_info *ins, int bytemode, int sizeflag)
       break;
     case v_mode:
       /* The operand-size prefix is overridden by a REX prefix.  */
-      if ((sizeflag & DFLAG) || (ins->rex & REX_W))
-	op = get32s (ins);
-      else
-	op = get16 (ins);
+      if (!(sizeflag & DFLAG) && !(ins->rex & REX_W))
+	{
+	  if (!get16 (ins, &op))
+	    return false;
+	}
+      else if (!get32s (ins, &op))
+	return false;
       break;
     default:
       oappend (ins, INTERNAL_DISASSEMBLER_ERROR);
-      return;
+      return true;
     }
 
   oappend_immediate (ins, op);
+  return true;
 }
 
-static void
+static bool
 OP_J (instr_info *ins, int bytemode, int sizeflag)
 {
   bfd_vma disp;
@@ -12635,10 +12571,8 @@ OP_J (instr_info *ins, int bytemode, int sizeflag)
   switch (bytemode)
     {
     case b_mode:
-      FETCH_DATA (ins->info, ins->codep + 1);
-      disp = *ins->codep++;
-      if ((disp & 0x80) != 0)
-	disp -= 0x100;
+      if (!get8s (ins, &disp))
+	return false;
       break;
     case v_mode:
     case dqw_mode:
@@ -12646,12 +12580,14 @@ OP_J (instr_info *ins, int bytemode, int sizeflag)
 	  || (ins->address_mode == mode_64bit
 	      && ((ins->isa64 == intel64 && bytemode != dqw_mode)
 		  || (ins->rex & REX_W))))
-	disp = get32s (ins);
+	{
+	  if (!get32s (ins, &disp))
+	    return false;
+	}
       else
 	{
-	  disp = get16 (ins);
-	  if ((disp & 0x8000) != 0)
-	    disp -= 0x10000;
+	  if (!get16s (ins, &disp))
+	    return false;
 	  /* In 16bit mode, address is wrapped around at 64k within
 	     the same segment.  Otherwise, a data16 prefix on a jump
 	     instruction means that the pc is masked to 16 bits after
@@ -12667,50 +12603,54 @@ OP_J (instr_info *ins, int bytemode, int sizeflag)
       break;
     default:
       oappend (ins, INTERNAL_DISASSEMBLER_ERROR);
-      return;
+      return true;
     }
   disp = ((ins->start_pc + (ins->codep - ins->start_codep) + disp) & mask)
 	 | segment;
   set_op (ins, disp, false);
   print_operand_value (ins, disp, dis_style_text);
+  return true;
 }
 
-static void
+static bool
 OP_SEG (instr_info *ins, int bytemode, int sizeflag)
 {
   if (bytemode == w_mode)
-    oappend_register (ins, att_names_seg[ins->modrm.reg]);
-  else
-    OP_E (ins, ins->modrm.mod == 3 ? bytemode : w_mode, sizeflag);
+    {
+      oappend_register (ins, att_names_seg[ins->modrm.reg]);
+      return true;
+    }
+  return OP_E (ins, ins->modrm.mod == 3 ? bytemode : w_mode, sizeflag);
 }
 
-static void
+static bool
 OP_DIR (instr_info *ins, int dummy ATTRIBUTE_UNUSED, int sizeflag)
 {
-  int seg, offset, res;
+  bfd_vma seg, offset;
+  int res;
   char scratch[24];
 
   if (sizeflag & DFLAG)
     {
-      offset = get32 (ins);
-      seg = get16 (ins);
+      if (!get32 (ins, &offset))
+	return false;;
     }
-  else
-    {
-      offset = get16 (ins);
-      seg = get16 (ins);
-    }
+  else if (!get16 (ins, &offset))
+    return false;
+  if (!get16 (ins, &seg))
+    return false;;
   ins->used_prefixes |= (ins->prefixes & PREFIX_DATA);
 
   res = snprintf (scratch, ARRAY_SIZE (scratch),
 		  ins->intel_syntax ? "0x%x:0x%x" : "$0x%x,$0x%x",
-		  seg, offset);
+		  (unsigned) seg, (unsigned) offset);
   if (res < 0 || (size_t) res >= ARRAY_SIZE (scratch))
     abort ();
   oappend (ins, scratch);
+  return true;
 }
 
-static void
+static bool
 OP_OFF (instr_info *ins, int bytemode, int sizeflag)
 {
   bfd_vma off;
@@ -12720,9 +12660,15 @@ OP_OFF (instr_info *ins, int bytemode, int sizeflag)
   append_seg (ins);
 
   if ((sizeflag & AFLAG) || ins->address_mode == mode_64bit)
-    off = get32 (ins);
+    {
+      if (!get32 (ins, &off))
+	return false;
+    }
   else
-    off = get16 (ins);
+    {
+      if (!get16 (ins, &off))
+	return false;
+    }
 
   if (ins->intel_syntax)
     {
@@ -12733,25 +12679,24 @@ OP_OFF (instr_info *ins, int bytemode, int sizeflag)
 	}
     }
   print_operand_value (ins, off, dis_style_address_offset);
+  return true;
 }
 
-static void
+static bool
 OP_OFF64 (instr_info *ins, int bytemode, int sizeflag)
 {
-  bfd_vma off;
+  uint64_t off;
 
   if (ins->address_mode != mode_64bit
       || (ins->prefixes & PREFIX_ADDR))
-    {
-      OP_OFF (ins, bytemode, sizeflag);
-      return;
-    }
+    return OP_OFF (ins, bytemode, sizeflag);
 
   if (ins->intel_syntax && (sizeflag & SUFFIX_ALWAYS))
     intel_operand_size (ins, bytemode, sizeflag);
   append_seg (ins);
 
-  off = get64 (ins);
+  if (!get64 (ins, &off))
+    return false;
 
   if (ins->intel_syntax)
     {
@@ -12762,6 +12707,7 @@ OP_OFF64 (instr_info *ins, int bytemode, int sizeflag)
 	}
     }
   print_operand_value (ins, off, dis_style_address_offset);
+  return true;
 }
 
 static void
@@ -12786,12 +12732,12 @@ ptr_reg (instr_info *ins, int code, int sizeflag)
   oappend_char (ins, ins->close_char);
 }
 
-static void
+static bool
 OP_ESreg (instr_info *ins, int code, int sizeflag)
 {
   if (ins->intel_syntax)
     {
-      switch (ins->codep[-1])
+      switch (ins->codep[-1] & 0xff)
 	{
 	case 0x6d:	/* insw/insl */
 	  intel_operand_size (ins, z_mode, sizeflag);
@@ -12806,17 +12752,18 @@ OP_ESreg (instr_info *ins, int code, int sizeflag)
 	  intel_operand_size (ins, b_mode, sizeflag);
 	}
     }
-  oappend_register (ins, "%es");
+  oappend_register (ins, att_names_seg[0]);
   oappend_char (ins, ':');
   ptr_reg (ins, code, sizeflag);
+  return true;
 }
 
-static void
+static bool
 OP_DSreg (instr_info *ins, int code, int sizeflag)
 {
   if (ins->intel_syntax)
     {
-      switch (ins->codep[-1])
+      switch (ins->codep[-1] & 0xff)
 	{
 	case 0x6f:	/* outsw/outsl */
 	  intel_operand_size (ins, z_mode, sizeflag);
@@ -12836,9 +12783,10 @@ OP_DSreg (instr_info *ins, int code, int sizeflag)
     ins->active_seg_prefix = PREFIX_DS;
   append_seg (ins);
   ptr_reg (ins, code, sizeflag);
+  return true;
 }
 
-static void
+static bool
 OP_C (instr_info *ins, int dummy ATTRIBUTE_UNUSED,
       int sizeflag ATTRIBUTE_UNUSED)
 {
@@ -12863,9 +12811,10 @@ OP_C (instr_info *ins, int dummy ATTRIBUTE_UNUSED,
   if (res < 0 || (size_t) res >= ARRAY_SIZE (scratch))
     abort ();
   oappend_register (ins, scratch);
+  return true;
 }
 
-static void
+static bool
 OP_D (instr_info *ins, int dummy ATTRIBUTE_UNUSED,
       int sizeflag ATTRIBUTE_UNUSED)
 {
@@ -12883,9 +12832,10 @@ OP_D (instr_info *ins, int dummy ATTRIBUTE_UNUSED,
   if (res < 0 || (size_t) res >= ARRAY_SIZE (scratch))
     abort ();
   oappend (ins, scratch);
+  return true;
 }
 
-static void
+static bool
 OP_T (instr_info *ins, int dummy ATTRIBUTE_UNUSED,
       int sizeflag ATTRIBUTE_UNUSED)
 {
@@ -12896,14 +12846,15 @@ OP_T (instr_info *ins, int dummy ATTRIBUTE_UNUSED,
   if (res < 0 || (size_t) res >= ARRAY_SIZE (scratch))
     abort ();
   oappend_register (ins, scratch);
+  return true;
 }
 
-static void
+static bool
 OP_MMX (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	int sizeflag ATTRIBUTE_UNUSED)
 {
   int reg = ins->modrm.reg;
-  const char *const *names;
+  const char (*names)[8];
 
   ins->used_prefixes |= (ins->prefixes & PREFIX_DATA);
   if (ins->prefixes & PREFIX_DATA)
@@ -12916,12 +12867,13 @@ OP_MMX (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
   else
     names = att_names_mm;
   oappend_register (ins, names[reg]);
+  return true;
 }
 
 static void
 print_vector_reg (instr_info *ins, unsigned int reg, int bytemode)
 {
-  const char *const *names;
+  const char (*names)[8];
 
   if (bytemode == xmmq_mode
       || bytemode == evex_half_bcst_xmmqh_mode
@@ -12993,7 +12945,7 @@ print_vector_reg (instr_info *ins, unsigned int reg, int bytemode)
   oappend_register (ins, names[reg]);
 }
 
-static void
+static bool
 OP_XMM (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
 {
   unsigned int reg = ins->modrm.reg;
@@ -13013,13 +12965,14 @@ OP_XMM (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
     ins->vex.no_broadcast = true;
 
   print_vector_reg (ins, reg, bytemode);
+  return true;
 }
 
-static void
+static bool
 OP_EM (instr_info *ins, int bytemode, int sizeflag)
 {
   int reg;
-  const char *const *names;
+  const char (*names)[8];
 
   if (ins->modrm.mod != 3)
     {
@@ -13029,8 +12982,7 @@ OP_EM (instr_info *ins, int bytemode, int sizeflag)
 	  bytemode = (ins->prefixes & PREFIX_DATA) ? x_mode : q_mode;
 	  ins->used_prefixes |= (ins->prefixes & PREFIX_DATA);
 	}
-      OP_E (ins, bytemode, sizeflag);
-      return;
+      return OP_E (ins, bytemode, sizeflag);
     }
 
   if ((sizeflag & SUFFIX_ALWAYS) && bytemode == v_swap_mode)
@@ -13051,6 +13003,7 @@ OP_EM (instr_info *ins, int bytemode, int sizeflag)
   else
     names = att_names_mm;
   oappend_register (ins, names[reg]);
+  return true;
 }
 
 /* cvt* are the only instructions in sse2 which have
@@ -13058,7 +13011,7 @@ OP_EM (instr_info *ins, int bytemode, int sizeflag)
    in their opcode. 0x66 was originally used to differentiate
    between SSE and MMX instruction(operands). So we have to handle the
    cvt* separately using OP_EMC and OP_MXC */
-static void
+static bool
 OP_EMC (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod != 3)
@@ -13068,8 +13021,7 @@ OP_EMC (instr_info *ins, int bytemode, int sizeflag)
 	  bytemode = (ins->prefixes & PREFIX_DATA) ? x_mode : q_mode;
 	  ins->used_prefixes |= (ins->prefixes & PREFIX_DATA);
 	}
-      OP_E (ins, bytemode, sizeflag);
-      return;
+      return OP_E (ins, bytemode, sizeflag);
     }
 
   /* Skip mod/rm byte.  */
@@ -13077,17 +13029,19 @@ OP_EMC (instr_info *ins, int bytemode, int sizeflag)
   ins->codep++;
   ins->used_prefixes |= (ins->prefixes & PREFIX_DATA);
   oappend_register (ins, att_names_mm[ins->modrm.rm]);
+  return true;
 }
 
-static void
+static bool
 OP_MXC (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	int sizeflag ATTRIBUTE_UNUSED)
 {
   ins->used_prefixes |= (ins->prefixes & PREFIX_DATA);
   oappend_register (ins, att_names_mm[ins->modrm.reg]);
+  return true;
 }
 
-static void
+static bool
 OP_EX (instr_info *ins, int bytemode, int sizeflag)
 {
   int reg;
@@ -13100,10 +13054,7 @@ OP_EX (instr_info *ins, int bytemode, int sizeflag)
     bytemode = ins->vex.w ? q_mode : d_mode;
 
   if (ins->modrm.mod != 3)
-    {
-      OP_E_memory (ins, bytemode, sizeflag);
-      return;
-    }
+    return OP_E_memory (ins, bytemode, sizeflag);
 
   reg = ins->modrm.rm;
   USED_REX (REX_B);
@@ -13127,57 +13078,56 @@ OP_EX (instr_info *ins, int bytemode, int sizeflag)
     ins->modrm.rm = reg;
 
   print_vector_reg (ins, reg, bytemode);
+  return true;
 }
 
-static void
+static bool
 OP_MS (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod == 3)
-    OP_EM (ins, bytemode, sizeflag);
-  else
-    BadOp (ins);
+    return OP_EM (ins, bytemode, sizeflag);
+  return BadOp (ins);
 }
 
-static void
+static bool
 OP_XS (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod == 3)
-    OP_EX (ins, bytemode, sizeflag);
-  else
-    BadOp (ins);
+    return OP_EX (ins, bytemode, sizeflag);
+  return BadOp (ins);
 }
 
-static void
+static bool
 OP_M (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod == 3)
     /* bad bound,lea,lds,les,lfs,lgs,lss,cmpxchg8b,vmptrst modrm */
-    BadOp (ins);
-  else
-    OP_E (ins, bytemode, sizeflag);
+    return BadOp (ins);
+  return OP_E (ins, bytemode, sizeflag);
 }
 
-static void
+static bool
 OP_0f07 (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod != 3 || ins->modrm.rm != 0)
-    BadOp (ins);
-  else
-    OP_E (ins, bytemode, sizeflag);
+    return BadOp (ins);
+  return OP_E (ins, bytemode, sizeflag);
 }
 
 /* NOP is an alias of "xchg %ax,%ax" in 16bit mode, "xchg %eax,%eax" in
    32bit mode and "xchg %rax,%rax" in 64bit mode.  */
 
-static void
+static bool
 NOP_Fixup (instr_info *ins, int opnd, int sizeflag)
 {
   if ((ins->prefixes & PREFIX_DATA) == 0 && (ins->rex & REX_B) == 0)
-    ins->mnemonicendp = stpcpy (ins->obuf, "nop");
-  else if (opnd == 0)
-    OP_REG (ins, eAX_reg, sizeflag);
-  else
-    OP_IMREG (ins, eAX_reg, sizeflag);
+    {
+      ins->mnemonicendp = stpcpy (ins->obuf, "nop");
+      return true;
+    }
+  if (opnd == 0)
+    return OP_REG (ins, eAX_reg, sizeflag);
+  return OP_IMREG (ins, eAX_reg, sizeflag);
 }
 
 static const char *const Suffix3DNow[] = {
@@ -13247,13 +13197,14 @@ static const char *const Suffix3DNow[] = {
 /* FC */	NULL,		NULL,		NULL,		NULL,
 };
 
-static void
+static bool
 OP_3DNowSuffix (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 		int sizeflag ATTRIBUTE_UNUSED)
 {
   const char *mnemonic;
 
-  FETCH_DATA (ins->info, ins->codep + 1);
+  if (!fetch_code (ins->info, ins->codep + 1))
+    return false;
   /* AMD 3DNow! instructions are specified by an opcode suffix in the
      place where an 8-bit immediate would normally go.  ie. the last
      byte of the instruction.  */
@@ -13272,6 +13223,7 @@ OP_3DNowSuffix (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
       BadOp (ins);
     }
   ins->mnemonicendp = ins->obufp;
+  return true;
 }
 
 static const struct op simd_cmp_op[] =
@@ -13314,13 +13266,14 @@ static const struct op vex_cmp_op[] =
   { STRING_COMMA_LEN ("true_us") },
 };
 
-static void
+static bool
 CMP_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	   int sizeflag ATTRIBUTE_UNUSED)
 {
   unsigned int cmp_type;
 
-  FETCH_DATA (ins->info, ins->codep + 1);
+  if (!fetch_code (ins->info, ins->codep + 1))
+    return false;
   cmp_type = *ins->codep++ & 0xff;
   if (cmp_type < ARRAY_SIZE (simd_cmp_op))
     {
@@ -13349,9 +13302,10 @@ CMP_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
       /* We have a reserved extension byte.  Output it directly.  */
       oappend_immediate (ins, cmp_type);
     }
+  return true;
 }
 
-static void
+static bool
 OP_Mwait (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
 {
   /* mwait %eax,%ecx / mwaitx %eax,%ecx,%ebx  */
@@ -13366,17 +13320,18 @@ OP_Mwait (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
   /* Skip mod/rm byte.  */
   MODRM_CHECK;
   ins->codep++;
+  return true;
 }
 
-static void
+static bool
 OP_Monitor (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	    int sizeflag ATTRIBUTE_UNUSED)
 {
   /* monitor %{e,r,}ax,%ecx,%edx"  */
   if (!ins->intel_syntax)
     {
-      const char *const *names = (ins->address_mode == mode_64bit
-				  ? att_names64 : att_names32);
+      const char (*names)[8] = (ins->address_mode == mode_64bit
+				? att_names64 : att_names32);
 
       if (ins->prefixes & PREFIX_ADDR)
 	{
@@ -13396,17 +13351,19 @@ OP_Monitor (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
   /* Skip mod/rm byte.  */
   MODRM_CHECK;
   ins->codep++;
+  return true;
 }
 
-static void
+static bool
 BadOp (instr_info *ins)
 {
   /* Throw away prefixes and 1st. opcode byte.  */
   ins->codep = ins->insn_codep + 1;
   ins->obufp = stpcpy (ins->obufp, "(bad)");
+  return true;
 }
 
-static void
+static bool
 REP_Fixup (instr_info *ins, int bytemode, int sizeflag)
 {
   /* The 0xf3 prefix should be displayed as "rep" for ins, outs, movs,
@@ -13419,48 +13376,48 @@ REP_Fixup (instr_info *ins, int bytemode, int sizeflag)
     case al_reg:
     case eAX_reg:
     case indir_dx_reg:
-      OP_IMREG (ins, bytemode, sizeflag);
-      break;
+      return OP_IMREG (ins, bytemode, sizeflag);
     case eDI_reg:
-      OP_ESreg (ins, bytemode, sizeflag);
-      break;
+      return OP_ESreg (ins, bytemode, sizeflag);
     case eSI_reg:
-      OP_DSreg (ins, bytemode, sizeflag);
-      break;
+      return OP_DSreg (ins, bytemode, sizeflag);
     default:
       abort ();
       break;
     }
+  return true;
 }
 
-static void
+static bool
 SEP_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	   int sizeflag ATTRIBUTE_UNUSED)
 {
   if (ins->isa64 != amd64)
-    return;
+    return true;
 
   ins->obufp = ins->obuf;
   BadOp (ins);
   ins->mnemonicendp = ins->obufp;
   ++ins->codep;
+  return true;
 }
 
 /* For BND-prefixed instructions 0xF2 prefix should be displayed as
    "bnd".  */
 
-static void
+static bool
 BND_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	   int sizeflag ATTRIBUTE_UNUSED)
 {
   if (ins->prefixes & PREFIX_REPNZ)
     ins->all_prefixes[ins->last_repnz_prefix] = BND_PREFIX;
+  return true;
 }
 
 /* For NOTRACK-prefixed instructions, 0x3E prefix should be displayed as
    "notrack".  */
 
-static void
+static bool
 NOTRACK_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	       int sizeflag ATTRIBUTE_UNUSED)
 {
@@ -13474,13 +13431,14 @@ NOTRACK_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
       ins->active_seg_prefix = 0;
       ins->all_prefixes[ins->last_seg_prefix] = NOTRACK_PREFIX;
     }
+  return true;
 }
 
 /* Similar to OP_E.  But the 0xf2/0xf3 ins->prefixes should be displayed as
    "xacquire"/"xrelease" for memory operand if there is a LOCK prefix.
  */
 
-static void
+static bool
 HLE_Fixup1 (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod != 3
@@ -13492,14 +13450,14 @@ HLE_Fixup1 (instr_info *ins, int bytemode, int sizeflag)
 	ins->all_prefixes[ins->last_repnz_prefix] = XACQUIRE_PREFIX;
     }
 
-  OP_E (ins, bytemode, sizeflag);
+  return OP_E (ins, bytemode, sizeflag);
 }
 
 /* Similar to OP_E.  But the 0xf2/0xf3 ins->prefixes should be displayed as
    "xacquire"/"xrelease" for memory operand.  No check for LOCK prefix.
  */
 
-static void
+static bool
 HLE_Fixup2 (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod != 3)
@@ -13510,13 +13468,13 @@ HLE_Fixup2 (instr_info *ins, int bytemode, int sizeflag)
 	ins->all_prefixes[ins->last_repnz_prefix] = XACQUIRE_PREFIX;
     }
 
-  OP_E (ins, bytemode, sizeflag);
+  return OP_E (ins, bytemode, sizeflag);
 }
 
 /* Similar to OP_E.  But the 0xf3 prefixes should be displayed as
    "xrelease" for memory operand.  No check for LOCK prefix.   */
 
-static void
+static bool
 HLE_Fixup3 (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod != 3
@@ -13524,10 +13482,10 @@ HLE_Fixup3 (instr_info *ins, int bytemode, int sizeflag)
       && (ins->prefixes & PREFIX_REPZ) != 0)
     ins->all_prefixes[ins->last_repz_prefix] = XRELEASE_PREFIX;
 
-  OP_E (ins, bytemode, sizeflag);
+  return OP_E (ins, bytemode, sizeflag);
 }
 
-static void
+static bool
 CMPXCHG8B_Fixup (instr_info *ins, int bytemode, int sizeflag)
 {
   USED_REX (REX_W);
@@ -13546,13 +13504,13 @@ CMPXCHG8B_Fixup (instr_info *ins, int bytemode, int sizeflag)
 	ins->all_prefixes[ins->last_repnz_prefix] = XACQUIRE_PREFIX;
     }
 
-  OP_M (ins, bytemode, sizeflag);
+  return OP_M (ins, bytemode, sizeflag);
 }
 
-static void
+static bool
 XMM_Fixup (instr_info *ins, int reg, int sizeflag ATTRIBUTE_UNUSED)
 {
-  const char *const *names = att_names_xmm;
+  const char (*names)[8] = att_names_xmm;
 
   if (ins->need_vex)
     {
@@ -13568,9 +13526,10 @@ XMM_Fixup (instr_info *ins, int reg, int sizeflag ATTRIBUTE_UNUSED)
 	}
     }
   oappend_register (ins, names[reg]);
+  return true;
 }
 
-static void
+static bool
 FXSAVE_Fixup (instr_info *ins, int bytemode, int sizeflag)
 {
   /* Add proper suffix to "fxsave" and "fxrstor".  */
@@ -13583,17 +13542,17 @@ FXSAVE_Fixup (instr_info *ins, int bytemode, int sizeflag)
       *p = '\0';
       ins->mnemonicendp = p;
     }
-  OP_M (ins, bytemode, sizeflag);
+  return OP_M (ins, bytemode, sizeflag);
 }
 
 /* Display the destination register operand for instructions with
    VEX. */
 
-static void
+static bool
 OP_VEX (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
 {
   int reg, modrm_reg, sib_index = -1;
-  const char *const *names;
+  const char (*names)[8];
 
   if (!ins->need_vex)
     abort ();
@@ -13605,7 +13564,7 @@ OP_VEX (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
       if (ins->vex.evex && !ins->vex.v)
 	{
 	  oappend (ins, "(bad)");
-	  return;
+	  return true;
 	}
 
       reg &= 7;
@@ -13617,7 +13576,7 @@ OP_VEX (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
     {
     case scalar_mode:
       oappend_register (ins, att_names_xmm[reg]);
-      return;
+      return true;
 
     case vex_vsib_d_w_dq_mode:
     case vex_vsib_q_w_dq_mode:
@@ -13650,7 +13609,7 @@ OP_VEX (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
       if (sib_index == modrm_reg || sib_index == reg)
 	strcat (ins->op_out[1], "/(bad)");
 
-      return;
+      return true;
 
     case tmm_mode:
       /* All 3 TMM registers must be distinct.  */
@@ -13677,7 +13636,7 @@ OP_VEX (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
 	    strcat (ins->op_out[1], "/(bad)");
 	}
 
-      return;
+      return true;
     }
 
   switch (ins->vex.length)
@@ -13700,13 +13659,13 @@ OP_VEX (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
 	  if (reg > 0x7)
 	    {
 	      oappend (ins, "(bad)");
-	      return;
+	      return true;
 	    }
 	  names = att_names_mask;
 	  break;
 	default:
 	  abort ();
-	  return;
+	  return true;
 	}
       break;
     case 256:
@@ -13718,17 +13677,16 @@ OP_VEX (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
 	  break;
 	case mask_bd_mode:
 	case mask_mode:
-	  if (reg > 0x7)
+	  if (reg <= 0x7)
 	    {
-	      oappend (ins, "(bad)");
-	      return;
+	      names = att_names_mask;
+	      break;
 	    }
-	  names = att_names_mask;
-	  break;
+	  /* Fall through.  */
 	default:
 	  /* See PR binutils/20893 for a reproducer.  */
 	  oappend (ins, "(bad)");
-	  return;
+	  return true;
 	}
       break;
     case 512:
@@ -13740,16 +13698,18 @@ OP_VEX (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
       break;
     }
   oappend_register (ins, names[reg]);
+  return true;
 }
 
-static void
+static bool
 OP_VexR (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod == 3)
-    OP_VEX (ins, bytemode, sizeflag);
+    return OP_VEX (ins, bytemode, sizeflag);
+  return true;
 }
 
-static void
+static bool
 OP_VexW (instr_info *ins, int bytemode, int sizeflag)
 {
   OP_VEX (ins, bytemode, sizeflag);
@@ -13762,16 +13722,18 @@ OP_VexW (instr_info *ins, int bytemode, int sizeflag)
       ins->op_out[2] = ins->op_out[1];
       ins->op_out[1] = tmp;
     }
+  return true;
 }
 
-static void
+static bool
 OP_REG_VexI4 (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
 {
   int reg;
-  const char *const *names = att_names_xmm;
+  const char (*names)[8] = att_names_xmm;
 
-  FETCH_DATA (ins->info, ins->codep + 1);
-  reg = *ins->codep++;
+  if (!fetch_code (ins->info, ins->codep + 1))
+    return false;
+  reg = *ins->codep++ & 0xff;
 
   if (bytemode != x_mode && bytemode != scalar_mode)
     abort ();
@@ -13793,16 +13755,18 @@ OP_REG_VexI4 (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
       ins->op_out[3] = ins->op_out[2];
       ins->op_out[2] = tmp;
     }
+  return true;
 }
 
-static void
+static bool
 OP_VexI4 (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	  int sizeflag ATTRIBUTE_UNUSED)
 {
   oappend_immediate (ins, ins->codep[-1] & 0xf);
+  return true;
 }
 
-static void
+static bool
 VPCMP_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	     int sizeflag ATTRIBUTE_UNUSED)
 {
@@ -13811,7 +13775,8 @@ VPCMP_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
   if (!ins->vex.evex)
     abort ();
 
-  FETCH_DATA (ins->info, ins->codep + 1);
+  if (!fetch_code (ins->info, ins->codep + 1))
+    return false;
   cmp_type = *ins->codep++ & 0xff;
   /* There are aliases for immediates 0, 1, 2, 4, 5, 6.
      If it's the case, print suffix, otherwise - print the immediate.  */
@@ -13844,6 +13809,7 @@ VPCMP_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
       /* We have a reserved extension byte.  Output it directly.  */
       oappend_immediate (ins, cmp_type);
     }
+  return true;
 }
 
 static const struct op xop_cmp_op[] =
@@ -13858,13 +13824,14 @@ static const struct op xop_cmp_op[] =
   { STRING_COMMA_LEN ("true") }
 };
 
-static void
+static bool
 VPCOM_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	     int sizeflag ATTRIBUTE_UNUSED)
 {
   unsigned int cmp_type;
 
-  FETCH_DATA (ins->info, ins->codep + 1);
+  if (!fetch_code (ins->info, ins->codep + 1))
+    return false;
   cmp_type = *ins->codep++ & 0xff;
   if (cmp_type < ARRAY_SIZE (xop_cmp_op))
     {
@@ -13893,6 +13860,7 @@ VPCOM_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
       /* We have a reserved extension byte.  Output it directly.  */
       oappend_immediate (ins, cmp_type);
     }
+  return true;
 }
 
 static const struct op pclmul_op[] =
@@ -13903,13 +13871,14 @@ static const struct op pclmul_op[] =
   { STRING_COMMA_LEN ("hqh") }
 };
 
-static void
+static bool
 PCLMUL_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
 	      int sizeflag ATTRIBUTE_UNUSED)
 {
   unsigned int pclmul_type;
 
-  FETCH_DATA (ins->info, ins->codep + 1);
+  if (!fetch_code (ins->info, ins->codep + 1))
+    return false;
   pclmul_type = *ins->codep++ & 0xff;
   switch (pclmul_type)
     {
@@ -13938,9 +13907,10 @@ PCLMUL_Fixup (instr_info *ins, int bytemode ATTRIBUTE_UNUSED,
       /* We have a reserved extension byte.  Output it directly.  */
       oappend_immediate (ins, pclmul_type);
     }
+  return true;
 }
 
-static void
+static bool
 MOVSXD_Fixup (instr_info *ins, int bytemode, int sizeflag)
 {
   /* Add proper suffix to "movsxd".  */
@@ -13970,10 +13940,10 @@ MOVSXD_Fixup (instr_info *ins, int bytemode, int sizeflag)
 
   ins->mnemonicendp = p;
   *p = '\0';
-  OP_E (ins, bytemode, sizeflag);
+  return OP_E (ins, bytemode, sizeflag);
 }
 
-static void
+static bool
 DistinctDest_Fixup (instr_info *ins, int bytemode, int sizeflag)
 {
   unsigned int reg = ins->vex.register_specifier;
@@ -14008,22 +13978,22 @@ DistinctDest_Fixup (instr_info *ins, int bytemode, int sizeflag)
 	  && modrm_reg == modrm_rm))
     {
       oappend (ins, "(bad)");
+      return true;
     }
-  else
-    OP_XMM (ins, bytemode, sizeflag);
+  return OP_XMM (ins, bytemode, sizeflag);
 }
 
-static void
+static bool
 OP_Rounding (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
 {
   if (ins->modrm.mod != 3 || !ins->vex.b)
-    return;
+    return true;
 
   switch (bytemode)
     {
     case evex_rounding_64_mode:
       if (ins->address_mode != mode_64bit || !ins->vex.w)
-        return;
+        return true;
       /* Fall through.  */
     case evex_rounding_mode:
       ins->evex_used |= EVEX_b_used;
@@ -14037,9 +14007,10 @@ OP_Rounding (instr_info *ins, int bytemode, int sizeflag ATTRIBUTE_UNUSED)
       abort ();
     }
   oappend (ins, "sae}");
+  return true;
 }
 
-static void
+static bool
 PREFETCHI_Fixup (instr_info *ins, int bytemode, int sizeflag)
 {
   if (ins->modrm.mod != 0 || ins->modrm.rm != 5)
@@ -14065,5 +14036,5 @@ PREFETCHI_Fixup (instr_info *ins, int bytemode, int sizeflag)
       bytemode = v_mode;
     }
 
-  OP_M (ins, bytemode, sizeflag);
+  return OP_M (ins, bytemode, sizeflag);
 }

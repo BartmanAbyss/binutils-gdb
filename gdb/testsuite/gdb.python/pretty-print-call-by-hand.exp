@@ -1,4 +1,4 @@
-# Copyright (C) 2022 Free Software Foundation, Inc.
+# Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,15 +19,9 @@
 
 load_lib gdb-python.exp
 
+require allow_python_tests
+
 standard_testfile
-
-# gdb needs to be started here for skip_python_tests to work.
-# prepare_for_testing could be used instead, but it could compile the program
-# unnecessarily, so starting GDB like this is preferable.
-gdb_start
-
-# Skip all tests if Python scripting is not enabled.
-if { [skip_python_tests] } { continue }
 
 if { [prepare_for_testing "failed to prepare" $testfile $srcfile debug] } {
     untested "failed to compile"
@@ -47,7 +41,7 @@ proc start_test { breakpoint_comment } {
 
     clean_restart ${binfile}
 
-    if { ![runto_main] } then {
+    if {![runto_main]} {
 	untested "couldn't run to breakpoint"
 	return -1
     }
@@ -55,8 +49,6 @@ proc start_test { breakpoint_comment } {
     # Let GDB get to the return line.
     gdb_breakpoint [gdb_get_line_number ${breakpoint_comment} ${testfile}.c ]
     gdb_continue_to_breakpoint ${breakpoint_comment} ".*"
-
-    gdb_test_no_output "set print pretty on" "starting to pretty print"
 
     set remote_python_file [gdb_remote_download host ${srcdir}/${subdir}/${testfile}.py]
     gdb_test_no_output "source ${remote_python_file}" "load python file"
@@ -66,11 +58,9 @@ proc start_test { breakpoint_comment } {
 
 # Start by testing the "run" command, it can't leverage start_test
 with_test_prefix "run to frame" {
-    if { ![runto_main] } then {
+    if {![runto_main]} {
 	untested "couldn't run to main"
     }
-
-    gdb_test_no_output "set print pretty on" "starting to pretty print"
 
     set remote_python_file [gdb_remote_download host ${srcdir}/${subdir}/${testfile}.py]
     gdb_test_no_output "source ${remote_python_file}" "load python file"

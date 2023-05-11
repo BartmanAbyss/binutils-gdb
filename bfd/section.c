@@ -1,5 +1,5 @@
 /* Object file "section" support for the BFD library.
-   Copyright (C) 1990-2022 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -137,14 +137,27 @@ SUBSECTION
 /*
 DOCDD
 INODE
-typedef asection, section prototypes, Section Output, Sections
+	typedef asection, section prototypes, Section Output, Sections
 SUBSECTION
 	typedef asection
 
 	Here is the section structure:
 
-CODE_FRAGMENT
+EXTERNAL
+.{* Linenumber stuff.  *}
+.typedef struct lineno_cache_entry
+.{
+.  unsigned int line_number;	{* Linenumber from start of function.  *}
+.  union
+.  {
+.    struct bfd_symbol *sym;	{* Function name.  *}
+.    bfd_vma offset;		{* Offset into section.  *}
+.  } u;
+.}
+.alent;
 .
+
+CODE_FRAGMENT
 .typedef struct bfd_section
 .{
 .  {* The name of the section; the name isn't a copy, the pointer is
@@ -336,9 +349,8 @@ CODE_FRAGMENT
 .     executables or shared objects. This is for COFF only.  *}
 .#define SEC_COFF_SHARED             0x8000000
 .
-.  {* This section should be compressed.  This is for ELF linker
-.     internal use only.  *}
-.#define SEC_ELF_COMPRESS            0x8000000
+.  {* Indicate that section has the purecode flag set.  *}
+.#define SEC_ELF_PURECODE            0x8000000
 .
 .  {* When a section with this flag is being linked, then if the size of
 .     the input section is less than a page, it should not cross a page
@@ -346,10 +358,6 @@ CODE_FRAGMENT
 .     it should be aligned on a page boundary.  This is for TI
 .     TMS320C54X only.  *}
 .#define SEC_TIC54X_BLOCK           0x10000000
-.
-.  {* This section should be renamed.  This is for ELF linker
-.     internal use only.  *}
-.#define SEC_ELF_RENAME             0x10000000
 .
 .  {* Conditionally link this section; do not link if there are no
 .     references found to any symbol in the section.  This is for TI
@@ -367,9 +375,6 @@ CODE_FRAGMENT
 .  {* Indicate that section has the no read flag set. This happens
 .     when memory read flag isn't set. *}
 .#define SEC_COFF_NOREAD            0x40000000
-.
-.  {* Indicate that section has the purecode flag set.  *}
-.#define SEC_ELF_PURECODE           0x80000000
 .
 .  {*  End of section flags.  *}
 .
@@ -501,7 +506,7 @@ CODE_FRAGMENT
 .
 .  {* If the SEC_IN_MEMORY flag is set, this points to the actual
 .     contents.  *}
-.  unsigned char *contents;
+.  bfd_byte *contents;
 .
 .  {* Attached line number information.  *}
 .  alent *lineno;
@@ -557,6 +562,8 @@ CODE_FRAGMENT
 .
 .} asection;
 .
+
+EXTERNAL
 .static inline const char *
 .bfd_section_name (const asection *sec)
 .{
@@ -1558,10 +1565,7 @@ bfd_get_section_contents (bfd *abfd,
       return true;
     }
 
-  if (abfd->direction != write_direction && section->rawsize != 0)
-    sz = section->rawsize;
-  else
-    sz = section->size;
+  sz = bfd_get_section_limit_octets (abfd, section);
   if ((bfd_size_type) offset > sz
       || count > sz - offset
       || count != (size_t) count)
@@ -1611,6 +1615,8 @@ SYNOPSIS
 DESCRIPTION
 	Read all data from @var{section} in BFD @var{abfd}
 	into a buffer, *@var{buf}, malloc'd by this function.
+	Return @code{true} on success, @code{false} on failure in which
+	case *@var{buf} will be NULL.
 */
 
 bool

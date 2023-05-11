@@ -1,6 +1,6 @@
 /* Target-dependent code for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,7 +35,7 @@
 #include "osabi.h"
 #include "infcall.h"
 #include "sim-regno.h"
-#include "gdb/sim-ppc.h"
+#include "sim/sim-ppc.h"
 #include "reggroups.h"
 #include "dwarf2/frame.h"
 #include "target-descriptions.h"
@@ -889,7 +889,8 @@ ppc_displaced_step_copy_insn (struct gdbarch *gdbarch,
 			      CORE_ADDR from, CORE_ADDR to,
 			      struct regcache *regs)
 {
-  size_t len = gdbarch_max_insn_length (gdbarch);
+  size_t len = gdbarch_displaced_step_buffer_length (gdbarch);
+  gdb_assert (len > PPC_INSN_SIZE);
   std::unique_ptr<ppc_displaced_step_copy_insn_closure> closure
     (new ppc_displaced_step_copy_insn_closure (len));
   gdb_byte *buf = closure->buf.data ();
@@ -939,7 +940,7 @@ ppc_displaced_step_copy_insn (struct gdbarch *gdbarch,
 
   displaced_debug_printf ("copy %s->%s: %s",
 			  paddress (gdbarch, from), paddress (gdbarch, to),
-			  displaced_step_dump_bytes (buf, len).c_str ());
+			  bytes_to_string (buf, len).c_str ());
 
   /* This is a work around for a problem with g++ 4.8.  */
   return displaced_step_copy_insn_closure_up (closure.release ());
@@ -951,8 +952,18 @@ static void
 ppc_displaced_step_fixup (struct gdbarch *gdbarch,
 			  struct displaced_step_copy_insn_closure *closure_,
 			  CORE_ADDR from, CORE_ADDR to,
-			  struct regcache *regs)
+			  struct regcache *regs, bool completed_p)
 {
+  /* If the displaced instruction didn't complete successfully then all we
+     need to do is restore the program counter.  */
+  if (!completed_p)
+    {
+      CORE_ADDR pc = regcache_read_pc (regs);
+      pc = from + (pc - to);
+      regcache_write_pc (regs, pc);
+      return;
+    }
+
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   /* Our closure is a copy of the instruction.  */
   ppc_displaced_step_copy_insn_closure *closure
@@ -1058,7 +1069,7 @@ ppc_displaced_step_fixup (struct gdbarch *gdbarch,
   else
     {
       /* Handle any other instructions that do not fit in the categories
-         above.  */
+	 above.  */
       regcache_cooked_write_unsigned (regs, gdbarch_pc_regnum (gdbarch),
 				      from + offset);
     }
@@ -1088,13 +1099,13 @@ ppc_displaced_step_prepare  (gdbarch *arch, thread_info *thread,
 
 static displaced_step_finish_status
 ppc_displaced_step_finish (gdbarch *arch, thread_info *thread,
-			   gdb_signal sig)
+			   const target_waitstatus &status)
 {
   ppc_inferior_data *per_inferior = get_ppc_per_inferior (thread->inf);
 
   gdb_assert (per_inferior->disp_step_buf.has_value ());
 
-  return per_inferior->disp_step_buf->finish (arch, thread, sig);
+  return per_inferior->disp_step_buf->finish (arch, thread, status);
 }
 
 /* Implementation of gdbarch_displaced_step_restore_all_in_ptid.  */
@@ -1633,7 +1644,6 @@ skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc, CORE_ADDR lim_pc,
 	     address at runtime, can appear to save more than one link
 	     register vis:
 
-	     *INDENT-OFF*
 	     stwu r1,-304(r1)
 	     mflr r3
 	     bl 0xff570d0 (blrl)
@@ -1642,7 +1652,6 @@ skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc, CORE_ADDR lim_pc,
 	     stw r31,300(r1)
 	     stw r3,308(r1);
 	     ...
-	     *INDENT-ON*
 
 	     remember just the first one, but skip over additional
 	     ones.  */
@@ -2433,8 +2442,9 @@ rs6000_builtin_type_vec128 (struct gdbarch *gdbarch)
       */
 
       /* PPC specific type for IEEE 128-bit float field */
+      type_allocator alloc (gdbarch);
       struct type *t_float128
-	= arch_float_type (gdbarch, 128, "float128_t", floatformats_ieee_quad);
+	= init_float_type (alloc, 128, "float128_t", floatformats_ieee_quad);
 
       struct type *t;
 
@@ -4183,15 +4193,15 @@ ppc_record_ACC_fpscr (struct regcache *regcache, ppc_gdbarch_tdep *tdep,
      entry consist of four 128-bit rows.
 
      The ACC rows map to specific VSR registers.
-         ACC[0][0] -> VSR[0]
-         ACC[0][1] -> VSR[1]
-         ACC[0][2] -> VSR[2]
-         ACC[0][3] -> VSR[3]
-              ...
-         ACC[7][0] -> VSR[28]
-         ACC[7][1] -> VSR[29]
-         ACC[7][2] -> VSR[30]
-         ACC[7][3] -> VSR[31]
+	 ACC[0][0] -> VSR[0]
+	 ACC[0][1] -> VSR[1]
+	 ACC[0][2] -> VSR[2]
+	 ACC[0][3] -> VSR[3]
+	      ...
+	 ACC[7][0] -> VSR[28]
+	 ACC[7][1] -> VSR[29]
+	 ACC[7][2] -> VSR[30]
+	 ACC[7][3] -> VSR[31]
 
      NOTE:
      In ISA 3.1 the ACC is mapped on top of VSR[0] thru VSR[31].
@@ -7448,17 +7458,35 @@ rs6000_program_breakpoint_here_p (gdbarch *gdbarch, CORE_ADDR address)
   if (target_read_memory (address, target_mem, PPC_INSN_SIZE) == 0)
     {
       uint32_t insn = (uint32_t) extract_unsigned_integer
-        (target_mem, PPC_INSN_SIZE, gdbarch_byte_order_for_code (gdbarch));
+	(target_mem, PPC_INSN_SIZE, gdbarch_byte_order_for_code (gdbarch));
 
       /* Check if INSN is a TW, TWI, TD or TDI instruction.  There
-         are multiple choices of such instructions with different registers
-         and / or immediate values but they all cause a break. */
+	 are multiple choices of such instructions with different registers
+	 and / or immediate values but they all cause a break. */
       if (is_tw_insn (insn) || is_twi_insn (insn) || is_td_insn (insn)
-          || is_tdi_insn (insn))
-        return true;
+	  || is_tdi_insn (insn))
+	return true;
     }
 
   return false;
+}
+
+/* Implement the update_call_site_pc arch hook.  */
+
+static CORE_ADDR
+ppc64_update_call_site_pc (struct gdbarch *gdbarch, CORE_ADDR pc)
+{
+  /* Some versions of GCC emit:
+
+     .  bl function
+     .  nop
+     .  ...
+
+     but emit DWARF where the DW_AT_call_return_pc points to
+     instruction after the 'nop'.  Note that while the compiler emits
+     a 'nop', the linker might put some other instruction there -- so
+     we just unconditionally check the next instruction.  */
+  return pc + 4;
 }
 
 /* Initialize the current architecture based on INFO.  If possible, re-use an
@@ -7471,7 +7499,6 @@ rs6000_program_breakpoint_here_p (gdbarch *gdbarch, CORE_ADDR address)
 static struct gdbarch *
 rs6000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   int wordsize, from_xcoff_exec, from_elf_exec;
   enum bfd_architecture arch;
   unsigned long mach;
@@ -8179,14 +8206,15 @@ rs6000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
        - "set arch"		trust blindly
        - GDB startup		useless but harmless */
 
-  ppc_gdbarch_tdep *tdep = new ppc_gdbarch_tdep;
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new ppc_gdbarch_tdep));
+  ppc_gdbarch_tdep *tdep = gdbarch_tdep<ppc_gdbarch_tdep> (gdbarch);
+
   tdep->wordsize = wordsize;
   tdep->elf_abi = elf_abi;
   tdep->soft_float = soft_float;
   tdep->long_double_abi = long_double_abi;
   tdep->vector_abi = vector_abi;
-
-  gdbarch = gdbarch_alloc (&info, tdep);
 
   tdep->ppc_gp0_regnum = PPC_R0_REGNUM;
   tdep->ppc_toc_regnum = PPC_R0_REGNUM + 2;
@@ -8245,11 +8273,11 @@ rs6000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   if (wordsize == 8)
     {
       set_gdbarch_return_value (gdbarch, ppc64_sysv_abi_return_value);
-      set_gdbarch_get_return_buf_addr (gdbarch,
-				       ppc64_sysv_get_return_buf_addr);
+      set_gdbarch_update_call_site_pc (gdbarch, ppc64_update_call_site_pc);
     }
   else
     set_gdbarch_return_value (gdbarch, ppc_sysv_abi_return_value);
+  set_gdbarch_get_return_buf_addr (gdbarch, ppc_sysv_get_return_buf_addr);
 
   /* Set lr_frame_offset.  */
   if (wordsize == 8)
@@ -8328,7 +8356,7 @@ rs6000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_sw_breakpoint_from_kind (gdbarch,
 				       rs6000_breakpoint::bp_from_kind);
   set_gdbarch_program_breakpoint_here_p (gdbarch,
-                                         rs6000_program_breakpoint_here_p);
+					 rs6000_program_breakpoint_here_p);
 
   /* The value of symbols of type N_SO and N_FUN maybe null when
      it shouldn't be.  */
@@ -8365,8 +8393,9 @@ rs6000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_displaced_step_finish (gdbarch, ppc_displaced_step_finish);
   set_gdbarch_displaced_step_restore_all_in_ptid
     (gdbarch, ppc_displaced_step_restore_all_in_ptid);
+  set_gdbarch_displaced_step_buffer_length (gdbarch, 2 * PPC_INSN_SIZE);
 
-  set_gdbarch_max_insn_length (gdbarch, 2 * PPC_INSN_SIZE);
+  set_gdbarch_max_insn_length (gdbarch, PPC_INSN_SIZE);
 
   /* Hook in ABI-specific overrides, if they have been registered.  */
   info.target_desc = tdesc;

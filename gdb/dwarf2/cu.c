@@ -1,6 +1,6 @@
 /* DWARF CU data structure
 
-   Copyright (C) 2021-2022 Free Software Foundation, Inc.
+   Copyright (C) 2021-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -107,7 +107,7 @@ struct type *
 dwarf2_cu::addr_type () const
 {
   struct objfile *objfile = this->per_objfile->objfile;
-  struct type *void_type = objfile_type (objfile)->builtin_void;
+  struct type *void_type = builtin_type (objfile)->builtin_void;
   struct type *addr_type = lookup_pointer_type (void_type);
   int addr_size = this->per_cu->addr_size ();
 

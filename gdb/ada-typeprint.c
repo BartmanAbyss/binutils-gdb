@@ -1,5 +1,5 @@
 /* Support for printing Ada types for GDB, the GNU debugger.
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -941,6 +941,13 @@ ada_print_type (struct type *type0, const char *varstring,
 		struct ui_file *stream, int show, int level,
 		const struct type_print_options *flags)
 {
+  if (type0->code () == TYPE_CODE_INTERNAL_FUNCTION)
+    {
+      c_print_type (type0, "", stream, show, level,
+		    language_ada, flags);
+      return;
+    }
+
   struct type *type = ada_check_typedef (ada_get_base_type (type0));
   /* If we can decode the original type name, use it.  However, there
      are cases where the original type is an internally-generated type

@@ -3,7 +3,7 @@
 @settitle The SFrame Format
 
 @copying
-Copyright @copyright{} 2021-2022 Free Software Foundation, Inc.
+Copyright @copyright{} 2021-2023 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU General Public License, Version 3 or any
@@ -35,7 +35,7 @@ License''.
 
 This manual describes version 1 of the SFrame file format.  SFrame stands for
 Simple Frame format.  SFrame format keeps track of the minimal necessary
-information needed for stack unwinding:
+information needed for generating stack traces:
 
 @itemize @minus
 @item
@@ -47,7 +47,7 @@ Return Address (RA).
 @end itemize
 
 The reason for existence of the SFrame format is to support fast, online
-backtracing using a simple unwinder.
+generation of stack traces using simple means.
 
 @menu
 * Overview::
@@ -62,7 +62,7 @@ backtracing using a simple unwinder.
 @cindex Overview
 @tindex PT_GNU_SFRAME
 
-The SFrame unwind information is provided in a loaded section, known as the
+The SFrame stack trace information is provided in a loaded section, known as the
 @code{.sframe} section.  When available, the @code{.sframe} section appears in
 a new segment of its own, PT_GNU_SFRAME.
 
@@ -243,7 +243,7 @@ must be the end of the auxilliary SFrame header, if the latter is present.
 
 Tieing it all together:
 
-@multitable {Offset} {@code{int8_t sfh_cfa_fixed_fp_offset}} {The ABI/arch identifier. See above}
+@multitable {Offset} {@code{int8_t sfh_cfa_fixed_fp_offset}} {The number of SFrame FREs in the section.}
 @headitem Offset @tab Name @tab Description
 @item 0x00
 @tab @code{sframe_preamble sfh_preamble}
@@ -289,7 +289,7 @@ high-level function description for backtracing.
 @item 0x18
 @tab @code{uint32_t sfh_freoff}
 @tab The offset in bytes of the SFrame FRE sub-section, the core of the SFrame
-section, which describes the unwind information using variable-length array
+section, which describes the stack trace information using variable-length array
 elements. @xref{SFrame Frame Row Entries}.
 
 @end multitable
@@ -303,8 +303,9 @@ elements. @xref{SFrame Frame Row Entries}.
 @cindex SFrame ABI/arch identifier
 
 SFrame header identifies the ABI/arch of the target system for which the
-executable and it's unwind information is intended.  There are currently three
-identifiable ABI/arch values in the format.
+executable and hence, the stack trace information contained in the SFrame
+section, is intended.  There are currently three identifiable ABI/arch values
+in the format.
 
 @multitable {SFRAME_ABI_AARCH64_ENDIAN_LITTLE} {Value} {@code{AARCH64 little-endian}}
 @headitem ABI/arch Identifier @tab Value @tab Description
@@ -324,7 +325,7 @@ identifiable ABI/arch values in the format.
 @end multitable
 
 The presence of an explicit identification of ABI/arch in SFrame may allow
-unwinders to make certain ABI-specific decisions.
+stack trace generators to make certain ABI-specific decisions.
 
 @node SFrame Function Descriptor Entries
 @section SFrame FDE
@@ -332,8 +333,8 @@ unwinders to make certain ABI-specific decisions.
 
 The SFrame Function Descriptor Entry sub-section is a sorted array of
 fixed-length SFrame function descriptor entries (SFrame FDEs).  Each SFrame FDE
-is a packed structure which contains information to describe a function's unwind
-information at a high-level.
+is a packed structure which contains information to describe a function's stack
+trace information at a high-level.
 
 @example
 typedef struct sframe_func_desc_entry
@@ -396,15 +397,25 @@ used for the function.
 
 The info word is a bitfield split into three parts.  From MSB to LSB:
 
-@multitable {Bit offset} {@code{isroot}} {Length of variable-length data for this type (some kinds only).}
+@multitable {Bit offset} {@code{pauth_key}} {Specify which key is used for signing the return addresses}
 @headitem Bit offset @tab Name @tab Description
-@item 7--5
+@item 7--6
 @tab @code{unused}
 @tab Unused bits.
 
+@item 5
+@tab @code{pauth_key}
+@tab Specify which key is used for signing the return addresses in the SFrame
+FDE.  Two possible values: @*
+SFRAME_AARCH64_PAUTH_KEY_A (0), or @*
+SFRAME_AARCH64_PAUTH_KEY_B (1).
+
 @item 4
 @tab @code{fdetype}
-@tab SFRAME_FDE_TYPE_PCMASK (1) or SFRAME_FDE_TYPE_PCINC (0). @xref{The SFrame FDE types}.
+@tab Specify the SFrame FDE type.  Two possible values: @*
+SFRAME_FDE_TYPE_PCMASK (1), or @*
+SFRAME_FDE_TYPE_PCINC (0). @*
+@xref{The SFrame FDE types}.
 
 @item 0--3
 @tab @code{fretype}
@@ -431,14 +442,16 @@ useful for the cases where a small pattern of instructions in a program stub is
 used repeatedly for a specific functionality.  Typical usecases are pltN
 entries and trampolines.
 
-@multitable {Name of SFrame FDE type} {Value} {Unwinders perform a (PC >= FRE_START_ADDR)}
+@multitable {SFRAME_FDE_TYPE_PCMASK} {Value} {Unwinders perform a Unwinders perform a}
 @headitem Name of SFrame FDE type @tab Value @tab Description
 
 @item SFRAME_FDE_TYPE_PCINC
-@tab 0 @tab Unwinders perform a (PC >= FRE_START_ADDR) to look up a matching FRE.
+@tab 0 @tab Unwinders perform a @*
+(PC >= FRE_START_ADDR) to look up a matching FRE.
 
 @item SFRAME_FDE_TYPE_PCMASK
-@tab 1 @tab  Unwinders perform a (PC & FRE_START_ADDR_AS_MASK >= FRE_START_ADDR_AS_MASK)
+@tab 1 @tab  Unwinders perform a @*
+(PC & FRE_START_ADDR_AS_MASK >= FRE_START_ADDR_AS_MASK)
 to look up a matching FRE.
 
 @end multitable
@@ -447,7 +460,7 @@ to look up a matching FRE.
 @subsection The SFrame FRE types
 
 A real world application can have functions of size big and small.  SFrame
-format defines three types of SFrame FRE entries to represent the unwind
+format defines three types of SFrame FRE entries to represent the stack trace
 information for such a variety of function sizes.  These representations vary
 in the number of bits needed to encode the start address offset in the SFrame
 FRE.
@@ -476,21 +489,21 @@ The following constants are defined and used to identify the SFrame FRE types:
 32-bit value.
 @end multitable
 
-A single function must use the same type of FRE throughout.  The choice of
-which SFrame FRE is used to encode the unwind information of a function, is
-stored in the @xref{The SFrame FDE info word}.
+A single function must use the same type of SFrame FRE throughout.  An
+identifier to reflect the chosen SFrame FRE type is stored in the
+@xref{The SFrame FDE info word}.
 
 @node SFrame Frame Row Entries
 @section SFrame FRE
 @cindex SFrame FRE
 
-The SFrame Frame Row Entry sub-section contains the core of the unwind
+The SFrame Frame Row Entry sub-section contains the core of the stack trace
 information.
 
-An SFrame Frame Row Entry is a self-sufficient record containing SFrame unwind
-info for a range of contiguous addresses, starting at the specified offset from
-the start of the function.  Each SFrame Frame Row Entry is followed by S*N
-bytes, where:
+An SFrame Frame Row Entry is a self-sufficient record containing SFrame stack
+trace information for a range of contiguous addresses, starting at the
+specified offset from the start of the function.  Each SFrame Frame Row Entry
+is followed by S*N bytes, where:
 
 @itemize @minus
 @item
@@ -566,13 +579,15 @@ The SFrame FRE info word is a bitfield split into four parts.  From MSB to LSB:
 @multitable {Bit offset} {@code{fre_cfa_base_reg_id}} {Size of stack offsets in bytes.  Valid values}
 @headitem Bit offset @tab Name @tab Description
 @item 7
-@tab @code{unused}
-@tab Unused bit.
+@tab @code{fre_mangled_ra_p}
+@tab Indicate whether the return address is mangled with any authorization bits (signed RA).
 
 @item 5-6
 @tab @code{fre_offset_size}
-@tab Size of stack offsets in bytes.  Valid values are SFRAME_FRE_OFFSET_1B,
-SFRAME_FRE_OFFSET_2B, and SFRAME_FRE_OFFSET_4B.
+@tab Size of stack offsets in bytes.  Valid values are: @*
+SFRAME_FRE_OFFSET_1B, @*
+SFRAME_FRE_OFFSET_2B, and @*
+SFRAME_FRE_OFFSET_4B.
 
 @item 1-4
 @tab @code{fre_offset_count}

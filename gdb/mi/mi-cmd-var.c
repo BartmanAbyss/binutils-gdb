@@ -1,5 +1,5 @@
 /* MI Command Set - varobj commands.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -335,14 +335,27 @@ mi_print_value_p (struct varobj *var, enum print_values print_values)
   if (type == NULL)
     return 1;
   else
-    {
-      type = check_typedef (type);
+    return mi_simple_type_p (type);
+}
 
-      /* For PRINT_SIMPLE_VALUES, only print the value if it has a type
-	 and that type is not a compound type.  */
-      return (type->code () != TYPE_CODE_ARRAY
-	      && type->code () != TYPE_CODE_STRUCT
-	      && type->code () != TYPE_CODE_UNION);
+/* See mi-cmds.h.  */
+
+bool
+mi_simple_type_p (struct type *type)
+{
+  type = check_typedef (type);
+
+  if (TYPE_IS_REFERENCE (type))
+    type = check_typedef (type->target_type ());
+
+  switch (type->code ())
+    {
+    case TYPE_CODE_ARRAY:
+    case TYPE_CODE_STRUCT:
+    case TYPE_CODE_UNION:
+      return false;
+    default:
+      return true;
     }
 }
 
@@ -390,15 +403,7 @@ mi_cmd_var_list_children (const char *command, char **argv, int argc)
 
   if (from < to)
     {
-      /* For historical reasons this might emit a list or a tuple, so
-	 we construct one or the other.  */
-      gdb::optional<ui_out_emit_tuple> tuple_emitter;
-      gdb::optional<ui_out_emit_list> list_emitter;
-
-      if (mi_version (uiout) == 1)
-	tuple_emitter.emplace (uiout, "children");
-      else
-	list_emitter.emplace (uiout, "children");
+      ui_out_emit_list list_emitter (uiout, "children");
       for (int ix = from; ix < to && ix < children.size (); ix++)
 	{
 	  ui_out_emit_tuple child_emitter (uiout, "child");
@@ -633,15 +638,7 @@ mi_cmd_var_update (const char *command, char **argv, int argc)
   else
     print_values = PRINT_NO_VALUES;
 
-  /* For historical reasons this might emit a list or a tuple, so we
-     construct one or the other.  */
-  gdb::optional<ui_out_emit_tuple> tuple_emitter;
-  gdb::optional<ui_out_emit_list> list_emitter;
-
-  if (mi_version (uiout) <= 1)
-    tuple_emitter.emplace (uiout, "changelist");
-  else
-    list_emitter.emplace (uiout, "changelist");
+  ui_out_emit_list list_emitter (uiout, "changelist");
 
   /* Check if the parameter is a "*", which means that we want to
      update all variables.  */
@@ -653,9 +650,7 @@ mi_cmd_var_update (const char *command, char **argv, int argc)
 	 only the root VAROBJs.  */
 
       all_root_varobjs ([=] (varobj *var)
-        {
-	  mi_cmd_var_update_iter (var, *name == '0', print_values);
-	});
+	{ mi_cmd_var_update_iter (var, *name == '0', print_values); });
     }
   else
     {
@@ -680,9 +675,7 @@ varobj_update_one (struct varobj *var, enum print_values print_values,
     {
       int from, to;
 
-      gdb::optional<ui_out_emit_tuple> tuple_emitter;
-      if (mi_version (uiout) > 1)
-	tuple_emitter.emplace (uiout, nullptr);
+      ui_out_emit_tuple tuple_emitter (uiout, nullptr);
       uiout->field_string ("name", varobj_get_objname (r.varobj));
 
       switch (r.status)

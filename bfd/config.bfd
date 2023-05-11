@@ -1,6 +1,6 @@
 # config.bfd
 #
-#   Copyright (C) 2012-2022 Free Software Foundation, Inc.
+#   Copyright (C) 2012-2023 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -135,9 +135,7 @@ case $targ in
  m68*-*-vxworks* | \
  m68*-apollo-* | \
  m68*-apple-aux* | \
- m68*-bull-sysv* | \
  m68*-ericsson-* | \
- m68*-motorola-sysv* | \
  m68*-netx-* | \
  m88*-*-* | \
  maxq-*-coff | \
@@ -249,9 +247,9 @@ case "${targ}" in
     targ_selvecs="aarch64_elf64_be_vec aarch64_elf32_le_vec aarch64_elf32_be_vec arm_elf32_le_vec arm_elf32_be_vec aarch64_pei_le_vec aarch64_pe_le_vec"
     want64=true
     ;;
-  aarch64-*-pe*)
+  aarch64-*-pe* | aarch64-*-mingw*)
     targ_defvec=aarch64_pe_le_vec
-    targ_selvecs="aarch64_pe_le_vec aarch64_pei_le_vec"
+    targ_selvecs="aarch64_pe_le_vec aarch64_pei_le_vec aarch64_elf64_le_vec aarch64_elf64_be_vec aarch64_elf32_le_vec aarch64_elf32_be_vec arm_elf32_le_vec arm_elf32_be_vec pdb_vec"
     want64=true
     targ_underscore=no
     ;;
@@ -285,7 +283,7 @@ case "${targ}" in
     targ_selvecs="aarch64_elf64_be_vec aarch64_elf32_le_vec aarch64_elf32_be_vec arm_elf32_le_vec arm_elf32_be_vec"
     want64=true
     ;;
-  aarch64-*-linux* | aarch64-*-netbsd*)
+  aarch64-*-linux* | aarch64-*-netbsd* | aarch64-*-nto*)
     targ_defvec=aarch64_elf64_le_vec
     targ_selvecs="aarch64_elf64_be_vec aarch64_elf32_le_vec aarch64_elf32_be_vec arm_elf32_le_vec arm_elf32_be_vec aarch64_pei_le_vec aarch64_pe_le_vec"
     want64=true
@@ -731,6 +729,11 @@ case "${targ}" in
     targ_selvecs=i386_elf32_vec
     want64=true
     ;;
+  x86_64-*-gnu*)
+    targ_defvec=x86_64_elf64_vec
+    targ_selvecs="i386_elf32_vec iamcu_elf32_vec x86_64_elf32_vec"
+    want64=true
+    ;;
 #endif
   i[3-7]86-*-lynxos*)
     targ_defvec=i386_elf32_vec
@@ -938,11 +941,21 @@ case "${targ}" in
     targ_defvec=mips_elf32_be_vec
     targ_selvecs="mips_elf32_le_vec mips_elf64_be_vec mips_elf64_le_vec mips_ecoff_be_vec mips_ecoff_le_vec"
     ;;
-  mips64*el-*-linux*)
+  mips*64*el-*-linux*-gnuabi64)
+    targ_defvec=mips_elf64_trad_le_vec
+    targ_selvecs="mips_elf32_ntrad_be_vec mips_elf32_ntrad_le_vec mips_elf32_trad_be_vec mips_elf32_trad_le_vec mips_elf64_trad_be_vec"
+    want64=true
+    ;;
+  mips*64*-*-linux*-gnuabi64)
+    targ_defvec=mips_elf64_trad_be_vec
+    targ_selvecs="mips_elf32_ntrad_be_vec mips_elf32_ntrad_le_vec mips_elf32_trad_be_vec mips_elf32_trad_le_vec mips_elf64_trad_le_vec"
+    want64=true
+    ;;
+  mips*64*el-*-linux*)
     targ_defvec=mips_elf32_ntrad_le_vec
     targ_selvecs="mips_elf32_ntrad_be_vec mips_elf32_trad_le_vec mips_elf32_trad_be_vec mips_elf64_trad_le_vec mips_elf64_trad_be_vec"
     ;;
-  mips64*-*-linux*)
+  mips*64*-*-linux*)
     targ_defvec=mips_elf32_ntrad_be_vec
     targ_selvecs="mips_elf32_ntrad_le_vec mips_elf32_trad_be_vec mips_elf32_trad_le_vec mips_elf64_trad_be_vec mips_elf64_trad_le_vec"
     ;;
@@ -1176,16 +1189,11 @@ case "${targ}" in
   powerpc-*-macos*)
     targ_defvec=powerpc_xcoff_vec
     ;;
-  powerpc-*-lynxos*)
-    targ_defvec=powerpc_elf32_vec
-    targ_selvecs="rs6000_xcoff_vec"
-    targ_cflags=-DSMALL_ARCHIVE
-    ;;
   powerpc-*-nto*)
     targ_defvec=powerpc_elf32_vec
     targ_selvecs="rs6000_xcoff_vec powerpc_elf32_le_vec powerpc_boot_vec"
     ;;
-  powerpc-*-vxworks* | powerpc-*-windiss*)
+  powerpc-*-vxworks*)
     targ_defvec=powerpc_elf32_vxworks_vec
     targ_selvecs="rs6000_xcoff_vec powerpc_elf32_vec powerpc_elf32_le_vec powerpc_boot_vec"
     targ64_selvecs="powerpc_elf64_vec powerpc_elf64_le_vec"
@@ -1495,12 +1503,6 @@ case "${targ}" in
     ;;
 esac
 
-if test x"$targ_defvec" = x"aarch64-pe"; then
-  # Not currently complete (and probably not stable), warn user
-  echo "*** WARNING BFD aarch64-pe support not complete nor stable"
-  echo "*** Do not rely on this for production purposes"
-fi
-
 # All MIPS ELF targets need a 64-bit bfd_vma.
 case "${targ_defvec} ${targ_selvecs}" in
   *mips_elf*)
@@ -1531,5 +1533,11 @@ esac
 case "${targ_defvec} ${targ_selvecs}" in
   *iamcu_elf32*)
     targ_archs="$targ_archs bfd_iamcu_arch"
+    ;;
+esac
+
+case "${targ}" in
+  mipsisa32r6* | mipsisa64r6*)
+    targ_cflags="$targ_cflags -DMIPS_DEFAULT_R6=1"
     ;;
 esac

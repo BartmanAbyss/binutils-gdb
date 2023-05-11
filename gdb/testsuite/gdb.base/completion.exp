@@ -1,4 +1,4 @@
-# Copyright 1998-2022 Free Software Foundation, Inc.
+# Copyright 1998-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -57,8 +57,8 @@ if {[prepare_for_testing "failed to prepare" $testfile \
     return -1
 }
 
-if ![runto_main] then {
-        perror "tests suppressed"
+if {![runto_main]} {
+    return
 }
 
 set timeout 30
@@ -159,7 +159,7 @@ foreach {-> reg} [regexp -all -inline -line {^info registers (\w+\S*)} $regs_out
     lappend completed_regs $reg
 }
 set completed_regs [join [lsort $completed_regs]]
-gdb_assert {{$all_regs eq $completed_regs}} "complete 'info registers '"
+gdb_assert {$all_regs eq $completed_regs} "complete 'info registers '"
 
 # Tests below are about tab-completion, which doesn't work if readline
 # library isn't used.  Check it first.

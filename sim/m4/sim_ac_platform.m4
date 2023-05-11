@@ -1,4 +1,4 @@
-dnl Copyright (C) 1997-2022 Free Software Foundation, Inc.
+dnl Copyright (C) 1997-2023 Free Software Foundation, Inc.
 dnl
 dnl This program is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -18,12 +18,12 @@ AC_DEFUN([SIM_AC_PLATFORM],
 [dnl
 dnl Check for common headers.
 dnl NB: You can assume C11 headers exist.
+dnl NB: We use gnulib from ../gnulib/, so we don't probe headers it provides.
 AC_CHECK_HEADERS_ONCE(m4_flatten([
   dlfcn.h
   fcntl.h
   fpu_control.h
   termios.h
-  unistd.h
   utime.h
   linux/if_tun.h
   linux/mii.h
@@ -37,7 +37,6 @@ AC_CHECK_HEADERS_ONCE(m4_flatten([
   sys/param.h
   sys/resource.h
   sys/socket.h
-  sys/stat.h
   sys/statfs.h
   sys/termio.h
   sys/termios.h
@@ -46,6 +45,7 @@ AC_CHECK_HEADERS_ONCE(m4_flatten([
 ]))
 AC_HEADER_DIRENT
 
+dnl NB: We use gnulib from ../gnulib/, so we don't probe functions it provides.
 AC_CHECK_FUNCS_ONCE(m4_flatten([
   __setfpucw
   access
@@ -125,9 +125,7 @@ AC_CHECK_MEMBERS([[struct stat.st_dev], [struct stat.st_ino],
 [[#ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
-#ifdef HAVE_SYS_STAT_H
-#include <sys/stat.h>
-#endif]])
+#include <sys/stat.h>]])
 
 AC_CHECK_TYPES([__int128])
 AC_CHECK_TYPES(socklen_t, [], [],
@@ -201,4 +199,18 @@ else
 fi
 AC_SUBST(READLINE_LIB)
 AC_SUBST(READLINE_CFLAGS)
+
+dnl Determine whether we have a known getopt prototype in unistd.h
+dnl to make sure that we have correct getopt declaration on
+dnl include/getopt.h.  The purpose of this is to sync with other Binutils
+dnl components and this logic is copied from ld/configure.ac.
+AC_MSG_CHECKING(for a known getopt prototype in unistd.h)
+AC_CACHE_VAL(sim_cv_decl_getopt_unistd_h,
+[AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <unistd.h>], [extern int getopt (int, char *const*, const char *);])],
+sim_cv_decl_getopt_unistd_h=yes, sim_cv_decl_getopt_unistd_h=no)])
+AC_MSG_RESULT($sim_cv_decl_getopt_unistd_h)
+if test $sim_cv_decl_getopt_unistd_h = yes; then
+  AC_DEFINE([HAVE_DECL_GETOPT], 1,
+	    [Is the prototype for getopt in <unistd.h> in the expected format?])
+fi
 ])

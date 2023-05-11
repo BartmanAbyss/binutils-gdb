@@ -1,6 +1,6 @@
 /* Interface between gdb and its extension languages.
 
-   Copyright (C) 2014-2022 Free Software Foundation, Inc.
+   Copyright (C) 2014-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -282,8 +282,8 @@ extern void eval_ext_lang_from_control_command (struct command_line *cmd);
 
 extern void auto_load_ext_lang_scripts_for_objfile (struct objfile *);
 
-extern char *apply_ext_lang_type_printers (struct ext_lang_type_printers *,
-					   struct type *);
+extern gdb::unique_xmalloc_ptr<char> apply_ext_lang_type_printers
+     (struct ext_lang_type_printers *, struct type *);
 
 extern int apply_ext_lang_val_pretty_printer
   (struct value *value, struct ui_file *stream, int recurse,
@@ -300,7 +300,7 @@ extern void preserve_ext_lang_values (struct objfile *, htab_t copied_types);
 extern const struct extension_language_defn *get_breakpoint_cond_ext_lang
   (struct breakpoint *b, enum extension_language skip_lang);
 
-extern int breakpoint_ext_lang_cond_says_stop (struct breakpoint *);
+extern bool breakpoint_ext_lang_cond_says_stop (struct breakpoint *);
 
 /* If a method with name METHOD_NAME is to be invoked on an object of type
    TYPE, then all extension languages are searched for implementations of
@@ -342,5 +342,21 @@ namespace selftests {
 extern void (*hook_set_active_ext_lang) ();
 }
 #endif
+
+/* Temporarily disable cooperative SIGINT handling.  Needed when we
+   don't want a SIGINT to interrupt the currently active extension
+   language.  */
+class scoped_disable_cooperative_sigint_handling
+{
+public:
+  scoped_disable_cooperative_sigint_handling ();
+  ~scoped_disable_cooperative_sigint_handling ();
+
+  DISABLE_COPY_AND_ASSIGN (scoped_disable_cooperative_sigint_handling);
+
+private:
+  struct active_ext_lang_state *m_prev_active_ext_lang_state;
+  bool m_prev_cooperative_sigint_handling_disabled;
+};
 
 #endif /* EXTENSION_H */

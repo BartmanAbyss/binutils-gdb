@@ -1,6 +1,6 @@
 /* Common target-dependent code for ppc64 GDB, the GNU debugger.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -622,9 +622,9 @@ ppc64_skip_trampoline_code_1 (frame_info_ptr frame, CORE_ADDR pc)
 				    ARRAY_SIZE (ppc64_standard_linkage6)),
 			       MAX (ARRAY_SIZE (ppc64_standard_linkage7),
 				    ARRAY_SIZE (ppc64_standard_linkage8))),
-		          MAX (MAX (ARRAY_SIZE (ppc64_standard_linkage9),
+			  MAX (MAX (ARRAY_SIZE (ppc64_standard_linkage9),
 				    ARRAY_SIZE (ppc64_standard_linkage10)),
-		               MAX (ARRAY_SIZE (ppc64_standard_linkage11),
+			       MAX (ARRAY_SIZE (ppc64_standard_linkage11),
 				    ARRAY_SIZE (ppc64_standard_linkage12)))))
 
 		     - 1];

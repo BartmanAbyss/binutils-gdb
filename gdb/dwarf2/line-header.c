@@ -1,6 +1,6 @@
 /* DWARF 2 debugging format support for GDB.
 
-   Copyright (C) 1994-2022 Free Software Foundation, Inc.
+   Copyright (C) 1994-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -214,6 +214,10 @@ read_formatted_entries (dwarf2_per_objfile *per_objfile, bfd *abfd,
 		 current GDB.  */
 	      break;
 	    }
+
+	  /* Normalize nullptr string.  */
+	  if (string.has_value () && *string == nullptr)
+	    string.emplace ("");
 
 	  switch (content_type)
 	    {

@@ -1,6 +1,6 @@
 /* Read a symbol table in MIPS' format (Third-Eye).
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    Contributed by Alessandro Forin (af@cs.cmu.edu) at CMU.  Major work
    by Per Bothner, John Gilmore and Ian Lance Taylor at Cygnus Support.
@@ -358,7 +358,7 @@ read_alphacoff_dynamic_symtab (minimal_symbol_reader &reader,
 	    }
 	}
 
-      reader.record (name, sym_value, ms_type);
+      reader.record (name, unrelocated_addr (sym_value), ms_type);
     }
 }
 

@@ -1,5 +1,5 @@
 /* gen-sframe.h - Support for generating SFrame.
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -49,6 +49,9 @@ struct sframe_row_entry
   /* A frame row entry is a merge candidate if new information can be updated
      on it.  */
   bool merge_candidate;
+
+  /* Whether the return address is mangled with pauth code.  */
+  bool mangled_ra_p;
 
   /* Track CFA base (architectural) register ID.  */
   unsigned int cfa_base_reg;
@@ -140,12 +143,13 @@ struct sframe_version_ops
 {
   unsigned char format_version;    /* SFrame format version.  */
   /* set SFrame FRE info.  */
-  unsigned char (*set_fre_info) (unsigned int, unsigned int, unsigned int);
+  unsigned char (*set_fre_info) (unsigned int, unsigned int, unsigned int,
+				 bool);
   /* set SFrame Func info.  */
-  unsigned char (*set_func_info) (unsigned int, unsigned int);
+  unsigned char (*set_func_info) (unsigned int, unsigned int, unsigned int);
 };
 
-/* Generate SFrame unwind info and prepare contents for the output.
+/* Generate SFrame stack trace info and prepare contents for the output.
    outout_sframe ()  is called at the end of file.  */
 
 extern void output_sframe (segT sframe_seg);

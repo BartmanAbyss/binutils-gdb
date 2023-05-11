@@ -1,4 +1,4 @@
-/* Copyright (C) 2009-2022 Free Software Foundation, Inc.
+/* Copyright (C) 2009-2023 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GDB.
@@ -231,6 +231,10 @@ compatible_debug_arch (unsigned int debug_arch)
   if (debug_arch == AARCH64_DEBUG_ARCH_V8_2)
     return true;
   if (debug_arch == AARCH64_DEBUG_ARCH_V8_4)
+    return true;
+  if (debug_arch == AARCH64_DEBUG_ARCH_V8_8)
+    return true;
+  if (debug_arch == AARCH64_DEBUG_ARCH_V8_9)
     return true;
 
   return false;

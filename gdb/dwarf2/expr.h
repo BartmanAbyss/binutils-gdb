@@ -1,6 +1,6 @@
 /* DWARF 2 Expression Evaluator.
 
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    Contributed by Daniel Berlin <dan@dberlin.org>.
 
@@ -23,7 +23,7 @@
 #define DWARF2EXPR_H
 
 #include "leb128.h"
-#include "gdbtypes.h"
+#include "dwarf2/call-site.h"
 
 struct dwarf2_per_objfile;
 
@@ -164,9 +164,9 @@ private:
   ULONGEST m_len = 0;
   const gdb_byte *m_data = nullptr;
 
-  /* Initialization status of variable: Non-zero if variable has been
-     initialized; zero otherwise.  */
-  int m_initialized = 0;
+  /* Initialization status of variable: True if variable has been
+     initialized; false otherwise.  */
+  bool m_initialized = false;
 
   /* A vector of pieces.
 

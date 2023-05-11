@@ -1,6 +1,6 @@
 /* Support for GDB maintenance commands.
 
-   Copyright (C) 1992-2022 Free Software Foundation, Inc.
+   Copyright (C) 1992-2023 Free Software Foundation, Inc.
 
    Written by Fred Fish at Cygnus Support.
 
@@ -331,11 +331,11 @@ maint_obj_section_from_bfd_section (bfd *abfd,
 				    asection *asection,
 				    objfile *ofile)
 {
-  if (ofile->sections == nullptr)
+  if (ofile->sections_start == nullptr)
     return nullptr;
 
   obj_section *osect
-    = &ofile->sections[gdb_bfd_section_index (abfd, asection)];
+    = &ofile->sections_start[gdb_bfd_section_index (abfd, asection)];
 
   if (osect >= ofile->sections_end)
     return nullptr;
@@ -375,7 +375,7 @@ maint_print_all_sections (const char *header, bfd *abfd, objfile *objfile,
 
       if (objfile != nullptr)
 	{
-	  gdb_assert (objfile->sections != nullptr);
+	  gdb_assert (objfile->sections_start != nullptr);
 	  osect
 	    = maint_obj_section_from_bfd_section (abfd, sect, objfile);
 	  if (osect->the_bfd_section == nullptr)
@@ -566,9 +566,9 @@ maintenance_translate_address (const char *arg, int from_tty)
       p = skip_spaces (p + 1);
 
       for (objfile *objfile : current_program_space->objfiles ())
-	ALL_OBJFILE_OSECTIONS (objfile, sect)
+	for (obj_section *iter : objfile->sections ())
 	  {
-	    if (strncmp (sect->the_bfd_section->name, arg, arg_len) == 0)
+	    if (strncmp (iter->the_bfd_section->name, arg, arg_len) == 0)
 	      goto found;
 	  }
 
@@ -1042,11 +1042,11 @@ scoped_command_stats::scoped_command_stats (bool msg_type)
 #ifdef HAVE_USEFUL_SBRK
       char *lim = (char *) sbrk (0);
       m_start_space = lim - lim_at_start;
-      m_space_enabled = 1;
+      m_space_enabled = true;
 #endif
     }
   else
-    m_space_enabled = 0;
+    m_space_enabled = false;
 
   if (msg_type == 0 || per_command_time)
     {
@@ -1054,13 +1054,13 @@ scoped_command_stats::scoped_command_stats (bool msg_type)
 
       m_start_cpu_time = run_time_clock::now ();
       m_start_wall_time = steady_clock::now ();
-      m_time_enabled = 1;
+      m_time_enabled = true;
 
       if (per_command_time)
 	print_time (_("command started"));
     }
   else
-    m_time_enabled = 0;
+    m_time_enabled = false;
 
   if (msg_type == 0 || per_command_symtab)
     {
@@ -1070,10 +1070,10 @@ scoped_command_stats::scoped_command_stats (bool msg_type)
       m_start_nr_symtabs = nr_symtabs;
       m_start_nr_compunit_symtabs = nr_compunit_symtabs;
       m_start_nr_blocks = nr_blocks;
-      m_symtab_enabled = 1;
+      m_symtab_enabled = true;
     }
   else
-    m_symtab_enabled = 0;
+    m_symtab_enabled = false;
 
   /* Initialize timer to keep track of how long we waited for the user.  */
   reset_prompt_for_continue_wait_time ();
@@ -1239,7 +1239,7 @@ Usage: maintenance info sections [-all-objects] [FILTERS]\n\
 FILTERS is a list of words, each word is either:\n\
   + A section name - any section with this name will be printed, or\n\
   + A section flag - any section with this flag will be printed.  The\n\
-        known flags are:\n\
+	known flags are:\n\
 	  ALLOC LOAD RELOC READONLY CODE DATA ROM CONSTRUCTOR\n\
 	  HAS_CONTENTS NEVER_LOAD COFF_SHARED_LIBRARY IS_COMMON\n\
 \n\

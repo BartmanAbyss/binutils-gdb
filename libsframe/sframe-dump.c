@@ -1,6 +1,6 @@
 /* sframe-dump.c - Textual dump of .sframe.
 
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    his file is part of libsframe.
 
@@ -24,6 +24,21 @@
 #include "sframe-impl.h"
 
 #define SFRAME_HEADER_FLAGS_STR_MAX_LEN 50
+
+/* Return TRUE if the SFrame section is associated with the aarch64 ABIs.  */
+
+static bool
+is_sframe_abi_arch_aarch64 (sframe_decoder_ctx *sfd_ctx)
+{
+  bool aarch64_p = false;
+
+  unsigned char abi_arch = sframe_decoder_get_abi_arch (sfd_ctx);
+  if ((abi_arch == SFRAME_ABI_AARCH64_ENDIAN_BIG)
+      || (abi_arch == SFRAME_ABI_AARCH64_ENDIAN_LITTLE))
+    aarch64_p = true;
+
+  return aarch64_p;
+}
 
 static void
 dump_sframe_header (sframe_decoder_ctx *sfd_ctx)
@@ -113,10 +128,13 @@ dump_sframe_func_with_fres (sframe_decoder_ctx *sfd_ctx,
 	  func_start_pc_vma,
 	  func_size);
 
-  char temp[100];
-  memset (temp, 0, 100);
+  if (is_sframe_abi_arch_aarch64 (sfd_ctx)
+      && (SFRAME_V1_FUNC_PAUTH_KEY (func_info) == SFRAME_AARCH64_PAUTH_KEY_B))
+    printf (", pauth = B key");
 
-  printf ("\n    %-7s%-8s %-10s%-10s%-10s", "STARTPC", fde_type_marker, "CFA", "FP", "RA");
+  char temp[100];
+
+  printf ("\n    %-7s%-8s %-10s%-10s%-13s", "STARTPC", fde_type_marker, "CFA", "FP", "RA");
   for (j = 0; j < num_fres; j++)
     {
       sframe_decoder_get_fre (sfd_ctx, funcidx, j, &fre);
@@ -139,7 +157,6 @@ dump_sframe_func_with_fres (sframe_decoder_ctx *sfd_ctx,
       printf ("  %-10s", temp);
 
       /* Dump SP/FP info.  */
-      memset (temp, 0, 100);
       if (err[1] == 0)
 	sprintf (temp, "c%+d", fp_offset);
       else
@@ -147,12 +164,17 @@ dump_sframe_func_with_fres (sframe_decoder_ctx *sfd_ctx,
       printf ("%-10s", temp);
 
       /* Dump RA info.  */
-      memset (temp, 0, 100);
       if (err[2] == 0)
 	sprintf (temp, "c%+d", ra_offset);
       else
 	strcpy (temp, "u");
-      printf ("%-10s", temp);
+      /* Mark SFrame FRE's RA information with "[s]" if the RA is mangled
+	 with signature bits.  */
+      const char *ra_mangled_p_str
+	= ((sframe_fre_get_ra_mangled_p (sfd_ctx, &fre, &err[2]))
+	   ? "[s]" : "   ");
+      strcat (temp, ra_mangled_p_str);
+      printf ("%-13s", temp);
     }
 }
 

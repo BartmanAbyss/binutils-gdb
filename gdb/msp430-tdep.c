@@ -1,7 +1,7 @@
 /* Target-dependent code for the Texas Instruments MSP430 for GDB, the
    GNU debugger.
 
-   Copyright (C) 2012-2022 Free Software Foundation, Inc.
+   Copyright (C) 2012-2023 Free Software Foundation, Inc.
 
    Contributed by Red Hat, Inc.
 
@@ -656,7 +656,7 @@ msp430_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   msp430_gdbarch_tdep *tdep = gdbarch_tdep<msp430_gdbarch_tdep> (gdbarch);
   int code_model = tdep->code_model;
 
-  struct type *func_type = value_type (function);
+  struct type *func_type = function->type ();
 
   /* Dereference function pointer types.  */
   while (func_type->code () == TYPE_CODE_PTR)
@@ -689,8 +689,8 @@ msp430_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       for (i = 0; i < nargs; i++)
 	{
 	  struct value *arg = args[i];
-	  const gdb_byte *arg_bits = value_contents_all (arg).data ();
-	  struct type *arg_type = check_typedef (value_type (arg));
+	  const gdb_byte *arg_bits = arg->contents_all ().data ();
+	  struct type *arg_type = check_typedef (arg->type ());
 	  ULONGEST arg_size = arg_type->length ();
 	  int offset;
 	  int current_arg_on_stack;
@@ -703,7 +703,7 @@ msp430_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	    {
 	      /* Aggregates of any size are passed by reference.  */
 	      store_unsigned_integer (struct_addr_buf, 4, byte_order,
-				      value_address (arg));
+				      arg->address ());
 	      arg_bits = struct_addr_buf;
 	      arg_size = (code_model == MSP_LARGE_CODE_MODEL) ? 4 : 2;
 	    }
@@ -835,7 +835,6 @@ msp430_skip_trampoline_code (frame_info_ptr frame, CORE_ADDR pc)
 static struct gdbarch *
 msp430_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   int elf_flags, isa, code_model;
 
   /* Extract the elf_flags if available.  */
@@ -917,8 +916,10 @@ msp430_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   /* None found, create a new architecture from the information
      provided.  */
-  msp430_gdbarch_tdep *tdep = new msp430_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new msp430_gdbarch_tdep));
+  msp430_gdbarch_tdep *tdep = gdbarch_tdep<msp430_gdbarch_tdep> (gdbarch);
+
   tdep->elf_flags = elf_flags;
   tdep->isa = isa;
   tdep->code_model = code_model;

@@ -1,5 +1,5 @@
 /* bucomm.c -- Bin Utils COMmon code.
-   Copyright (C) 1991-2022 Free Software Foundation, Inc.
+   Copyright (C) 1991-2023 Free Software Foundation, Inc.
 
    This file is part of GNU Binutils.
 
@@ -555,6 +555,7 @@ make_tempname (const char *filename, int *ofd)
   if (fd == -1)
     {
       free (tmpname);
+      bfd_set_error (bfd_error_system_call);
       return NULL;
     }
   *ofd = fd;
@@ -583,7 +584,10 @@ make_tempdir (const char *filename)
 #endif
 #endif
   if (ret == NULL)
-    free (tmpname);
+    {
+      free (tmpname);
+      bfd_set_error (bfd_error_system_call);
+    }
   return ret;
 }
 

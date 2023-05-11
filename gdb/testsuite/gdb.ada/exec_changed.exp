@@ -1,4 +1,4 @@
-# Copyright 2005-2022 Free Software Foundation, Inc.
+# Copyright 2005-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,14 +15,11 @@
 
 load_lib "ada.exp"
 
-if { [skip_ada_tests] } { return -1 }
+require allow_ada_tests
 
 # This testcase verifies the behavior of the `start' command, which
 # does not work when we use the gdb stub...
-if [use_gdb_stub] {
-    untested "skipping tests due to use_gdb_stub"
-    return
-}
+require !use_gdb_stub
 
 standard_ada_testfile first
 
@@ -54,7 +51,7 @@ gdb_load ${common_binfile}
 
 # Start the program, we should land in the program main procedure
 if { [gdb_start_cmd] < 0 } {
-    untested start
+    fail start
     return -1
 }
 

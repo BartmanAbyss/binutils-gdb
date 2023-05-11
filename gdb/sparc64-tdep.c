@@ -1,6 +1,6 @@
 /* Target-dependent code for UltraSPARC.
 
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -1381,7 +1381,7 @@ sparc64_store_arguments (struct regcache *regcache, int nargs,
 
   for (i = 0; i < nargs; i++)
     {
-      struct type *type = value_type (args[i]);
+      struct type *type = args[i]->type ();
       int len = type->length ();
 
       if (sparc64_structure_or_union_p (type)
@@ -1411,7 +1411,7 @@ sparc64_store_arguments (struct regcache *regcache, int nargs,
 		 a problem.  */
 	      sp &= ~0xf;
 
-	      write_memory (sp, value_contents (args[i]).data (), len);
+	      write_memory (sp, args[i]->contents ().data (), len);
 	      args[i] = value_from_pointer (lookup_pointer_type (type), sp);
 	      num_elements++;
 	    }
@@ -1480,8 +1480,8 @@ sparc64_store_arguments (struct regcache *regcache, int nargs,
 
   for (i = 0; i < nargs; i++)
     {
-      const gdb_byte *valbuf = value_contents (args[i]).data ();
-      struct type *type = value_type (args[i]);
+      const gdb_byte *valbuf = args[i]->contents ().data ();
+      struct type *type = args[i]->type ();
       int len = type->length ();
       int regnum = -1;
       gdb_byte buf[16];
@@ -1835,6 +1835,7 @@ sparc64_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_gdbarch_push_dummy_call (gdbarch, sparc64_push_dummy_call);
 
   set_gdbarch_return_value (gdbarch, sparc64_return_value);
+  set_gdbarch_return_value_as_value (gdbarch, default_gdbarch_return_value);
   set_gdbarch_stabs_argument_has_addr
     (gdbarch, default_stabs_argument_has_addr);
 

@@ -1,5 +1,5 @@
 /* MI Command Set - stack commands.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Solutions (a Red Hat company).
 
    This file is part of GDB.
@@ -35,7 +35,7 @@
 #include <ctype.h>
 #include "mi-parse.h"
 #include "gdbsupport/gdb_optional.h"
-#include "safe-ctype.h"
+#include "gdbsupport/gdb-safe-ctype.h"
 #include "inferior.h"
 #include "observable.h"
 
@@ -176,12 +176,10 @@ mi_cmd_stack_list_frames (const char *command, char **argv, int argc)
 	   i++, fi = get_prev_frame (fi))
 	{
 	  QUIT;
-	  fi.prepare_reinflate ();
 	  /* Print the location and the address always, even for level 0.
 	     If args is 0, don't print the arguments.  */
 	  print_frame_info (user_frame_print_options,
 			    fi, 1, LOC_AND_ADDRESS, 0 /* args */, 0);
-	  fi.reinflate ();
 	}
     }
 }
@@ -503,14 +501,13 @@ list_arg_or_local (const struct frame_arg *arg, enum what_to_list what,
 		  && (arg->val || arg->error)));
 
   if (skip_unavailable && arg->val != NULL
-      && (value_entirely_unavailable (arg->val)
+      && (arg->val->entirely_unavailable ()
 	  /* A scalar object that does not have all bits available is
 	     also considered unavailable, because all bits contribute
 	     to its representation.  */
-	  || (val_print_scalar_type_p (value_type (arg->val))
-	      && !value_bytes_available (arg->val,
-					 value_embedded_offset (arg->val),
-					 value_type (arg->val)->length ()))))
+	  || (val_print_scalar_type_p (arg->val->type ())
+	      && !arg->val->bytes_available (arg->val->embedded_offset (),
+					     arg->val->type ()->length ()))))
     return;
 
   gdb::optional<ui_out_emit_tuple> tuple_emitter;
@@ -545,7 +542,7 @@ list_arg_or_local (const struct frame_arg *arg, enum what_to_list what,
 	      struct value_print_options opts;
 
 	      get_no_prettyformat_print_options (&opts);
-	      opts.deref_ref = 1;
+	      opts.deref_ref = true;
 	      common_val_print (arg->val, &stb, 0, &opts,
 				language_def (arg->sym->language ()));
 	    }
@@ -571,9 +568,6 @@ list_args_or_locals (const frame_print_options &fp_opts,
 		     frame_info_ptr fi, int skip_unavailable)
 {
   const struct block *block;
-  struct symbol *sym;
-  struct block_iterator iter;
-  struct type *type;
   const char *name_of_result;
   struct ui_out *uiout = current_uiout;
 
@@ -598,7 +592,7 @@ list_args_or_locals (const frame_print_options &fp_opts,
 
   while (block != 0)
     {
-      ALL_BLOCK_SYMBOLS (block, iter, sym)
+      for (struct symbol *sym : block_iterator_range (block))
 	{
 	  int print_me = 0;
 
@@ -651,17 +645,15 @@ list_args_or_locals (const frame_print_options &fp_opts,
 	      switch (values)
 		{
 		case PRINT_SIMPLE_VALUES:
-		  type = check_typedef (sym2->type ());
-		  if (type->code () != TYPE_CODE_ARRAY
-		      && type->code () != TYPE_CODE_STRUCT
-		      && type->code () != TYPE_CODE_UNION)
-		    {
+		  if (!mi_simple_type_p (sym2->type ()))
+		    break;
+		  /* FALLTHROUGH */
+
 		case PRINT_ALL_VALUES:
 		  if (sym->is_argument ())
 		    read_frame_arg (fp_opts, sym2, fi, &arg, &entryarg);
 		  else
 		    read_frame_local (sym2, fi, &arg);
-		    }
 		  break;
 		}
 

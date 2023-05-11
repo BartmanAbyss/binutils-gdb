@@ -1,4 +1,4 @@
-/* Copyright (C) 2021 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
    Contributed by Oracle.
 
    This file is part of GNU Binutils.
@@ -220,17 +220,6 @@ extern "C"
   CollectorModule __collector_register_module (ModuleInterface *modint);
 #ifdef __cplusplus
 }
-#endif
-
-#ifdef __has_attribute
-# if __has_attribute (__symver__)
-#  define SYMVER_ATTRIBUTE(sym, symver) \
-    __attribute__ ((__symver__ (#symver)))
-# endif
-#endif
-#ifndef SYMVER_ATTRIBUTE
-# define SYMVER_ATTRIBUTE(sym, symver) \
-  __asm__(".symver " #sym "," #symver);
 #endif
 
 #endif /* _COLLECTOR_MODULE_H */

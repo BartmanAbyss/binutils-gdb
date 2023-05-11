@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux i386.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -415,7 +415,7 @@ i386_linux_report_signal_info (struct gdbarch *gdbarch, struct ui_out *uiout,
       access
 	= parse_and_eval_long ("$_siginfo._sifields._sigfault.si_addr");
     }
-  catch (const gdb_exception &exception)
+  catch (const gdb_exception_error &exception)
     {
       return;
     }

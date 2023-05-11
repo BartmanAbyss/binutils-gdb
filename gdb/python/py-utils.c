@@ -1,6 +1,6 @@
 /* General utility routines for GDB/Python.
 
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,6 +18,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
+#include "top.h"		/* For quit_force ().  */
 #include "charset.h"
 #include "value.h"
 #include "python-internal.h"
@@ -219,6 +220,8 @@ gdbpy_convert_exception (const struct gdb_exception &exception)
 
   if (exception.reason == RETURN_QUIT)
     exc_class = PyExc_KeyboardInterrupt;
+  else if (exception.reason == RETURN_FORCED_QUIT)
+    quit_force (NULL, 0);
   else if (exception.error == MEMORY_ERROR)
     exc_class = gdbpy_gdb_memory_error;
   else

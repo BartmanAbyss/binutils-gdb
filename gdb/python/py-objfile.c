@@ -1,6 +1,6 @@
 /* Python interface to objfiles.
 
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -704,7 +704,7 @@ objfile_to_objfile_object (struct objfile *objfile)
   return gdbpy_ref<>::new_reference (result);
 }
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_objfile (void)
 {
   if (PyType_Ready (&objfile_object_type) < 0)
@@ -713,6 +713,8 @@ gdbpy_initialize_objfile (void)
   return gdb_pymodule_addobject (gdb_module, "Objfile",
 				 (PyObject *) &objfile_object_type);
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_objfile);
 
 
 

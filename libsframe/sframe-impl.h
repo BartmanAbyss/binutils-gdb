@@ -1,6 +1,6 @@
 /* Implementation header.
 
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of libsframe.
 
@@ -32,10 +32,17 @@ extern "C"
 
 struct sframe_decoder_ctx
 {
-  sframe_header sfd_header;	      /* SFrame header.  */
-  uint32_t *sfd_funcdesc;	      /* SFrame function desc entries table.  */
-  void *sfd_fres;		      /* SFrame FRE table.  */
-  int sfd_fre_nbytes;		      /* Number of bytes needed for SFrame FREs.  */
+  /* SFrame header.  */
+  sframe_header sfd_header;
+  /* SFrame function desc entries table.  */
+  uint32_t *sfd_funcdesc;
+  /* SFrame FRE table.  */
+  void *sfd_fres;
+  /* Number of bytes needed for SFrame FREs.  */
+  int sfd_fre_nbytes;
+  /* Reference to the internally malloc'd buffer, if any, for endian flipping
+     the original input buffer before decoding.  */
+  void *sfd_buf;
 };
 
 struct sframe_encoder_ctx

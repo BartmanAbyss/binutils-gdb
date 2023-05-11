@@ -1,6 +1,6 @@
 /* Top level stuff for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,6 +19,7 @@
 
 #include "defs.h"
 #include "top.h"
+#include "ui.h"
 #include "target.h"
 #include "inferior.h"
 #include "symfile.h"
@@ -410,6 +411,10 @@ start_event_loop ()
 	{
 	  result = gdb_do_one_event ();
 	}
+      catch (const gdb_exception_forced_quit &ex)
+	{
+	  throw;
+	}
       catch (const gdb_exception &ex)
 	{
 	  exception_print (gdb_stderr, ex);
@@ -517,6 +522,10 @@ catch_command_errors (catch_command_errors_const_ftype command,
       /* Do any commands attached to breakpoint we stopped at.  */
       if (do_bp_actions)
 	bpstat_do_actions ();
+    }
+  catch (const gdb_exception_forced_quit &e)
+    {
+      quit_force (NULL, 0);
     }
   catch (const gdb_exception &e)
     {
@@ -1056,7 +1065,8 @@ captured_main_1 (struct captured_main_args *context)
       symarg = argv[optind];
       execarg = argv[optind];
       ++optind;
-      set_inferior_args_vector (argc - optind, &argv[optind]);
+      current_inferior ()->set_args
+	(gdb::array_view<char * const> (&argv[optind], argc - optind));
     }
   else
     {
@@ -1124,31 +1134,11 @@ captured_main_1 (struct captured_main_args *context)
       exit (0);
     }
 
-  /* FIXME: cagney/2003-02-03: The big hack (part 1 of 2) that lets
-     GDB retain the old MI1 interpreter startup behavior.  Output the
-     copyright message before the interpreter is installed.  That way
-     it isn't encapsulated in MI output.  */
-  if (!quiet && interpreter_p == INTERP_MI1)
-    {
-      /* Print all the junk at the top, with trailing "..." if we are
-	 about to read a symbol file (possibly slowly).  */
-      print_gdb_version (gdb_stdout, true);
-      if (symarg)
-	gdb_printf ("..");
-      gdb_printf ("\n");
-      gdb_flush (gdb_stdout);	/* Force to screen during slow
-				   operations.  */
-    }
-
   /* Install the default UI.  All the interpreters should have had a
      look at things by now.  Initialize the default interpreter.  */
   set_top_level_interpreter (interpreter_p.c_str ());
 
-  /* FIXME: cagney/2003-02-03: The big hack (part 2 of 2) that lets
-     GDB retain the old MI1 interpreter startup behavior.  Output the
-     copyright message after the interpreter is installed when it is
-     any sane interpreter.  */
-  if (!quiet && !current_interp_named_p (INTERP_MI1))
+  if (!quiet)
     {
       /* Print all the junk at the top, with trailing "..." if we are
 	 about to read a symbol file (possibly slowly).  */
@@ -1328,6 +1318,10 @@ captured_main (void *data)
       try
 	{
 	  captured_command_loop ();
+	}
+      catch (const gdb_exception_forced_quit &ex)
+	{
+	  quit_force (NULL, 0);
 	}
       catch (const gdb_exception &ex)
 	{

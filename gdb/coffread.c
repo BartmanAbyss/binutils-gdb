@@ -1,5 +1,5 @@
 /* Read coff symbol tables and convert to internal format, for GDB.
-   Copyright (C) 1987-2022 Free Software Foundation, Inc.
+   Copyright (C) 1987-2023 Free Software Foundation, Inc.
    Contributed by David D. Johnson, Brown University (ddj@cs.brown.edu).
 
    This file is part of GDB.
@@ -354,7 +354,7 @@ coff_alloc_type (int index)
      We will fill it in later if we find out how.  */
   if (type == NULL)
     {
-      type = alloc_type (coffread_objfile);
+      type = type_allocator (coffread_objfile).new_type ();
       *type_addr = type;
     }
   return type;
@@ -404,7 +404,7 @@ coff_end_compunit_symtab (struct objfile *objfile)
 {
   set_last_source_start_addr (current_source_start_addr);
 
-  end_compunit_symtab (current_source_end_addr, SECT_OFF_TEXT (objfile));
+  end_compunit_symtab (current_source_end_addr);
 
   /* Reinitialize for beginning of new file.  */
   set_last_source_file (NULL);
@@ -445,7 +445,7 @@ is_import_fixup_symbol (struct coff_symbol *cs,
 
 static struct minimal_symbol *
 record_minimal_symbol (minimal_symbol_reader &reader,
-		       struct coff_symbol *cs, CORE_ADDR address,
+		       struct coff_symbol *cs, unrelocated_addr address,
 		       enum minimal_symbol_type type, int section, 
 		       struct objfile *objfile)
 {
@@ -485,11 +485,6 @@ coff_symfile_init (struct objfile *objfile)
 {
   /* Allocate struct to keep track of the symfile.  */
   coff_objfile_data_key.emplace (objfile);
-
-  /* COFF objects may be reordered, so set OBJF_REORDERED.  If we
-     find this causes a significant slowdown in gdb then we could
-     set it in the debug symbol readers only when necessary.  */
-  objfile->flags |= OBJF_REORDERED;
 }
 
 /* This function is called for every section; it finds the outer
@@ -734,10 +729,13 @@ coff_symfile_read (struct objfile *objfile, symfile_add_flags symfile_flags)
   /* Try to add separate debug file if no symbols table found.   */
   if (!objfile->has_partial_symbols ())
     {
-      std::string debugfile = find_separate_debug_file_by_buildid (objfile);
+      std::vector<std::string> warnings_vector;
+      std::string debugfile
+	= find_separate_debug_file_by_buildid (objfile, &warnings_vector);
 
       if (debugfile.empty ())
-	debugfile = find_separate_debug_file_by_debuglink (objfile);
+	debugfile
+	  = find_separate_debug_file_by_debuglink (objfile, &warnings_vector);
 
       if (!debugfile.empty ())
 	{
@@ -746,6 +744,11 @@ coff_symfile_read (struct objfile *objfile, symfile_add_flags symfile_flags)
 	  symbol_file_add_separate (debug_bfd, debugfile.c_str (),
 				    symfile_flags, objfile);
 	}
+      /* If all the methods to collect the debuginfo failed, print any
+	 warnings that were collected.  */
+      if (debugfile.empty () && !warnings_vector.empty ())
+	for (const std::string &w : warnings_vector)
+	  warning ("%s", w.c_str ());
     }
 }
 
@@ -877,8 +880,9 @@ coff_symtab_read (minimal_symbol_reader &reader,
 	  tmpaddr = cs->c_value;
 	  /* Don't record unresolved symbols.  */
 	  if (!(cs->c_secnum <= 0 && cs->c_value == 0))
-	    record_minimal_symbol (reader, cs, tmpaddr, mst_text,
-				   section, objfile);
+	    record_minimal_symbol (reader, cs,
+				   unrelocated_addr (tmpaddr),
+				   mst_text, section, objfile);
 
 	  fcn_line_ptr = main_aux.x_sym.x_fcnary.x_fcn.x_lnnoptr;
 	  fcn_start_addr = tmpaddr;
@@ -1038,8 +1042,9 @@ coff_symtab_read (minimal_symbol_reader &reader,
 		  ms_type = mst_unknown;
 	      }
 
-	    msym = record_minimal_symbol (reader, cs, tmpaddr, ms_type,
-					  sec, objfile);
+	    msym = record_minimal_symbol (reader, cs,
+					  unrelocated_addr (tmpaddr),
+					  ms_type, sec, objfile);
 	    if (msym)
 	      gdbarch_coff_make_msymbol_special (gdbarch,
 						 cs->c_sclass, msym);
@@ -1127,9 +1132,10 @@ coff_symtab_read (minimal_symbol_reader &reader,
 		 of the closing '}', and for which we do not have any
 		 other statement-line-number.  */
 	      if (fcn_last_line == 1)
-		record_line (get_current_subfile (), fcn_first_line,
-			     gdbarch_addr_bits_remove (gdbarch,
-						       fcn_first_line_addr));
+		record_line
+		  (get_current_subfile (), fcn_first_line,
+		   unrelocated_addr (gdbarch_addr_bits_remove (gdbarch,
+							       fcn_first_line_addr)));
 	      else
 		enter_linenos (fcn_line_ptr, fcn_first_line,
 			       fcn_last_line, objfile);
@@ -1455,10 +1461,10 @@ enter_linenos (file_ptr file_offset, int first_line,
       if (L_LNNO32 (&lptr) && L_LNNO32 (&lptr) <= last_line)
 	{
 	  CORE_ADDR addr = lptr.l_addr.l_paddr;
-	  addr += objfile->text_section_offset ();
 	  record_line (get_current_subfile (),
 		       first_line + L_LNNO32 (&lptr),
-		       gdbarch_addr_bits_remove (gdbarch, addr));
+		       unrelocated_addr (gdbarch_addr_bits_remove (gdbarch,
+								   addr)));
 	}
       else
 	break;
@@ -1495,12 +1501,9 @@ patch_type (struct type *type, struct type *real_type)
 static void
 patch_opaque_types (struct symtab *s)
 {
-  struct block_iterator iter;
-  struct symbol *real_sym;
-
   /* Go through the per-file symbols only.  */
   const struct block *b = s->compunit ()->blockvector ()->static_block ();
-  ALL_BLOCK_SYMBOLS (b, iter, real_sym)
+  for (struct symbol *real_sym : block_iterator_range (b))
     {
       /* Find completed typedefs to use to fix opaque ones.
 	 Remove syms from the chain when their types are stored,
@@ -1766,7 +1769,7 @@ decode_type (struct coff_symbol *cs, unsigned int c_type,
 
 	  /* Define an array type.  */
 	  /* auxent refers to array, not base type.  */
-	  if (aux->x_sym.x_tagndx.l == 0)
+	  if (aux->x_sym.x_tagndx.u32 == 0)
 	    cs->c_naux = 0;
 
 	  /* Shift the indices down.  */
@@ -1778,11 +1781,11 @@ decode_type (struct coff_symbol *cs, unsigned int c_type,
 	  *dim = 0;
 
 	  base_type = decode_type (cs, new_c_type, aux, objfile);
-	  index_type = objfile_type (objfile)->builtin_int;
+	  index_type = builtin_type (objfile)->builtin_int;
+	  type_allocator alloc (objfile);
 	  range_type
-	    = create_static_range_type (NULL, index_type, 0, n - 1);
-	  type =
-	    create_array_type (NULL, base_type, range_type);
+	    = create_static_range_type (alloc, index_type, 0, n - 1);
+	  type = create_array_type (alloc, base_type, range_type);
 	}
       return type;
     }
@@ -1793,14 +1796,14 @@ decode_type (struct coff_symbol *cs, unsigned int c_type,
      unions, and enums, so we have to check the c_sclass field.  SCO
      3.2v4 cc gets confused with pointers to pointers to defined
      structs, and generates negative x_tagndx fields.  */
-  if (cs->c_naux > 0 && aux->x_sym.x_tagndx.l != 0)
+  if (cs->c_naux > 0 && aux->x_sym.x_tagndx.u32 != 0)
     {
       if (cs->c_sclass != C_STRTAG
 	  && cs->c_sclass != C_UNTAG
 	  && cs->c_sclass != C_ENTAG
-	  && aux->x_sym.x_tagndx.l >= 0)
+	  && (int32_t) aux->x_sym.x_tagndx.u32 >= 0)
 	{
-	  type = coff_alloc_type (aux->x_sym.x_tagndx.l);
+	  type = coff_alloc_type (aux->x_sym.x_tagndx.u32);
 	  return type;
 	}
       else
@@ -1823,7 +1826,7 @@ decode_function_type (struct coff_symbol *cs,
 		      union internal_auxent *aux, 
 		      struct objfile *objfile)
 {
-  if (aux->x_sym.x_tagndx.l == 0)
+  if (aux->x_sym.x_tagndx.u32 == 0)
     cs->c_naux = 0;	/* auxent refers to function, not base
 			   type.  */
 
@@ -1845,39 +1848,39 @@ decode_base_type (struct coff_symbol *cs,
     {
     case T_NULL:
       /* Shows up with "void (*foo)();" structure members.  */
-      return objfile_type (objfile)->builtin_void;
+      return builtin_type (objfile)->builtin_void;
 
 #ifdef T_VOID
     case T_VOID:
       /* Intel 960 COFF has this symbol and meaning.  */
-      return objfile_type (objfile)->builtin_void;
+      return builtin_type (objfile)->builtin_void;
 #endif
 
     case T_CHAR:
-      return objfile_type (objfile)->builtin_char;
+      return builtin_type (objfile)->builtin_char;
 
     case T_SHORT:
-      return objfile_type (objfile)->builtin_short;
+      return builtin_type (objfile)->builtin_short;
 
     case T_INT:
-      return objfile_type (objfile)->builtin_int;
+      return builtin_type (objfile)->builtin_int;
 
     case T_LONG:
       if (cs->c_sclass == C_FIELD
 	  && aux->x_sym.x_misc.x_lnsz.x_size
 	     > gdbarch_long_bit (gdbarch))
-	return objfile_type (objfile)->builtin_long_long;
+	return builtin_type (objfile)->builtin_long_long;
       else
-	return objfile_type (objfile)->builtin_long;
+	return builtin_type (objfile)->builtin_long;
 
     case T_FLOAT:
-      return objfile_type (objfile)->builtin_float;
+      return builtin_type (objfile)->builtin_float;
 
     case T_DOUBLE:
-      return objfile_type (objfile)->builtin_double;
+      return builtin_type (objfile)->builtin_double;
 
     case T_LNGDBL:
-      return objfile_type (objfile)->builtin_long_double;
+      return builtin_type (objfile)->builtin_long_double;
 
     case T_STRUCT:
       if (cs->c_naux != 1)
@@ -1895,7 +1898,7 @@ decode_base_type (struct coff_symbol *cs,
 	{
 	  type = coff_read_struct_type (cs->c_symnum,
 					aux->x_sym.x_misc.x_lnsz.x_size,
-					aux->x_sym.x_fcnary.x_fcn.x_endndx.l,
+					aux->x_sym.x_fcnary.x_fcn.x_endndx.u32,
 					objfile);
 	}
       return type;
@@ -1915,7 +1918,7 @@ decode_base_type (struct coff_symbol *cs,
 	{
 	  type = coff_read_struct_type (cs->c_symnum,
 					aux->x_sym.x_misc.x_lnsz.x_size,
-					aux->x_sym.x_fcnary.x_fcn.x_endndx.l,
+					aux->x_sym.x_fcnary.x_fcn.x_endndx.u32,
 					objfile);
 	}
       type->set_code (TYPE_CODE_UNION);
@@ -1936,7 +1939,7 @@ decode_base_type (struct coff_symbol *cs,
 	{
 	  type = coff_read_enum_type (cs->c_symnum,
 				      aux->x_sym.x_misc.x_lnsz.x_size,
-				      aux->x_sym.x_fcnary.x_fcn.x_endndx.l,
+				      aux->x_sym.x_fcnary.x_fcn.x_endndx.u32,
 				      objfile);
 	}
       return type;
@@ -1946,24 +1949,24 @@ decode_base_type (struct coff_symbol *cs,
       break;
 
     case T_UCHAR:
-      return objfile_type (objfile)->builtin_unsigned_char;
+      return builtin_type (objfile)->builtin_unsigned_char;
 
     case T_USHORT:
-      return objfile_type (objfile)->builtin_unsigned_short;
+      return builtin_type (objfile)->builtin_unsigned_short;
 
     case T_UINT:
-      return objfile_type (objfile)->builtin_unsigned_int;
+      return builtin_type (objfile)->builtin_unsigned_int;
 
     case T_ULONG:
       if (cs->c_sclass == C_FIELD
 	  && aux->x_sym.x_misc.x_lnsz.x_size
 	     > gdbarch_long_bit (gdbarch))
-	return objfile_type (objfile)->builtin_unsigned_long_long;
+	return builtin_type (objfile)->builtin_unsigned_long_long;
       else
-	return objfile_type (objfile)->builtin_unsigned_long;
+	return builtin_type (objfile)->builtin_unsigned_long;
     }
   complaint (_("Unexpected type for symbol %s"), cs->c_name);
-  return objfile_type (objfile)->builtin_void;
+  return builtin_type (objfile)->builtin_void;
 }
 
 /* This page contains subroutines of read_type.  */

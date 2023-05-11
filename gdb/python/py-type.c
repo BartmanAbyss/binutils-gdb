@@ -1,6 +1,6 @@
 /* Python interface to types.
 
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -154,7 +154,7 @@ convert_field (struct type *type, int field)
   if (PyObject_SetAttrString (result.get (), "parent_type", arg.get ()) < 0)
     return NULL;
 
-  if (!field_is_static (&type->field (field)))
+  if (!type->field (field).is_static ())
     {
       const char *attrstring;
 
@@ -957,7 +957,6 @@ typy_template_argument (PyObject *self, PyObject *args)
   const struct block *block = NULL;
   PyObject *block_obj = NULL;
   struct symbol *sym;
-  struct value *val = NULL;
 
   if (! PyArg_ParseTuple (args, "i|O", &argno, &block_obj))
     return NULL;
@@ -1014,16 +1013,19 @@ typy_template_argument (PyObject *self, PyObject *args)
       return NULL;
     }
 
+  PyObject *result = nullptr;
   try
     {
-      val = value_of_variable (sym, block);
+      scoped_value_mark free_values;
+      struct value *val = value_of_variable (sym, block);
+      result = value_to_value_object (val);
     }
   catch (const gdb_exception &except)
     {
       GDB_PY_HANDLE_EXCEPTION (except);
     }
 
-  return value_to_value_object (val);
+  return result;
 }
 
 static PyObject *
@@ -1189,7 +1191,8 @@ typy_optimized_out (PyObject *self, PyObject *args)
 {
   struct type *type = ((type_object *) self)->type;
 
-  return value_to_value_object (allocate_optimized_out_value (type));
+  scoped_value_mark free_values;
+  return value_to_value_object (value::allocate_optimized_out (type));
 }
 
 /* Return a gdb.Field object for the field named by the argument.  */
@@ -1442,7 +1445,7 @@ gdbpy_lookup_type (PyObject *self, PyObject *args, PyObject *kw)
   return type_to_type_object (type);
 }
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_types (void)
 {
   if (PyType_Ready (&type_object_type) < 0)
@@ -1469,6 +1472,8 @@ gdbpy_initialize_types (void)
   return gdb_pymodule_addobject (gdb_module, "Field",
 				 (PyObject *) &field_object_type);
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_types);
 
 
 

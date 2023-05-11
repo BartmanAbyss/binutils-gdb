@@ -1,5 +1,5 @@
 /* GNU/Linux/ARM specific low level interface, for the remote server for GDB.
-   Copyright (C) 1995-2022 Free Software Foundation, Inc.
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -958,7 +958,7 @@ get_next_pcs_syscall_next_pc (struct arm_get_next_pcs *self)
 static const struct target_desc *
 arm_read_description (void)
 {
-  unsigned long arm_hwcap = linux_get_hwcap (4);
+  unsigned long arm_hwcap = linux_get_hwcap (current_thread->id.pid (), 4);
 
   if (arm_hwcap & HWCAP_IWMMXT)
     return arm_linux_read_description (ARM_FP_TYPE_IWMMXT);

@@ -1,6 +1,6 @@
 /* Branch trace support for GDB, the GNU debugger.
 
-   Copyright (C) 2013-2022 Free Software Foundation, Inc.
+   Copyright (C) 2013-2023 Free Software Foundation, Inc.
 
    Contributed by Intel Corp. <markus.t.metzger@intel.com>
 
@@ -44,6 +44,7 @@
 #include "cli/cli-style.h"
 #include "async-event.h"
 #include <forward_list>
+#include "objfiles.h"
 
 static const target_info record_btrace_target_info = {
   "record-btrace",
@@ -704,8 +705,8 @@ static struct btrace_line_range
 btrace_find_line_range (CORE_ADDR pc)
 {
   struct btrace_line_range range;
-  struct linetable_entry *lines;
-  struct linetable *ltable;
+  const linetable_entry *lines;
+  const linetable *ltable;
   struct symtab *symtab;
   int nlines, i;
 
@@ -722,6 +723,10 @@ btrace_find_line_range (CORE_ADDR pc)
   if (nlines <= 0)
     return btrace_mk_line_range (symtab, 0, 0);
 
+  struct objfile *objfile = symtab->compunit ()->objfile ();
+  unrelocated_addr unrel_pc
+    = unrelocated_addr (pc - objfile->text_section_offset ());
+
   range = btrace_mk_line_range (symtab, 0, 0);
   for (i = 0; i < nlines - 1; i++)
     {
@@ -733,8 +738,8 @@ btrace_find_line_range (CORE_ADDR pc)
 	 possibly adding more line numbers to the range.  At the time this
 	 change was made I was unsure how to test this so chose to go with
 	 maintaining the existing experience.  */
-      if ((lines[i].pc == pc) && (lines[i].line != 0)
-	  && (lines[i].is_stmt == 1))
+      if (lines[i].raw_pc () == unrel_pc && lines[i].line != 0
+	  && lines[i].is_stmt)
 	range = btrace_line_range_add (range, lines[i].line);
     }
 
@@ -1391,7 +1396,7 @@ enum record_method
 record_btrace_target::record_method (ptid_t ptid)
 {
   process_stratum_target *proc_target = current_inferior ()->process_target ();
-  thread_info *const tp = find_thread_ptid (proc_target, ptid);
+  thread_info *const tp = proc_target->find_thread (ptid);
 
   if (tp == NULL)
     error (_("No thread."));
@@ -1543,7 +1548,8 @@ record_btrace_target::fetch_registers (struct regcache *regcache, int regno)
   /* Thread-db may ask for a thread's registers before GDB knows about the
      thread.  We forward the request to the target beneath in this
      case.  */
-  thread_info *tp = find_thread_ptid (regcache->target (), regcache->ptid ());
+  thread_info *tp
+    = current_inferior ()->process_target ()->find_thread (regcache->ptid ());
   if (tp != nullptr)
     replay =  tp->btrace.replay;
 
@@ -2932,7 +2938,7 @@ cmd_record_btrace_start (const char *args, int from_tty)
     {
       execute_command ("target record-btrace", from_tty);
     }
-  catch (const gdb_exception &exception)
+  catch (const gdb_exception_error &exception)
     {
       record_btrace_conf.format = BTRACE_FORMAT_BTS;
 

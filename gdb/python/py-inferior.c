@@ -1,6 +1,6 @@
 /* Python interface to inferiors.
 
-   Copyright (C) 2009-2022 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -714,8 +714,8 @@ infpy_thread_from_thread_handle (PyObject *self, PyObject *args, PyObject *kw)
   else if (gdbpy_is_value_object (handle_obj))
     {
       struct value *val = value_object_to_value (handle_obj);
-      bytes = value_contents_all (val).data ();
-      bytes_len = value_type (val)->length ();
+      bytes = val->contents_all ().data ();
+      bytes_len = val->type ()->length ();
     }
   else
     {
@@ -802,7 +802,7 @@ gdbpy_selected_inferior (PyObject *self, PyObject *args)
 	  inferior_to_inferior_object (current_inferior ()).release ());
 }
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_inferior (void)
 {
   if (PyType_Ready (&inferior_object_type) < 0)
@@ -837,6 +837,10 @@ gdbpy_initialize_inferior (void)
 
   return 0;
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_inferior);
+
+
 
 static gdb_PyGetSetDef inferior_object_getset[] =
 {

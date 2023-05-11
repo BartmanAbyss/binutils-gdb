@@ -1,4 +1,4 @@
-#as: -J
+#as: -J --divide
 #objdump: -dw
 #name: i386 opcodes
 
@@ -592,8 +592,12 @@ Disassembly of section .text:
 [ 	]*[a-f0-9]+:	0f 4b 90 90 90 90 90 	cmovnp -0x6f6f6f70\(%eax\),%edx
 [ 	]*[a-f0-9]+:	66 0f 4a 90 90 90 90 90 	cmovp  -0x6f6f6f70\(%eax\),%dx
 [ 	]*[a-f0-9]+:	66 0f 4b 90 90 90 90 90 	cmovnp -0x6f6f6f70\(%eax\),%dx
+[ 	]*[a-f0-9]+:	df 28                	fildll \(%eax\)
+[ 	]*[a-f0-9]+:	df 28                	fildll \(%eax\)
+[ 	]*[a-f0-9]+:	df 38                	fistpll \(%eax\)
+[ 	]*[a-f0-9]+:	df 38                	fistpll \(%eax\)
  +[a-f0-9]+:	82 c3 01             	add    \$0x1,%bl
- +[a-f0-9]+:	82 f3 01             	xor    \$0x1,%bl
+ +[a-f0-9]+:	82 cb 01             	or     \$0x1,%bl
  +[a-f0-9]+:	82 d3 01             	adc    \$0x1,%bl
  +[a-f0-9]+:	82 db 01             	sbb    \$0x1,%bl
  +[a-f0-9]+:	82 e3 01             	and    \$0x1,%bl

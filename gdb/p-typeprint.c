@@ -1,5 +1,5 @@
 /* Support for printing Pascal types for GDB, the GNU debugger.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -244,29 +244,6 @@ pascal_language::type_print_varspec_prefix (struct type *type,
 		    plongest (type->bounds ()->high.const_val ()));
       gdb_printf (stream, "of ");
       break;
-
-    case TYPE_CODE_UNDEF:
-    case TYPE_CODE_STRUCT:
-    case TYPE_CODE_UNION:
-    case TYPE_CODE_ENUM:
-    case TYPE_CODE_INT:
-    case TYPE_CODE_FLT:
-    case TYPE_CODE_VOID:
-    case TYPE_CODE_ERROR:
-    case TYPE_CODE_CHAR:
-    case TYPE_CODE_BOOL:
-    case TYPE_CODE_SET:
-    case TYPE_CODE_RANGE:
-    case TYPE_CODE_STRING:
-    case TYPE_CODE_COMPLEX:
-    case TYPE_CODE_TYPEDEF:
-    case TYPE_CODE_FIXED_POINT:
-      /* These types need no prefix.  They are listed here so that
-	 gcc -Wall will reveal any types that haven't been handled.  */
-      break;
-    default:
-      gdb_assert_not_reached ("unexpected type");
-      break;
     }
 }
 
@@ -376,29 +353,6 @@ pascal_language::type_print_varspec_suffix (struct type *type,
 	print_func_args (type, stream, flags);
       type_print_func_varspec_suffix (type, stream, show,
 					     passed_a_ptr, 0, flags);
-      break;
-
-    case TYPE_CODE_UNDEF:
-    case TYPE_CODE_STRUCT:
-    case TYPE_CODE_UNION:
-    case TYPE_CODE_ENUM:
-    case TYPE_CODE_INT:
-    case TYPE_CODE_FLT:
-    case TYPE_CODE_VOID:
-    case TYPE_CODE_ERROR:
-    case TYPE_CODE_CHAR:
-    case TYPE_CODE_BOOL:
-    case TYPE_CODE_SET:
-    case TYPE_CODE_RANGE:
-    case TYPE_CODE_STRING:
-    case TYPE_CODE_COMPLEX:
-    case TYPE_CODE_TYPEDEF:
-    case TYPE_CODE_FIXED_POINT:
-      /* These types do not need a suffix.  They are listed so that
-	 gcc -Wall will report types that may not have been considered.  */
-      break;
-    default:
-      gdb_assert_not_reached ("unexpected type");
       break;
     }
 }
@@ -562,12 +516,12 @@ pascal_language::type_print_base (struct type *type, struct ui_file *stream, int
 		}
 
 	      print_spaces (level + 4, stream);
-	      if (field_is_static (&type->field (i)))
+	      if (type->field (i).is_static ())
 		gdb_printf (stream, "static ");
 	      print_type (type->field (i).type (),
 				 type->field (i).name (),
 				 stream, show - 1, level + 4, flags);
-	      if (!field_is_static (&type->field (i))
+	      if (!type->field (i).is_static ()
 		  && TYPE_FIELD_PACKED (type, i))
 		{
 		  /* It is a bitfield.  This code does not attempt

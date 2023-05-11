@@ -1,6 +1,6 @@
 /* Convert symbols from GDB to GCC
 
-   Copyright (C) 2014-2022 Free Software Foundation, Inc.
+   Copyright (C) 2014-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -58,7 +58,7 @@ convert_one_symbol (compile_c_instance *context,
 {
   gcc_type sym_type;
   const char *filename = sym.symbol->symtab ()->filename;
-  unsigned short line = sym.symbol->line ();
+  unsigned int line = sym.symbol->line ();
 
   context->error_symbol_once (sym.symbol);
 
@@ -156,13 +156,13 @@ convert_one_symbol (compile_c_instance *context,
 	      }
 
 	    val = read_var_value (sym.symbol, sym.block, frame);
-	    if (VALUE_LVAL (val) != lval_memory)
+	    if (val->lval () != lval_memory)
 	      error (_("Symbol \"%s\" cannot be used for compilation "
 		       "evaluation as its address has not been found."),
 		     sym.symbol->print_name ());
 
 	    kind = GCC_C_SYMBOL_VARIABLE;
-	    addr = value_address (val);
+	    addr = val->address ();
 	  }
 	  break;
 
@@ -212,7 +212,6 @@ static void
 convert_symbol_sym (compile_c_instance *context, const char *identifier,
 		    struct block_symbol sym, domain_enum domain)
 {
-  const struct block *static_block;
   int is_local_symbol;
 
   /* If we found a symbol and it is not in the  static or global
@@ -227,7 +226,9 @@ convert_symbol_sym (compile_c_instance *context, const char *identifier,
      }
   */
 
-  static_block = block_static_block (sym.block);
+  const struct block *static_block = nullptr;
+  if (sym.block != nullptr)
+    static_block = sym.block->static_block ();
   /* STATIC_BLOCK is NULL if FOUND_BLOCK is the global block.  */
   is_local_symbol = (sym.block != static_block && static_block != NULL);
   if (is_local_symbol)
@@ -238,7 +239,7 @@ convert_symbol_sym (compile_c_instance *context, const char *identifier,
       /* If the outer symbol is in the static block, we ignore it, as
 	 it cannot be referenced.  */
       if (global_sym.symbol != NULL
-	  && global_sym.block != block_static_block (global_sym.block))
+	  && global_sym.block != global_sym.block->static_block ())
 	{
 	  if (compile_debug)
 	    gdb_printf (gdb_stdlog,
@@ -278,12 +279,12 @@ convert_symbol_bmsym (compile_c_instance *context,
     case mst_text:
     case mst_file_text:
     case mst_solib_trampoline:
-      type = objfile_type (objfile)->nodebug_text_symbol;
+      type = builtin_type (objfile)->nodebug_text_symbol;
       kind = GCC_C_SYMBOL_FUNCTION;
       break;
 
     case mst_text_gnu_ifunc:
-      type = objfile_type (objfile)->nodebug_text_gnu_ifunc_symbol;
+      type = builtin_type (objfile)->nodebug_text_gnu_ifunc_symbol;
       kind = GCC_C_SYMBOL_FUNCTION;
       addr = gnu_ifunc_resolve_addr (target_gdbarch (), addr);
       break;
@@ -292,17 +293,17 @@ convert_symbol_bmsym (compile_c_instance *context,
     case mst_file_data:
     case mst_bss:
     case mst_file_bss:
-      type = objfile_type (objfile)->nodebug_data_symbol;
+      type = builtin_type (objfile)->nodebug_data_symbol;
       kind = GCC_C_SYMBOL_VARIABLE;
       break;
 
     case mst_slot_got_plt:
-      type = objfile_type (objfile)->nodebug_got_plt_symbol;
+      type = builtin_type (objfile)->nodebug_got_plt_symbol;
       kind = GCC_C_SYMBOL_FUNCTION;
       break;
 
     default:
-      type = objfile_type (objfile)->nodebug_unknown_symbol;
+      type = builtin_type (objfile)->nodebug_unknown_symbol;
       kind = GCC_C_SYMBOL_VARIABLE;
       break;
     }
@@ -527,7 +528,7 @@ generate_vla_size (compile_instance *compiler,
 	int i;
 
 	for (i = 0; i < type->num_fields (); ++i)
-	  if (!field_is_static (&type->field (i)))
+	  if (!type->field (i).is_static ())
 	    generate_vla_size (compiler, stream, gdbarch, registers_used, pc,
 			       type->field (i).type (), sym);
       }
@@ -613,7 +614,10 @@ generate_c_for_variable_locations (compile_instance *compiler,
 				   const struct block *block,
 				   CORE_ADDR pc)
 {
-  const struct block *static_block = block_static_block (block);
+  if (block == nullptr)
+    return {};
+
+  const struct block *static_block = block->static_block ();
 
   /* If we're already in the static or global block, there is nothing
      to write.  */
@@ -629,14 +633,9 @@ generate_c_for_variable_locations (compile_instance *compiler,
 
   while (1)
     {
-      struct symbol *sym;
-      struct block_iterator iter;
-
       /* Iterate over symbols in this block, generating code to
 	 compute the location of each local variable.  */
-      for (sym = block_iterator_first (block, &iter);
-	   sym != NULL;
-	   sym = block_iterator_next (&iter))
+      for (struct symbol *sym : block_iterator_range (block))
 	{
 	  if (!symbol_seen (symhash.get (), sym))
 	    generate_c_for_for_one_variable (compiler, stream, gdbarch,

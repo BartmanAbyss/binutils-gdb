@@ -1,6 +1,6 @@
 /* Disassemble support for GDB.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -27,11 +27,12 @@
 #include "gdbcmd.h"
 #include "dis-asm.h"
 #include "source.h"
-#include "safe-ctype.h"
+#include "gdbsupport/gdb-safe-ctype.h"
 #include <algorithm>
 #include "gdbsupport/gdb_optional.h"
 #include "valprint.h"
 #include "cli/cli-style.h"
+#include "objfiles.h"
 
 /* Disassemble functions.
    FIXME: We should get rid of all the duplicate code in gdb that does
@@ -191,7 +192,7 @@ line_has_code_p (htab_t table, struct symtab *symtab, int line)
 int
 gdb_disassembler_memory_reader::dis_asm_read_memory
   (bfd_vma memaddr, gdb_byte *myaddr, unsigned int len,
-   struct disassemble_info *info)
+   struct disassemble_info *info) noexcept
 {
   return target_read_code (memaddr, myaddr, len);
 }
@@ -199,8 +200,8 @@ gdb_disassembler_memory_reader::dis_asm_read_memory
 /* Wrapper of memory_error.  */
 
 void
-gdb_disassembler::dis_asm_memory_error (int err, bfd_vma memaddr,
-					struct disassemble_info *info)
+gdb_disassembler::dis_asm_memory_error
+  (int err, bfd_vma memaddr, struct disassemble_info *info) noexcept
 {
   gdb_disassembler *self
     = static_cast<gdb_disassembler *>(info->application_data);
@@ -211,8 +212,8 @@ gdb_disassembler::dis_asm_memory_error (int err, bfd_vma memaddr,
 /* Wrapper of print_address.  */
 
 void
-gdb_disassembler::dis_asm_print_address (bfd_vma addr,
-					 struct disassemble_info *info)
+gdb_disassembler::dis_asm_print_address
+  (bfd_vma addr, struct disassemble_info *info) noexcept
 {
   gdb_disassembler *self
     = static_cast<gdb_disassembler *>(info->application_data);
@@ -256,7 +257,7 @@ gdb_printing_disassembler::stream_from_gdb_disassemble_info (void *dis_info)
 
 int
 gdb_printing_disassembler::fprintf_func (void *dis_info,
-					 const char *format, ...)
+					 const char *format, ...) noexcept
 {
   ui_file *stream = stream_from_gdb_disassemble_info (dis_info);
 
@@ -272,9 +273,9 @@ gdb_printing_disassembler::fprintf_func (void *dis_info,
 /* See disasm.h.  */
 
 int
-gdb_printing_disassembler::fprintf_styled_func (void *dis_info,
-						enum disassembler_style style,
-						const char *format, ...)
+gdb_printing_disassembler::fprintf_styled_func
+  (void *dis_info, enum disassembler_style style,
+   const char *format, ...) noexcept
 {
   ui_file *stream = stream_from_gdb_disassemble_info (dis_info);
   gdb_printing_disassembler *dis = (gdb_printing_disassembler *) dis_info;
@@ -572,7 +573,7 @@ do_mixed_source_and_assembly_deprecated
 {
   int newlines = 0;
   int nlines;
-  struct linetable_entry *le;
+  const struct linetable_entry *le;
   struct deprecated_dis_line_entry *mle;
   struct symtab_and_line sal;
   int i;
@@ -592,19 +593,26 @@ do_mixed_source_and_assembly_deprecated
   mle = (struct deprecated_dis_line_entry *)
     alloca (nlines * sizeof (struct deprecated_dis_line_entry));
 
+  struct objfile *objfile = symtab->compunit ()->objfile ();
+
+  unrelocated_addr unrel_low
+    = unrelocated_addr (low - objfile->text_section_offset ());
+  unrelocated_addr unrel_high
+    = unrelocated_addr (high - objfile->text_section_offset ());
+
   /* Copy linetable entries for this function into our data
      structure, creating end_pc's and setting out_of_order as
      appropriate.  */
 
   /* First, skip all the preceding functions.  */
 
-  for (i = 0; i < nlines - 1 && le[i].pc < low; i++);
+  for (i = 0; i < nlines - 1 && le[i].raw_pc () < unrel_low; i++);
 
   /* Now, copy all entries before the end of this function.  */
 
-  for (; i < nlines - 1 && le[i].pc < high; i++)
+  for (; i < nlines - 1 && le[i].raw_pc () < unrel_high; i++)
     {
-      if (le[i].line == le[i + 1].line && le[i].pc == le[i + 1].pc)
+      if (le[i] == le[i + 1])
 	continue;		/* Ignore duplicates.  */
 
       /* Skip any end-of-function markers.  */
@@ -614,19 +622,19 @@ do_mixed_source_and_assembly_deprecated
       mle[newlines].line = le[i].line;
       if (le[i].line > le[i + 1].line)
 	out_of_order = 1;
-      mle[newlines].start_pc = le[i].pc;
-      mle[newlines].end_pc = le[i + 1].pc;
+      mle[newlines].start_pc = le[i].pc (objfile);
+      mle[newlines].end_pc = le[i + 1].pc (objfile);
       newlines++;
     }
 
   /* If we're on the last line, and it's part of the function,
      then we need to get the end pc in a special way.  */
 
-  if (i == nlines - 1 && le[i].pc < high)
+  if (i == nlines - 1 && le[i].raw_pc () < unrel_high)
     {
       mle[newlines].line = le[i].line;
-      mle[newlines].start_pc = le[i].pc;
-      sal = find_pc_line (le[i].pc, 0);
+      mle[newlines].start_pc = le[i].pc (objfile);
+      sal = find_pc_line (le[i].pc (objfile), 0);
       mle[newlines].end_pc = sal.end;
       newlines++;
     }
@@ -733,6 +741,13 @@ do_mixed_source_and_assembly (struct gdbarch *gdbarch,
 
   htab_up dis_line_table (allocate_dis_line_table ());
 
+  struct objfile *objfile = main_symtab->compunit ()->objfile ();
+
+  unrelocated_addr unrel_low
+    = unrelocated_addr (low - objfile->text_section_offset ());
+  unrelocated_addr unrel_high
+    = unrelocated_addr (high - objfile->text_section_offset ());
+
   pc = low;
 
   /* The prologue may be empty, but there may still be a line number entry
@@ -746,10 +761,10 @@ do_mixed_source_and_assembly (struct gdbarch *gdbarch,
   first_le = NULL;
 
   /* Skip all the preceding functions.  */
-  for (i = 0; i < nlines && le[i].pc < low; i++)
+  for (i = 0; i < nlines && le[i].raw_pc () < unrel_low; i++)
     continue;
 
-  if (i < nlines && le[i].pc < high)
+  if (i < nlines && le[i].raw_pc () < unrel_high)
     first_le = &le[i];
 
   /* Add lines for every pc value.  */
@@ -1220,8 +1235,8 @@ gdb_insn_length (struct gdbarch *gdbarch, CORE_ADDR addr)
 /* See disasm.h.  */
 
 int
-gdb_non_printing_disassembler::null_fprintf_func (void *stream,
-						  const char *format, ...)
+gdb_non_printing_disassembler::null_fprintf_func
+  (void *stream, const char *format, ...) noexcept
 {
   return 0;
 }
@@ -1230,7 +1245,8 @@ gdb_non_printing_disassembler::null_fprintf_func (void *stream,
 
 int
 gdb_non_printing_disassembler::null_fprintf_styled_func
-  (void *stream, enum disassembler_style style, const char *format, ...)
+  (void *stream, enum disassembler_style style,
+   const char *format, ...) noexcept
 {
   return 0;
 }

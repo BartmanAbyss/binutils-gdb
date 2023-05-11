@@ -1,6 +1,6 @@
 /* MI Interpreter Definitions and Commands for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -27,7 +27,7 @@
 #include "inferior.h"
 #include "infrun.h"
 #include "ui-out.h"
-#include "top.h"
+#include "ui.h"
 #include "mi-main.h"
 #include "mi-cmds.h"
 #include "mi-out.h"
@@ -61,7 +61,6 @@ static void mi_insert_notify_hooks (void);
 static void mi_remove_notify_hooks (void);
 
 static void mi_on_signal_received (enum gdb_signal siggnal);
-static void mi_on_end_stepping_range (void);
 static void mi_on_signal_exited (enum gdb_signal siggnal);
 static void mi_on_exited (int exitstatus);
 static void mi_on_normal_stop (struct bpstat *bs, int print_frame);
@@ -199,11 +198,10 @@ mi_interp::suspend ()
   gdb_disable_readline ();
 }
 
-gdb_exception
+void
 mi_interp::exec (const char *command)
 {
   mi_execute_command_wrapper (command);
-  return gdb_exception ();
 }
 
 void
@@ -240,12 +238,7 @@ mi_cmd_interpreter_exec (const char *command, char **argv, int argc)
     };
 
   for (i = 1; i < argc; i++)
-    {
-      struct gdb_exception e = interp_exec (interp_to_use, argv[i]);
-
-      if (e.reason < 0)
-	error ("%s", e.what ());
-    }
+    interp_exec (interp_to_use, argv[i]);
 }
 
 /* This inserts a number of hooks that are meant to produce
@@ -548,23 +541,6 @@ mi_on_signal_received (enum gdb_signal siggnal)
     }
 }
 
-/* Observer for the end_stepping_range notification.  */
-
-static void
-mi_on_end_stepping_range (void)
-{
-  SWITCH_THRU_ALL_UIS ()
-    {
-      struct mi_interp *mi = find_mi_interp ();
-
-      if (mi == NULL)
-	continue;
-
-      print_end_stepping_range_reason (mi->mi_uiout);
-      print_end_stepping_range_reason (mi->cli_uiout);
-    }
-}
-
 /* Observer for the signal_exited notification.  */
 
 static void
@@ -847,7 +823,7 @@ mi_print_breakpoint_for_event (struct mi_interp *mi, breakpoint *bp)
 
       print_breakpoint (bp);
     }
-  catch (const gdb_exception &ex)
+  catch (const gdb_exception_error &ex)
     {
       exception_print (gdb_stderr, ex);
     }
@@ -1021,7 +997,7 @@ mi_on_resume (ptid_t ptid)
   if (ptid == minus_one_ptid || ptid.is_pid ())
     tp = inferior_thread ();
   else
-    tp = find_thread_ptid (target, ptid);
+    tp = target->find_thread (ptid);
 
   /* Suppress output while calling an inferior function.  */
   if (tp->control.in_infcall)
@@ -1275,31 +1251,26 @@ mi_interp::set_logging (ui_file_up logfile, bool logging_redirect,
     {
       mi->saved_raw_stdout = mi->raw_stdout;
 
-      /* If something is being redirected, then grab logfile.  */
-      ui_file *logfile_p = nullptr;
-      if (logging_redirect || debug_redirect)
-	{
-	  logfile_p = logfile.get ();
-	  mi->saved_raw_file_to_delete = logfile_p;
-	}
+      ui_file *logfile_p = logfile.get ();
+      mi->logfile_holder = std::move (logfile);
 
       /* If something is not being redirected, then a tee containing both the
 	 logfile and stdout.  */
       ui_file *tee = nullptr;
       if (!logging_redirect || !debug_redirect)
 	{
-	  tee = new tee_file (mi->raw_stdout, std::move (logfile));
-	  mi->saved_raw_file_to_delete = tee;
+	  tee = new tee_file (mi->raw_stdout, logfile_p);
+	  mi->stdout_holder.reset (tee);
 	}
 
       mi->raw_stdout = logging_redirect ? logfile_p : tee;
     }
   else
     {
-      delete mi->saved_raw_file_to_delete;
+      mi->logfile_holder.reset ();
+      mi->stdout_holder.reset ();
       mi->raw_stdout = mi->saved_raw_stdout;
       mi->saved_raw_stdout = nullptr;
-      mi->saved_raw_file_to_delete = nullptr;
     }
 
   mi->out->set_raw (mi->raw_stdout);
@@ -1322,15 +1293,12 @@ void
 _initialize_mi_interp ()
 {
   /* The various interpreter levels.  */
-  interp_factory_register (INTERP_MI1, mi_interp_factory);
   interp_factory_register (INTERP_MI2, mi_interp_factory);
   interp_factory_register (INTERP_MI3, mi_interp_factory);
   interp_factory_register (INTERP_MI4, mi_interp_factory);
   interp_factory_register (INTERP_MI, mi_interp_factory);
 
   gdb::observers::signal_received.attach (mi_on_signal_received, "mi-interp");
-  gdb::observers::end_stepping_range.attach (mi_on_end_stepping_range,
-					     "mi-interp");
   gdb::observers::signal_exited.attach (mi_on_signal_exited, "mi-interp");
   gdb::observers::exited.attach (mi_on_exited, "mi-interp");
   gdb::observers::no_history.attach (mi_on_no_history, "mi-interp");

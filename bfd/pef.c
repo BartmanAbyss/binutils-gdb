@@ -1,5 +1,5 @@
 /* PEF support for BFD.
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -181,7 +181,7 @@ bfd_pef_parse_traceback_table (bfd *abfd,
 
       /* Strip leading period inserted by compiler.  */
       if (namebuf[0] == '.')
-	memmove (namebuf, namebuf + 1, name.name_len + 1);
+	memmove (namebuf, namebuf + 1, name.name_len);
 
       sym->name = namebuf;
 

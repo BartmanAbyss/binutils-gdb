@@ -1,5 +1,5 @@
 dnl Autoconf configure script for GDB, the GNU debugger.
-dnl Copyright (C) 1995-2022 Free Software Foundation, Inc.
+dnl Copyright (C) 1995-2023 Free Software Foundation, Inc.
 dnl
 dnl This file is part of GDB.
 dnl
@@ -60,6 +60,11 @@ AX_CXX_COMPILE_STDCXX(11, , mandatory)
 # Dependency checking.
 ZW_CREATE_DEPDIR
 ZW_PROG_COMPILER_DEPENDENCIES([CC])
+
+# Since the first call to PKG_CHECK_MODULES may not happen (is guarded by
+# a condition), we must call PKG_PROG_PKG_CONFIG explicitly to probe for
+# pkg-config.
+PKG_PROG_PKG_CONFIG
 
 dnl List of object files and targets accumulated by configure.
 
@@ -241,6 +246,54 @@ if test x${all_targets} = xtrue; then
   fi
 fi
 
+# AMD debugger API support.
+
+AC_ARG_WITH([amd-dbgapi],
+	    [AS_HELP_STRING([--with-amd-dbgapi],
+			    [support for the amd-dbgapi target (yes / no / auto)])],
+	    [GDB_CHECK_YES_NO_AUTO_VAL([$withval], [--with-amd-dbgapi])],
+	    [with_amd_dbgapi=auto])
+
+# If the user passes --without-amd-dbgapi but also explicitly enables a target
+# that requires amd-dbgapi, it is an error.
+if test "$with_amd_dbgapi" = no -a "$gdb_require_amd_dbgapi" = true; then
+  AC_MSG_ERROR([an explicitly enabled target requires amd-dbgapi, but amd-dbgapi is explicitly disabled])
+fi
+
+# Look for amd-dbgapi if:
+#
+#   - a target architecture requiring it has explicitly been enabled, or
+#   - --enable-targets=all was provided and the user did not explicitly disable
+#     amd-dbgapi support
+if test "$gdb_require_amd_dbgapi" = true \
+     -o \( "$all_targets" = true -a "$with_amd_dbgapi" != no \); then
+  # amd-dbgapi version 0.68 is part of ROCm 5.4.  There is no guarantee of API
+  # stability until amd-dbgapi hits 1.0, but for convenience, still check for
+  # greater or equal that version.  It can be handy when testing with a newer
+  # version of the library.
+  PKG_CHECK_MODULES([AMD_DBGAPI], [amd-dbgapi >= 0.68.0],
+		    [has_amd_dbgapi=yes], [has_amd_dbgapi=no])
+
+  if test "$has_amd_dbgapi" = "yes"; then
+    AC_DEFINE(HAVE_AMD_DBGAPI, 1, [Define if amd-dbgapi is being linked in.])
+    TARGET_OBS="$TARGET_OBS amd-dbgapi-target.o"
+
+    # If --enable-targets=all was provided, use the list of all files depending
+    # on amd-dbgapi that is hardcoded in the Makefile.  Else, the appropriate
+    # architecture entry in configure.tgt will have added the files to
+    # gdb_target_obs.
+    if test "$all_targets" = true; then
+      TARGET_OBS="$TARGET_OBS \$(ALL_AMD_DBGAPI_TARGET_OBS)"
+    fi
+  elif test "$gdb_require_amd_dbgapi" = true -o "$with_amd_dbgapi" = yes; then
+    # amd-dbgapi was not found and...
+    #
+    #   - a target requiring it was explicitly enabled, or
+    #   - the user explicitly wants to enable amd-dbgapi
+    AC_MSG_ERROR([amd-dbgapi is required, but cannot find an appropriate version: $AMD_DBGAPI_PKG_ERRORS])
+  fi
+fi
+
 AC_SUBST(TARGET_OBS)
 AC_SUBST(HAVE_NATIVE_GCORE_TARGET)
 
@@ -263,20 +316,6 @@ fi
 if test "x$targ_defvec" != x; then
   AC_DEFINE_UNQUOTED(DEFAULT_BFD_VEC, $targ_defvec,
     [Define to BFD's default target vector. ])
-fi
-
-# Enable MI.
-AC_ARG_ENABLE([gdbmi],
-	      [AS_HELP_STRING([--disable-gdbmi], [disable machine-interface (MI)])],
-	      [GDB_CHECK_YES_NO_VAL([$enableval], [--enable-gdbmi])],
-	      [enable_gdbmi=yes])
-if test x"$enable_gdbmi" = xyes; then
-  if test -d "$srcdir/mi"; then
-    CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_MI_OBS)"
-    CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_MI_DEPS)"
-    CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_MI_SRCS)"
-    ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_MI_CFLAGS)"
-  fi
 fi
 
 # Enable TUI.
@@ -511,28 +550,26 @@ if test x"$prefer_curses" = xyes; then
   # search /usr/local/include, if ncurses is installed in /usr/local.  A
   # default installation of ncurses on alpha*-dec-osf* will lead to such
   # a situation.
-  AC_SEARCH_LIBS(waddstr, [ncursesw ncurses cursesX curses])
-
-  if test "$ac_cv_search_waddstr" != no; then
-    curses_found=yes
-  fi
+  AC_SEARCH_LIBS(waddstr, [ncursesw ncurses cursesX curses],
+                 [curses_found=yes
+                  AC_DEFINE([HAVE_LIBCURSES], [1],
+                            [Define to 1 if curses is enabled.])
+                 ])
 fi
 
 # Check whether we should enable the TUI, but only do so if we really
 # can.
 if test x"$enable_tui" != xno; then
-  if test -d "$srcdir/tui"; then
-    if test "$curses_found" != no; then
-      CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_TUI_OBS)"
-      CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_TUI_DEPS)"
-      CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_TUI_SRCS)"
-      ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_TUI_CFLAGS)"
+  if test "$curses_found" != no; then
+    CONFIG_OBS="$CONFIG_OBS \$(SUBDIR_TUI_OBS)"
+    CONFIG_DEPS="$CONFIG_DEPS \$(SUBDIR_TUI_DEPS)"
+    CONFIG_SRCS="$CONFIG_SRCS \$(SUBDIR_TUI_SRCS)"
+    ENABLE_CFLAGS="$ENABLE_CFLAGS \$(SUBDIR_TUI_CFLAGS)"
+  else
+    if test x"$enable_tui" = xyes; then
+      AC_MSG_ERROR([no enhanced curses library found; disable TUI])
     else
-      if test x"$enable_tui" = xyes; then
-	AC_MSG_ERROR([no enhanced curses library found; disable TUI])
-      else
-	AC_MSG_WARN([no enhanced curses library found; disabling TUI])
-      fi
+      AC_MSG_WARN([no enhanced curses library found; disabling TUI])
     fi
   fi
 fi
@@ -591,16 +628,19 @@ if test "$with_system_readline" = yes; then
   READLINE_DEPS=
   READLINE_CFLAGS=
   READLINE_TEXI_INCFLAG=
+  READLINE_DOC_SOURCE_INCLUDES='$(READLINE_SYSTEM_DOC_INCLUDES)'
 else
   READLINE='$(READLINE_DIR)/libreadline.a'
   READLINE_DEPS='$(READLINE)'
   READLINE_CFLAGS='-I$(READLINE_SRC)/..'
   READLINE_TEXI_INCFLAG='-I $(READLINE_DIR)'
+  READLINE_DOC_SOURCE_INCLUDES='$(READLINE_INTREE_DOC_INCLUDES)'
 fi
 AC_SUBST(READLINE)
 AC_SUBST(READLINE_DEPS)
 AC_SUBST(READLINE_CFLAGS)
 AC_SUBST(READLINE_TEXI_INCFLAG)
+AC_SUBST(READLINE_DOC_SOURCE_INCLUDES)
 
 # Generate jit-reader.h
 
@@ -656,60 +696,8 @@ else
   fi
 fi
 
-AC_ARG_WITH(gmp_include,
-   [  --with-gmp-include=DIR  GMP include directory ],
-   CPPFLAGS="$CPPFLAGS -I$withval")
-AC_ARG_WITH(gmp_lib,
-   [  --with-gmp-lib=DIR      GMP lib directory ],
-   LDFLAGS="$LDFLAGS -L$withval")
-AC_ARG_WITH(gmp,
-   [  --with-gmp=DIR          GMP install directory ], [
-   if test -z "$with_gmp_lib" && test -z "$with_gmp_include" ; then
-      CPPFLAGS="$CPPFLAGS -I$withval/include"
-      LDFLAGS="$LDFLAGS -L$withval/lib"
-   else
-      AC_MSG_FAILURE([Do not use --with-gmp and --with-gmp-include/--with-gmp-lib options simultaneously.])
-   fi
-  ])
-
-# Verify that we have a usable GMP library.
-AC_LIB_HAVE_LINKFLAGS([gmp], [], [#include <gmp.h>],
-                      [mpz_t n;
-                       mpz_init (n);])
-if test "$HAVE_LIBGMP" != yes; then
-  AC_MSG_ERROR([GMP is missing or unusable])
-fi
-
-AC_ARG_WITH([mpfr_include],
-            [AC_HELP_STRING([--with-mpfr-include=DIR],
-                            [MPFR include directory])],
-            [CPPFLAGS="-I$withval $CPPFLAGS"])
-AC_ARG_WITH([mpfr_lib],
-            [AC_HELP_STRING([--with-mpfr-lib=DIR],
-                            [MPFR lib directory])],
-            [LDFLAGS="-L$withval $LDFLAGS"])
-
-AC_ARG_WITH(mpfr,
-  AS_HELP_STRING([--with-mpfr], [include MPFR support (auto/yes/no)]),
-  [], [with_mpfr=auto])
-AC_MSG_CHECKING([whether to use MPFR])
-AC_MSG_RESULT([$with_mpfr])
-
-if test "${with_mpfr}" = no; then
-  AC_MSG_WARN([MPFR support disabled; some features may be unavailable.])
-  HAVE_LIBMPFR=no
-else
-  AC_LIB_HAVE_LINKFLAGS([mpfr], [gmp], [#include <mpfr.h>],
-			[mpfr_exp_t exp; mpfr_t x;
-			 mpfr_frexp (&exp, x, x, MPFR_RNDN);])
-  if test "$HAVE_LIBMPFR" != yes; then
-    if test "$with_mpfr" = yes; then
-      AC_MSG_ERROR([MPFR is missing or unusable])
-    else
-      AC_MSG_WARN([MPFR is missing or unusable; some features may be unavailable.])
-    fi
-  fi
-fi
+AC_ARG_VAR(GMPLIBS,[How to link GMP])
+AC_ARG_VAR(GMPINC,[How to find GMP include files])
 
 # --------------------- #
 # Check for libpython.  #
@@ -2177,11 +2165,6 @@ else
   fi
 fi
 
-# Check for xxhash
-AC_ARG_WITH(xxhash,
-  AS_HELP_STRING([--with-xxhash], [use libxxhash for hashing (faster) (auto/yes/no)]),
-  [], [with_xxhash=auto])
-
 GCC_ENABLE([libctf], [yes], [], [Handle .ctf type-info sections])
 if test "${enable_libctf}" = yes; then
   AC_DEFINE(ENABLE_LIBCTF, 1, [Handle .ctf type-info sections])
@@ -2196,24 +2179,6 @@ AC_SUBST(CTF_DEPS)
 
 # If nativefile (NAT_FILE) is not set in configure.nat, we link to an
 # empty version.
-
-if test "x$with_xxhash" != "xno"; then
-  AC_LIB_HAVE_LINKFLAGS([xxhash], [],
-			[#include <xxhash.h>],
-			[XXH32("foo", 3, 0);
-			])
-  if test "$HAVE_LIBXXHASH" != yes; then
-    if test "$with_xxhash" = yes; then
-      AC_MSG_ERROR([xxhash is missing or unusable])
-    fi
-  fi
-  if test "x$with_xxhash" = "xauto"; then
-    with_xxhash="$HAVE_LIBXXHASH"
-  fi
-fi
-
-AC_MSG_CHECKING([whether to use xxhash])
-AC_MSG_RESULT([$with_xxhash])
 
 NM_H=
 rm -f nm.h

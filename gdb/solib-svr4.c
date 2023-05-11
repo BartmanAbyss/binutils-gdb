@@ -1,6 +1,6 @@
 /* Handle SVR4 shared libraries for GDB, the GNU Debugger.
 
-   Copyright (C) 1990-2022 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -1908,8 +1908,8 @@ solist_update_incremental (svr4_info *info, CORE_ADDR debug_base,
 	return 0;
 
       /* Get the so list from the target.  We replace the list in the
-         target response so we can easily check that the response only
-         covers one namespace.
+	 target response so we can easily check that the response only
+	 covers one namespace.
 
 	 We expect gdbserver to provide updates for the namespace that
 	 contains LM, which whould be this namespace...  */
@@ -1977,17 +1977,22 @@ svr4_handle_solib_event (void)
   if (info->probes_table == NULL)
     return;
 
+  pc = regcache_read_pc (get_current_regcache ());
+  pa = solib_event_probe_at (info, pc);
+  if (pa == nullptr)
+    {
+      /* When some solib ops sits above us, it can respond to a solib event
+	 by calling in here.  This is done assuming that if the current event
+	 is not an SVR4 solib event, calling here should be a no-op.  */
+      return;
+    }
+
   /* If anything goes wrong we revert to the original linker
      interface.  */
   auto cleanup = make_scope_exit ([info] ()
     {
       disable_probes_interface (info);
     });
-
-  pc = regcache_read_pc (get_current_regcache ());
-  pa = solib_event_probe_at (info, pc);
-  if (pa == NULL)
-    return;
 
   action = solib_event_probe_action (pa);
   if (action == PROBES_INTERFACE_FAILED)
@@ -2168,6 +2173,9 @@ svr4_create_probe_breakpoints (svr4_info *info, struct gdbarch *gdbarch,
 	{
 	  CORE_ADDR address = p->get_relocated_address (objfile);
 
+	  solib_debug_printf ("name=%s, addr=%s", probe_info[i].name,
+			      paddress (gdbarch, address));
+
 	  create_solib_event_breakpoint (gdbarch, address);
 	  register_solib_event_probe (info, objfile, p, address, action);
 	}
@@ -2185,6 +2193,9 @@ svr4_find_and_create_probe_breakpoints (svr4_info *info,
 					struct obj_section *os,
 					bool with_prefix)
 {
+  SOLIB_SCOPED_DEBUG_START_END ("objfile=%s, with_prefix=%d",
+				os->objfile->original_name, with_prefix);
+
   std::vector<probe *> probes[NUM_PROBES];
 
   for (int i = 0; i < NUM_PROBES; i++)
@@ -2204,16 +2215,36 @@ svr4_find_and_create_probe_breakpoints (svr4_info *info,
 	}
 
       probes[i] = find_probes_in_objfile (os->objfile, "rtld", name);
-
-      /* The "map_failed" probe did not exist in early
-	 versions of the probes code in which the probes'
-	 names were prefixed with "rtld_".  */
-      if (with_prefix && streq (name, "rtld_map_failed"))
-	continue;
+      solib_debug_printf ("probe=%s, num found=%zu", name, probes[i].size ());
 
       /* Ensure at least one probe for the current name was found.  */
       if (probes[i].empty ())
-	return false;
+	{
+	  /* The "map_failed" probe did not exist in early versions of the
+	     probes code in which the probes' names were prefixed with
+	     "rtld_".
+
+	     Additionally, the "map_failed" probe was accidentally removed
+	     from glibc 2.35 and 2.36, when changes in glibc meant the
+	     probe could no longer be reached, and the compiler optimized
+	     the probe away.  In this case the probe name doesn't have the
+	     "rtld_" prefix.
+
+	     To handle this, and give GDB as much flexibility as possible,
+	     we make the rule that, if a probe isn't required for the
+	     correct operation of GDB (i.e. its action is DO_NOTHING), then
+	     we will still use the probes interface, even if that probe is
+	     missing.
+
+	     The only (possible) downside of this is that, if the user has
+	     'set stop-on-solib-events on' in effect, then they might get
+	     fewer events using the probes interface than with the classic
+	     non-probes interface.  */
+	  if (probe_info[i].action == DO_NOTHING)
+	    continue;
+	  else
+	    return false;
+	}
 
       /* Ensure probe arguments can be evaluated.  */
       for (probe *p : probes[i])
@@ -2237,6 +2268,7 @@ svr4_find_and_create_probe_breakpoints (svr4_info *info,
     }
 
   /* All probes found.  Now create them.  */
+  solib_debug_printf ("using probes interface");
   svr4_create_probe_breakpoints (info, gdbarch, probes, os->objfile);
   return true;
 }
@@ -2262,17 +2294,13 @@ svr4_create_solib_event_breakpoints (svr4_info *info, struct gdbarch *gdbarch,
   if (os == nullptr
       || (!svr4_find_and_create_probe_breakpoints (info, gdbarch, os, false)
 	  && !svr4_find_and_create_probe_breakpoints (info, gdbarch, os, true)))
-    create_solib_event_breakpoint (gdbarch, address);
+    {
+      solib_debug_printf ("falling back to r_brk breakpoint: addr=%s",
+			  paddress (gdbarch, address));
+      create_solib_event_breakpoint (gdbarch, address);
+    }
 }
 
-/* Helper function for gdb_bfd_lookup_symbol.  */
-
-static int
-cmp_name_and_sec_flags (const asymbol *sym, const void *data)
-{
-  return (strcmp (sym->name, (const char *) data) == 0
-	  && (sym->section->flags & (SEC_CODE | SEC_DATA)) != 0);
-}
 /* Arrange for dynamic linker to hit breakpoint.
 
    Both the SunOS and the SVR4 dynamic linkers have, as part of their
@@ -2517,9 +2545,15 @@ enable_break (struct svr4_info *info, int from_tty)
       /* Now try to set a breakpoint in the dynamic linker.  */
       for (bkpt_namep = solib_break_names; *bkpt_namep != NULL; bkpt_namep++)
 	{
-	  sym_addr = gdb_bfd_lookup_symbol (tmp_bfd.get (),
-					    cmp_name_and_sec_flags,
-					    *bkpt_namep);
+	  sym_addr
+	    = (gdb_bfd_lookup_symbol
+	       (tmp_bfd.get (),
+		[=] (const asymbol *sym)
+		{
+		  return (strcmp (sym->name, *bkpt_namep) == 0
+			  && ((sym->section->flags & (SEC_CODE | SEC_DATA))
+			      != 0));
+		}));
 	  if (sym_addr != 0)
 	    break;
 	}

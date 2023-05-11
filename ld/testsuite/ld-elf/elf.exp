@@ -1,5 +1,5 @@
 # Expect script for various ELF tests.
-#   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+#   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -238,6 +238,12 @@ if {   [istarget *-*-*linux*]
 	return $text
     }
 
+    set curr_ldflags $LDFLAGS
+    if { [istarget powerpc*-*-*] && ![istarget powerpc64*-*-*] } {
+	# Don't generate an executable .plt section
+	set LDFLAGS "$LDFLAGS --secure-plt"
+    }
+
     # Since the warnings can be disabled by configure, ensure consistency
     # of the first test by forcing the flags.
     run_ld_link_tests [list \
@@ -284,6 +290,8 @@ if {   [istarget *-*-*linux*]
 	     {} \
 	    "rwx-segments-3.exe"] \
 	  ]
+
+    set LDFLAGS $curr_ldflags
 
     if { [target_defaults_to_execstack] } {
 	run_ld_link_tests [list \
@@ -516,31 +524,24 @@ run_cc_link_tests [list \
 	{{nm "" pr26391.nd}} \
 	"pr26391-4" \
     ] \
-]
-
-run_ld_link_tests [list \
     [list \
 	"Build pr26391-5.o" \
-	"-z unique-symbol -r" \
-	"" \
-	"" \
+	"-Wl,-z,unique-symbol -r -nostdlib -nostartfiles" \
+	"-fno-function-sections" \
 	{pr26391a.c pr26391b.c pr26391c.c pr26391d.c} \
 	[list \
 	    [list "nm" "$dep_plug_opt" "pr26391.nd"] \
 	    [list "nm" "$dep_plug_opt" "pr26391.fd"] \
 	] \
 	"pr26391-5.o" \
-	"-fno-function-sections" \
     ] \
     [list \
 	"Build pr26391-6.o" \
-	"-z unique-symbol -r" \
-	"" \
-	"" \
+	"-Wl,-z,unique-symbol -r -nostdlib -nostartfiles" \
+	"-ffunction-sections" \
 	{pr26391a.c pr26391b.c pr26391c.c pr26391d.c} \
 	{{nm "" pr26391.nd}} \
 	"pr26391-6.o" \
-	"-ffunction-sections" \
     ] \
 ]
 
@@ -606,5 +607,11 @@ run_ld_link_exec_tests [list \
 	"tmpdir/pr26391-6.o" \
     ] \
 ]
+
+set merge_exec_tests {
+    {"merge4" "" ""
+	{merge4a.c merge4b.s} "merge4" "merge4.out"}
+}
+run_ld_link_exec_tests $merge_exec_tests
 
 catch "exec rm -f tmpdir/preinit tmpdir/init tmpdir/fini tmpdir/init-mixed" status

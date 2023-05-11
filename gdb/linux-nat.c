@@ -1,6 +1,6 @@
 /* GNU/Linux native-dependent code common to multiple platforms.
 
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -60,7 +60,6 @@
 #include "symfile.h"
 #include "gdbsupport/agent.h"
 #include "tracepoint.h"
-#include "gdbsupport/buffer.h"
 #include "target-descriptions.h"
 #include "gdbsupport/filestuff.h"
 #include "objfiles.h"
@@ -256,6 +255,19 @@ is_leader (lwp_info *lp)
   return lp->ptid.pid () == lp->ptid.lwp ();
 }
 
+/* Convert an LWP's pending status to a std::string.  */
+
+static std::string
+pending_status_str (lwp_info *lp)
+{
+  gdb_assert (lwp_status_pending_p (lp));
+
+  if (lp->waitstatus.kind () != TARGET_WAITKIND_IGNORE)
+    return lp->waitstatus.to_string ();
+  else
+    return status_to_str (lp->status);
+}
+
 
 /* LWP accessors.  */
 
@@ -372,6 +384,7 @@ linux_init_ptrace_procfs (pid_t pid, int attached)
   linux_enable_event_reporting (pid, options);
   linux_ptrace_init_warnings ();
   linux_proc_init_warnings ();
+  proc_mem_file_is_writable ();
 }
 
 linux_nat_target::~linux_nat_target ()
@@ -890,7 +903,7 @@ linux_nat_switch_fork (ptid_t new_ptid)
 static void
 exit_lwp (struct lwp_info *lp)
 {
-  struct thread_info *th = find_thread_ptid (linux_target, lp->ptid);
+  struct thread_info *th = linux_target->find_thread (lp->ptid);
 
   if (th)
     {
@@ -1219,14 +1232,14 @@ get_detach_signal (struct lwp_info *lp)
     signo = gdb_signal_from_host (WSTOPSIG (lp->status));
   else
     {
-      struct thread_info *tp = find_thread_ptid (linux_target, lp->ptid);
+      thread_info *tp = linux_target->find_thread (lp->ptid);
 
       if (target_is_non_stop_p () && !tp->executing ())
 	{
 	  if (tp->has_pending_waitstatus ())
 	    {
 	      /* If the thread has a pending event, and it was stopped with a
-	         signal, use that signal to resume it.  If it has a pending
+		 signal, use that signal to resume it.  If it has a pending
 		 event of another kind, it was not stopped with a signal, so
 		 resume it without a signal.  */
 	      if (tp->pending_waitstatus ().kind () == TARGET_WAITKIND_STOPPED)
@@ -1312,7 +1325,7 @@ detach_one_lwp (struct lwp_info *lp, int *signo_p)
 
 
   /* Check in thread_info::pending_waitstatus.  */
-  thread_info *tp = find_thread_ptid (linux_target, lp->ptid);
+  thread_info *tp = linux_target->find_thread (lp->ptid);
   if (tp->has_pending_waitstatus ())
     {
       const target_waitstatus &ws = tp->pending_waitstatus ();
@@ -1566,7 +1579,7 @@ linux_nat_resume_callback (struct lwp_info *lp, struct lwp_info *except)
     {
       struct thread_info *thread;
 
-      thread = find_thread_ptid (linux_target, lp->ptid);
+      thread = linux_target->find_thread (lp->ptid);
       if (thread != NULL)
 	{
 	  signo = thread->stop_signal ();
@@ -1647,8 +1660,8 @@ linux_nat_target::resume (ptid_t scope_ptid, int step, enum gdb_signal signo)
 	 this thread with a signal?  */
       gdb_assert (signo == GDB_SIGNAL_0);
 
-      linux_nat_debug_printf ("Short circuiting for status 0x%x",
-			      lp->status);
+      linux_nat_debug_printf ("Short circuiting for status %s",
+			      pending_status_str (lp).c_str ());
 
       if (target_can_async_p ())
 	{
@@ -1704,7 +1717,7 @@ linux_handle_syscall_trap (struct lwp_info *lp, int stopping)
 {
   struct target_waitstatus *ourstatus = &lp->waitstatus;
   struct gdbarch *gdbarch = target_thread_architecture (lp->ptid);
-  thread_info *thread = find_thread_ptid (linux_target, lp->ptid);
+  thread_info *thread = linux_target->find_thread (lp->ptid);
   int syscall_number = (int) gdbarch_get_syscall_number (gdbarch, thread);
 
   if (stopping)
@@ -2983,7 +2996,7 @@ linux_nat_filter_event (int lwpid, int status)
       if (!lp->step
 	  && WSTOPSIG (status) && sigismember (&pass_mask, WSTOPSIG (status))
 	  && (WSTOPSIG (status) != SIGSTOP
-	      || !find_thread_ptid (linux_target, lp->ptid)->stop_requested)
+	      || !linux_target->find_thread (lp->ptid)->stop_requested)
 	  && !linux_wstatus_maybe_breakpoint (status))
 	{
 	  linux_resume_one_lwp (lp, lp->step, signo);
@@ -3137,7 +3150,7 @@ linux_nat_wait_1 (ptid_t ptid, struct target_waitstatus *ourstatus,
   if (lp != NULL)
     {
       linux_nat_debug_printf ("Using pending wait status %s for %s.",
-			      status_to_str (lp->status).c_str (),
+			      pending_status_str (lp).c_str (),
 			      lp->ptid.to_string ().c_str ());
     }
 
@@ -3606,28 +3619,21 @@ siginfo_fixup (siginfo_t *siginfo, gdb_byte *inf_siginfo, int direction)
 }
 
 static enum target_xfer_status
-linux_xfer_siginfo (enum target_object object,
+linux_xfer_siginfo (ptid_t ptid, enum target_object object,
 		    const char *annex, gdb_byte *readbuf,
 		    const gdb_byte *writebuf, ULONGEST offset, ULONGEST len,
 		    ULONGEST *xfered_len)
 {
-  int pid;
   siginfo_t siginfo;
   gdb_byte inf_siginfo[sizeof (siginfo_t)];
 
   gdb_assert (object == TARGET_OBJECT_SIGNAL_INFO);
   gdb_assert (readbuf || writebuf);
 
-  pid = inferior_ptid.lwp ();
-  if (pid == 0)
-    pid = inferior_ptid.pid ();
-
   if (offset > sizeof (siginfo))
     return TARGET_XFER_E_IO;
 
-  errno = 0;
-  ptrace (PTRACE_GETSIGINFO, pid, (PTRACE_TYPE_ARG3) 0, &siginfo);
-  if (errno != 0)
+  if (!linux_nat_get_siginfo (ptid, &siginfo))
     return TARGET_XFER_E_IO;
 
   /* When GDB is built as a 64-bit application, ptrace writes into
@@ -3650,6 +3656,7 @@ linux_xfer_siginfo (enum target_object object,
       /* Convert back to ptrace layout before flushing it out.  */
       siginfo_fixup (&siginfo, inf_siginfo, 1);
 
+      int pid = get_ptrace_pid (ptid);
       errno = 0;
       ptrace (PTRACE_SETSIGINFO, pid, (PTRACE_TYPE_ARG3) 0, &siginfo);
       if (errno != 0)
@@ -3667,8 +3674,9 @@ linux_nat_xfer_osdata (enum target_object object,
 		       ULONGEST *xfered_len);
 
 static enum target_xfer_status
-linux_proc_xfer_memory_partial (gdb_byte *readbuf, const gdb_byte *writebuf,
-				ULONGEST offset, LONGEST len, ULONGEST *xfered_len);
+linux_proc_xfer_memory_partial (int pid, gdb_byte *readbuf,
+				const gdb_byte *writebuf, ULONGEST offset,
+				LONGEST len, ULONGEST *xfered_len);
 
 enum target_xfer_status
 linux_nat_target::xfer_partial (enum target_object object,
@@ -3677,7 +3685,7 @@ linux_nat_target::xfer_partial (enum target_object object,
 				ULONGEST offset, ULONGEST len, ULONGEST *xfered_len)
 {
   if (object == TARGET_OBJECT_SIGNAL_INFO)
-    return linux_xfer_siginfo (object, annex, readbuf, writebuf,
+    return linux_xfer_siginfo (inferior_ptid, object, annex, readbuf, writebuf,
 			       offset, len, xfered_len);
 
   /* The target is connected but no live inferior is selected.  Pass
@@ -3713,8 +3721,9 @@ linux_nat_target::xfer_partial (enum target_object object,
 	 space, while the core was trying to write to the pre-exec
 	 address space.  */
       if (proc_mem_file_is_writable ())
-	return linux_proc_xfer_memory_partial (readbuf, writebuf,
-					       offset, len, xfered_len);
+	return linux_proc_xfer_memory_partial (inferior_ptid.pid (), readbuf,
+					       writebuf, offset, len,
+					       xfered_len);
     }
 
   return inf_ptrace_target::xfer_partial (object, annex, readbuf, writebuf,
@@ -3941,12 +3950,10 @@ linux_proc_xfer_memory_partial_fd (int fd, int pid,
    threads.  */
 
 static enum target_xfer_status
-linux_proc_xfer_memory_partial (gdb_byte *readbuf, const gdb_byte *writebuf,
-				ULONGEST offset, LONGEST len,
-				ULONGEST *xfered_len)
+linux_proc_xfer_memory_partial (int pid, gdb_byte *readbuf,
+				const gdb_byte *writebuf, ULONGEST offset,
+				LONGEST len, ULONGEST *xfered_len)
 {
-  int pid = inferior_ptid.pid ();
-
   auto iter = proc_mem_file_map.find (pid);
   if (iter == proc_mem_file_map.end ())
     return TARGET_XFER_EOF;
@@ -3961,7 +3968,11 @@ linux_proc_xfer_memory_partial (gdb_byte *readbuf, const gdb_byte *writebuf,
    return true if so.  It wasn't writable before Linux 2.6.39, but
    there's no way to know whether the feature was backported to older
    kernels.  So we check to see if it works.  The result is cached,
-   and this is garanteed to be called once early at startup.  */
+   and this is garanteed to be called once early during inferior
+   startup, so that any warning is printed out consistently between
+   GDB invocations.  Note we don't call it during GDB startup instead
+   though, because then we might warn with e.g. just "gdb --version"
+   on sandboxed systems.  See PR gdb/29907.  */
 
 static bool
 proc_mem_file_is_writable ()
@@ -4115,9 +4126,7 @@ linux_nat_target::static_tracepoint_markers_by_strid (const char *strid)
   /* Pause all */
   target_stop (ptid);
 
-  memcpy (s, "qTfSTM", sizeof ("qTfSTM"));
-  s[sizeof ("qTfSTM")] = 0;
-
+  strcpy (s, "qTfSTM");
   agent_run_command (pid, s, strlen (s) + 1);
 
   /* Unpause all.  */
@@ -4134,8 +4143,7 @@ linux_nat_target::static_tracepoint_markers_by_strid (const char *strid)
 	}
       while (*p++ == ',');	/* comma-separated list */
 
-      memcpy (s, "qTsSTM", sizeof ("qTsSTM"));
-      s[sizeof ("qTsSTM")] = 0;
+      strcpy (s, "qTsSTM");
       agent_run_command (pid, s, strlen (s) + 1);
       p = s;
     }
@@ -4270,7 +4278,7 @@ linux_nat_stop_lwp (struct lwp_info *lwp)
 
       if (debug_linux_nat)
 	{
-	  if (find_thread_ptid (linux_target, lwp->ptid)->stop_requested)
+	  if (linux_target->find_thread (lwp->ptid)->stop_requested)
 	    linux_nat_debug_printf ("already stopped/stop_requested %s",
 				    lwp->ptid.to_string ().c_str ());
 	  else
@@ -4443,23 +4451,11 @@ linux_nat_target::linux_nat_target ()
 
 /* See linux-nat.h.  */
 
-int
+bool
 linux_nat_get_siginfo (ptid_t ptid, siginfo_t *siginfo)
 {
-  int pid;
-
-  pid = ptid.lwp ();
-  if (pid == 0)
-    pid = ptid.pid ();
-
-  errno = 0;
-  ptrace (PTRACE_GETSIGINFO, pid, (PTRACE_TYPE_ARG3) 0, siginfo);
-  if (errno != 0)
-    {
-      memset (siginfo, 0, sizeof (*siginfo));
-      return 0;
-    }
-  return 1;
+  int pid = get_ptrace_pid (ptid);
+  return ptrace (PTRACE_GETSIGINFO, pid, (PTRACE_TYPE_ARG3) 0, siginfo) == 0;
 }
 
 /* See nat/linux-nat.h.  */
@@ -4508,8 +4504,6 @@ Enables printf debugging output."),
   sigemptyset (&blocked_mask);
 
   lwp_lwpid_htab_create ();
-
-  proc_mem_file_is_writable ();
 }
 
 

@@ -1,5 +1,5 @@
 /* expr.c -operands, expressions-
-   Copyright (C) 1987-2022 Free Software Foundation, Inc.
+   Copyright (C) 1987-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -48,15 +48,16 @@ struct expr_symbol_line {
 };
 
 static struct expr_symbol_line *expr_symbol_lines;
+
+static const expressionS zero = { .X_op = O_constant };
 
 /* Build a dummy symbol to hold a complex expression.  This is how we
    build expressions up out of other expressions.  The symbol is put
    into the fake section expr_section.  */
 
 symbolS *
-make_expr_symbol (expressionS *expressionP)
+make_expr_symbol (const expressionS *expressionP)
 {
-  expressionS zero;
   symbolS *symbolP;
   struct expr_symbol_line *n;
 
@@ -73,11 +74,6 @@ make_expr_symbol (expressionS *expressionP)
 	as_bad (_("bignum invalid"));
       else
 	as_bad (_("floating point number invalid"));
-      zero.X_op = O_constant;
-      zero.X_add_number = 0;
-      zero.X_unsigned = 0;
-      zero.X_extrabit = 0;
-      clean_up_expression (&zero);
       expressionP = &zero;
     }
 
@@ -130,12 +126,12 @@ expr_symbol_where (symbolS *sym, const char **pfile, unsigned int *pline)
 
 /* Look up a previously used .startof. / .sizeof. symbol, or make a fresh
    one.  */
+static symbolS **seen[2];
+static unsigned int nr_seen[2];
 
 static symbolS *
 symbol_lookup_or_make (const char *name, bool start)
 {
-  static symbolS **seen[2];
-  static unsigned int nr_seen[2];
   char *buf = concat (start ? ".startof." : ".sizeof.", name, NULL);
   symbolS *symbolP;
   unsigned int i;
@@ -149,8 +145,8 @@ symbol_lookup_or_make (const char *name, bool start)
 
     name = S_GET_NAME (symbolP);
     if ((symbols_case_sensitive
-	 ? strcasecmp (buf, name)
-	 : strcmp (buf, name)) == 0)
+	 ? strcmp (buf, name)
+	 : strcasecmp (buf, name)) == 0)
       {
 	free (buf);
 	return symbolP;
@@ -573,10 +569,6 @@ integer_constant (int radix, expressionS *expressionP)
 	  symbolP = symbol_find (name);
 	  if ((symbolP != NULL) && (S_IS_DEFINED (symbolP)))
 	    {
-	      /* Local labels are never absolute.  Don't waste time
-		 checking absoluteness.  */
-	      know (SEG_NORMAL (S_GET_SEGMENT (symbolP)));
-
 	      expressionP->X_op = O_symbol;
 	      expressionP->X_add_symbol = symbolP;
 	    }
@@ -604,11 +596,6 @@ integer_constant (int radix, expressionS *expressionP)
 	  name = fb_label_name (number, 1);
 	  symbolP = symbol_find_or_make (name);
 	  /* We have no need to check symbol properties.  */
-#ifndef many_segments
-	  /* Since "know" puts its arg into a "string", we
-	     can't have newlines in the argument.  */
-	  know (S_GET_SEGMENT (symbolP) == undefined_section || S_GET_SEGMENT (symbolP) == text_section || S_GET_SEGMENT (symbolP) == data_section);
-#endif
 	  expressionP->X_op = O_symbol;
 	  expressionP->X_add_symbol = symbolP;
 	  expressionP->X_add_number = 0;
@@ -758,6 +745,10 @@ current_location (expressionS *expressionp)
       expressionp->X_add_number = 0;
     }
 }
+
+#ifndef md_register_arithmetic
+# define md_register_arithmetic 1
+#endif
 
 /* In:	Input_line_pointer points to 1st char of operand, which may
 	be a space.
@@ -996,7 +987,7 @@ operand (expressionS *expressionP, enum expr_mode mode)
 	}	    
       else
 	input_line_pointer++;
-      SKIP_WHITESPACE ();
+      SKIP_ALL_WHITESPACE ();
       /* Here with input_line_pointer -> char after "(...)".  */
       return segment;
 
@@ -1135,6 +1126,14 @@ operand (expressionS *expressionP, enum expr_mode mode)
 		else
 		  expressionP->X_op = O_logical_not;
 		expressionP->X_add_number = 0;
+	      }
+	    else if (!md_register_arithmetic && expressionP->X_op == O_register)
+	      {
+		/* Convert to binary '+'.  */
+		expressionP->X_op_symbol = make_expr_symbol (expressionP);
+		expressionP->X_add_symbol = make_expr_symbol (&zero);
+		expressionP->X_add_number = 0;
+		expressionP->X_op = O_add;
 	      }
 	  }
 	else
@@ -1596,6 +1595,17 @@ expr_begin (void)
     e.X_op = O_max;
     gas_assert (e.X_op == O_max);
   }
+
+  memset (seen, 0, sizeof seen);
+  memset (nr_seen, 0, sizeof nr_seen);
+  expr_symbol_lines = NULL;
+}
+
+void
+expr_end (void)
+{
+  for (size_t i = 0; i < ARRAY_SIZE (seen); i++)
+    free (seen[i]);
 }
 
 /* Return the encoding for the operator at INPUT_LINE_POINTER, and
@@ -1889,9 +1899,6 @@ expr (int rankarg,		/* Larger # is higher rank.  */
 	}
       else
 #endif
-#ifndef md_register_arithmetic
-# define md_register_arithmetic 1
-#endif
       if (op_left == O_add && right.X_op == O_constant
 	  && (md_register_arithmetic || resultP->X_op != O_register))
 	{
@@ -1947,14 +1954,6 @@ expr (int rankarg,		/* Larger # is higher rank.  */
 	      as_warn (_("division by zero"));
 	      v = 1;
 	    }
-	  if ((valueT) v >= sizeof(valueT) * CHAR_BIT
-	      && (op_left == O_left_shift || op_left == O_right_shift))
-	    {
-	      as_warn_value_out_of_range (_("shift count"), v, 0,
-					  sizeof(valueT) * CHAR_BIT - 1,
-					  NULL, 0);
-	      resultP->X_add_number = v = 0;
-	    }
 	  switch (op_left)
 	    {
 	    default:			goto general;
@@ -1967,6 +1966,7 @@ expr (int rankarg,		/* Larger # is higher rank.  */
 	    case O_divide:		resultP->X_add_number /= v; break;
 	    case O_modulus:		resultP->X_add_number %= v; break;
 	    case O_left_shift:
+	    case O_right_shift:
 	      /* We always use unsigned shifts.  According to the ISO
 		 C standard, left shift of a signed type having a
 		 negative value is undefined behaviour, and right
@@ -1975,12 +1975,19 @@ expr (int rankarg,		/* Larger # is higher rank.  */
 		 when the result overflows is also undefined
 		 behaviour.  So don't trigger ubsan warnings or rely
 		 on characteristics of the compiler.  */
-	      resultP->X_add_number
-		= (valueT) resultP->X_add_number << (valueT) v;
-	      break;
-	    case O_right_shift:
-	      resultP->X_add_number
-		= (valueT) resultP->X_add_number >> (valueT) v;
+	      if ((valueT) v >= sizeof (valueT) * CHAR_BIT)
+		{
+		  as_warn_value_out_of_range (_("shift count"), v, 0,
+					      sizeof (valueT) * CHAR_BIT - 1,
+					      NULL, 0);
+		  resultP->X_add_number = 0;
+		}
+	      else if (op_left == O_left_shift)
+		resultP->X_add_number
+		  = (valueT) resultP->X_add_number << (valueT) v;
+	      else
+		resultP->X_add_number
+		  = (valueT) resultP->X_add_number >> (valueT) v;
 	      break;
 	    case O_bit_inclusive_or:	resultP->X_add_number |= v; break;
 	    case O_bit_or_not:		resultP->X_add_number |= ~v; break;
@@ -2309,8 +2316,18 @@ resolve_expression (expressionS *expressionP)
 	    return 0;
 	  left = (offsetT) left % (offsetT) right;
 	  break;
-	case O_left_shift:		left <<= right; break;
-	case O_right_shift:		left >>= right; break;
+	case O_left_shift:
+	  if (right >= sizeof (left) * CHAR_BIT)
+	    left = 0;
+	  else
+	    left <<= right;
+	  break;
+	case O_right_shift:
+	  if (right >= sizeof (left) * CHAR_BIT)
+	    left = 0;
+	  else
+	    left >>= right;
+	  break;
 	case O_bit_inclusive_or:	left |= right; break;
 	case O_bit_or_not:		left |= ~right; break;
 	case O_bit_exclusive_or:	left ^= right; break;
@@ -2371,12 +2388,17 @@ resolve_expression (expressionS *expressionP)
    here lessens the crowd at read.c.
 
    Assume input_line_pointer is at start of symbol name, or the
-    start of a double quote enclosed symbol name.
-   Advance input_line_pointer past symbol name.
-   Turn that character into a '\0', returning its former value,
-    which may be the closing double quote.
+   start of a double quote enclosed symbol name.  Advance
+   input_line_pointer past symbol name.  Turn that character into a '\0',
+   returning its former value, which may be the closing double quote.
+
    This allows a string compare (RMS wants symbol names to be strings)
-    of the symbol name.
+   of the symbol name.
+
+   NOTE: The input buffer is further altered when adjacent strings are
+   concatenated by the function.  Callers caring about the original buffer
+   contents will need to make a copy before calling here.
+
    There will always be a char following symbol name, because all good
    lines end in end-of-line.  */
 

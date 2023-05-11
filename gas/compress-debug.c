@@ -1,5 +1,5 @@
 /* compress-debug.c - compress debug sections
-   Copyright (C) 2010-2022 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -20,6 +20,7 @@
 
 #include "config.h"
 #include <stdio.h>
+#include <string.h>
 #include <zlib.h>
 #if HAVE_ZSTD
 #include <zstd.h>
@@ -39,10 +40,7 @@ compress_init (bool use_zstd)
   }
 
   static struct z_stream_s strm;
-
-  strm.zalloc = NULL;
-  strm.zfree = NULL;
-  strm.opaque = NULL;
+  memset (&strm, 0, sizeof (strm));
   deflateInit (&strm, Z_DEFAULT_COMPRESSION);
   return &strm;
 }

@@ -1,5 +1,5 @@
 /* PowerPC-specific support for 32-bit ELF
-   Copyright (C) 1994-2022 Free Software Foundation, Inc.
+   Copyright (C) 1994-2023 Free Software Foundation, Inc.
    Written by Ian Lance Taylor, Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -1087,6 +1087,7 @@ _bfd_elf_ppc_set_arch (bfd *abfd)
       s = bfd_get_section_by_name (abfd, APUINFO_SECTION_NAME);
       if (s != NULL
 	  && s->size >= 24
+	  && (s->flags & SEC_HAS_CONTENTS) != 0
 	  && bfd_malloc_and_get_section (abfd, s, &contents))
 	{
 	  unsigned int apuinfo_size = bfd_get_32 (abfd, contents + 4);
@@ -1840,7 +1841,8 @@ ppc_elf_get_synthetic_symtab (bfd *abfd, long symcount, asymbol **syms,
   /* If this object was prelinked, the prelinker stored the address
      of .glink at got[1].  If it wasn't prelinked, got[1] will be zero.  */
   dynamic = bfd_get_section_by_name (abfd, ".dynamic");
-  if (dynamic != NULL)
+  if (dynamic != NULL
+      && (dynamic->flags & SEC_HAS_CONTENTS) != 0)
     {
       bfd_byte *dynbuf, *extdyn, *extdynend;
       size_t extdynsize;
@@ -1918,7 +1920,7 @@ ppc_elf_get_synthetic_symtab (bfd *abfd, long symcount, asymbol **syms,
 	    }
     }
 
-  count = relplt->size / sizeof (Elf32_External_Rela);
+  count = NUM_SHDR_ENTRIES (&elf_section_data (relplt)->this_hdr);
   /* If the stubs are those for -shared/-pie then we might have
      multiple stubs for each plt entry.  If that is the case then
      there is no way to associate stubs with their plt entries short
@@ -4020,12 +4022,19 @@ ppc_elf_select_plt_layout (bfd *output_bfd ATTRIBUTE_UNUSED,
 	  htab->plt_type = plt_type;
 	}
     }
-  if (htab->plt_type == PLT_OLD && htab->params->plt_style == PLT_NEW)
+  if (htab->plt_type == PLT_OLD)
     {
-      if (htab->old_bfd != NULL)
-	_bfd_error_handler (_("bss-plt forced due to %pB"), htab->old_bfd);
-      else
-	_bfd_error_handler (_("bss-plt forced by profiling"));
+      if (!info->user_warn_rwx_segments)
+	info->no_warn_rwx_segments = 1;
+      if (htab->params->plt_style == PLT_NEW
+	  || (htab->params->plt_style != PLT_OLD
+	      && !info->no_warn_rwx_segments))
+	{
+	  if (htab->old_bfd != NULL)
+	    _bfd_error_handler (_("bss-plt forced due to %pB"), htab->old_bfd);
+	  else
+	    _bfd_error_handler (_("bss-plt forced by profiling"));
+	}
     }
 
   BFD_ASSERT (htab->plt_type != PLT_VXWORKS);
@@ -6099,6 +6108,7 @@ ppc_elf_relax_section (bfd *abfd,
   /* No need to do anything with non-alloc or non-code sections.  */
   if ((isec->flags & SEC_ALLOC) == 0
       || (isec->flags & SEC_CODE) == 0
+      || (isec->flags & SEC_HAS_CONTENTS) == 0
       || (isec->flags & SEC_LINKER_CREATED) != 0
       || isec->size < 4)
     return true;

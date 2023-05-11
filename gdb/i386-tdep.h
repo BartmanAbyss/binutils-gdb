@@ -1,6 +1,6 @@
 /* Target-dependent code for the i386.
 
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -353,7 +353,7 @@ enum record_i386_regnum
 /* Types for i386-specific registers.  */
 extern struct type *i387_ext_type (struct gdbarch *gdbarch);
 
-/* Checks of different pseudo-registers.  */
+/* Checks of different registers.  */
 extern int i386_byte_regnum_p (struct gdbarch *gdbarch, int regnum);
 extern int i386_word_regnum_p (struct gdbarch *gdbarch, int regnum);
 extern int i386_dword_regnum_p (struct gdbarch *gdbarch, int regnum);
@@ -448,7 +448,7 @@ extern displaced_step_copy_insn_closure_up i386_displaced_step_copy_insn
    struct regcache *regs);
 extern void i386_displaced_step_fixup
   (struct gdbarch *gdbarch, displaced_step_copy_insn_closure *closure,
-   CORE_ADDR from, CORE_ADDR to, regcache *regs);
+   CORE_ADDR from, CORE_ADDR to, regcache *regs, bool completed_p);
 
 /* Initialize a basic ELF architecture variant.  */
 extern void i386_elf_init_abi (struct gdbarch_info, struct gdbarch *);

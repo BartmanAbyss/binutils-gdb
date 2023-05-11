@@ -1,5 +1,5 @@
 /* YACC parser for Pascal expressions, for GDB.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -50,11 +50,7 @@
 #include "parser-defs.h"
 #include "language.h"
 #include "p-lang.h"
-#include "bfd.h" /* Required by objfiles.h.  */
-#include "symfile.h" /* Required by objfiles.h.  */
-#include "objfiles.h" /* For have_full_symbols and have_partial_symbols.  */
 #include "block.h"
-#include "completer.h"
 #include "expop.h"
 
 #define parse_type(ps) builtin_type (ps->gdbarch ())
@@ -542,7 +538,7 @@ exp	:	DOLLAR_VARIABLE
 			      value *val
 				= value_of_internalvar (pstate->gdbarch (),
 							intvar);
-			      current_type = value_type (val);
+			      current_type = val->type ();
 			    }
  			}
  	;
@@ -591,7 +587,7 @@ exp	:	THIS
 			  this_val
 			    = value_of_this_silent (pstate->language ());
 			  if (this_val)
-			    this_type = value_type (this_val);
+			    this_type = this_val->type ();
 			  else
 			    this_type = NULL;
 			  if (this_type)
@@ -707,7 +703,7 @@ variable:	name_not_typename
 			      this_val
 				= value_of_this_silent (pstate->language ());
 			      if (this_val)
-				this_type = value_type (this_val);
+				this_type = this_val->type ();
 			      else
 				this_type = NULL;
 			      if (this_type)

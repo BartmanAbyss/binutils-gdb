@@ -1,6 +1,6 @@
 /* Common target dependent code for GDB on AArch64 systems.
 
-   Copyright (C) 2009-2022 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GDB.
@@ -94,6 +94,8 @@ struct aarch64_gdbarch_tdep : gdbarch_tdep_base
   }
 
   int pauth_reg_base = 0;
+  /* Number of pauth masks.  */
+  int pauth_reg_count = 0;
   int ra_sign_state_regnum = 0;
 
   /* Returns true if the target supports pauth.  */
@@ -111,12 +113,13 @@ struct aarch64_gdbarch_tdep : gdbarch_tdep_base
     return mte_reg_base != -1;
   }
 
-  /* TLS register.  This is -1 if the TLS register is not available.  */
-  int tls_regnum = 0;
+  /* TLS registers.  This is -1 if the TLS registers are not available.  */
+  int tls_regnum_base = 0;
+  int tls_register_count = 0;
 
   bool has_tls() const
   {
-    return tls_regnum != -1;
+    return tls_regnum_base != -1;
   }
 
   /* The W pseudo-registers.  */
@@ -139,7 +142,7 @@ displaced_step_copy_insn_closure_up
 void aarch64_displaced_step_fixup (struct gdbarch *gdbarch,
 				   displaced_step_copy_insn_closure *dsc,
 				   CORE_ADDR from, CORE_ADDR to,
-				   struct regcache *regs);
+				   struct regcache *regs, bool completed_p);
 
 bool aarch64_displaced_step_hw_singlestep (struct gdbarch *gdbarch);
 

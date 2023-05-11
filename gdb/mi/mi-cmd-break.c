@@ -1,5 +1,5 @@
 /* MI Command Set - breakpoint and watchpoint commands.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Solutions (a Red Hat company).
 
    This file is part of GDB.
@@ -58,7 +58,7 @@ breakpoint_notify (struct breakpoint *b)
 	{
 	  print_breakpoint (b);
 	}
-      catch (const gdb_exception &ex)
+      catch (const gdb_exception_error &ex)
 	{
 	  exception_print (gdb_stderr, ex);
 	}
@@ -243,6 +243,8 @@ mi_cmd_break_insert_1 (int dprintf, const char *command, char **argv, int argc)
 	  break;
 	case THREAD_OPT:
 	  thread = atol (oarg);
+	  if (!valid_global_thread_id (thread))
+	    error (_("Unknown thread %d."), thread);
 	  break;
 	case PENDING_OPT:
 	  pending = 1;
@@ -564,7 +566,7 @@ mi_cmd_break_commands (const char *command, char **argv, int argc)
 
   int count = 1;
   auto reader
-    = [&] ()
+    = [&] (std::string &buffer)
       {
 	const char *result = nullptr;
 	if (count < argc)

@@ -1,5 +1,5 @@
 /* Darwin support for GDB, the GNU debugger.
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    Contributed by AdaCore.
 
@@ -81,7 +81,6 @@ macho_new_init (struct objfile *objfile)
 static void
 macho_symfile_init (struct objfile *objfile)
 {
-  objfile->flags |= OBJF_REORDERED;
 }
 
 /* Add symbol SYM to the minimal symbol table of OBJFILE.  */
@@ -99,11 +98,11 @@ macho_symtab_add_minsym (minimal_symbol_reader &reader,
 
   if (sym->flags & (BSF_GLOBAL | BSF_LOCAL | BSF_WEAK))
     {
-      CORE_ADDR symaddr;
+      unrelocated_addr symaddr;
       enum minimal_symbol_type ms_type;
 
       /* Bfd symbols are section relative.  */
-      symaddr = sym->value + sym->section->vma;
+      symaddr = unrelocated_addr (sym->value + sym->section->vma);
 
       if (sym->section == bfd_abs_section_ptr)
 	ms_type = mst_abs;
@@ -586,8 +585,7 @@ macho_add_oso_symfile (oso_el *oso, const gdb_bfd_ref_ptr &abfd,
   symbol_file_add_from_bfd
     (abfd, name, symfile_flags & ~(SYMFILE_MAINLINE | SYMFILE_VERBOSE),
      NULL,
-     main_objfile->flags & (OBJF_REORDERED | OBJF_SHARED
-			    | OBJF_READNOW | OBJF_USERLOADED),
+     main_objfile->flags & (OBJF_SHARED | OBJF_READNOW | OBJF_USERLOADED),
      main_objfile);
 }
 
@@ -895,7 +893,6 @@ macho_symfile_offsets (struct objfile *objfile,
 		       const section_addr_info &addrs)
 {
   unsigned int i;
-  struct obj_section *osect;
 
   /* Allocate section_offsets.  */
   objfile->section_offsets.assign (gdb_bfd_count_sections (objfile->obfd.get ()), 0);
@@ -911,7 +908,7 @@ macho_symfile_offsets (struct objfile *objfile,
 
   for (i = 0; i < addrs.size (); i++)
     {
-      ALL_OBJFILE_OSECTIONS (objfile, osect)
+      for (obj_section *osect : objfile->sections ())
 	{
 	  const char *bfd_sect_name = osect->the_bfd_section->name;
 
@@ -925,10 +922,10 @@ macho_symfile_offsets (struct objfile *objfile,
 
   objfile->sect_index_text = 0;
 
-  ALL_OBJFILE_OSECTIONS (objfile, osect)
+  for (obj_section *osect : objfile->sections ())
     {
       const char *bfd_sect_name = osect->the_bfd_section->name;
-      int sect_index = osect - objfile->sections;;
+      int sect_index = osect - objfile->sections_start;
 
       if (startswith (bfd_sect_name, "LC_SEGMENT."))
 	bfd_sect_name += 11;

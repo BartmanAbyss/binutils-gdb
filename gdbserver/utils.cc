@@ -1,5 +1,5 @@
 /* General utility routines for the remote server for GDB.
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -49,28 +49,6 @@ malloc_failure (long size)
 	   PREFIX "ran out of memory while trying to allocate %lu bytes\n",
 	   (unsigned long) size);
   abort_or_exit ();
-}
-
-/* Print the system error message for errno, and also mention STRING
-   as the file name for which the error was encountered.
-   Then return to command level.  */
-
-void
-perror_with_name (const char *string)
-{
-  const char *err;
-  char *combined;
-
-  err = safe_strerror (errno);
-  if (err == NULL)
-    err = "unknown error";
-
-  combined = (char *) alloca (strlen (err) + strlen (string) + 3);
-  strcpy (combined, string);
-  strcat (combined, ": ");
-  strcat (combined, err);
-
-  error ("%s.", combined);
 }
 
 /* Print an error message and return to top level.  */

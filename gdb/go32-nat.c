@@ -1,5 +1,5 @@
 /* Native debugging support for Intel x86 running DJGPP.
-   Copyright (C) 1997-2022 Free Software Foundation, Inc.
+   Copyright (C) 1997-2023 Free Software Foundation, Inc.
    Written by Robert Hoehne.
 
    This file is part of GDB.
@@ -154,7 +154,6 @@ static void load_npx (void);	/* Restore the FPU of the debugged program.  */
 
 /* ------------------------------------------------------------------------- */
 /* Store the contents of the NPX in the global variable `npx'.  */
-/* *INDENT-OFF* */
 
 static void
 save_npx (void)
@@ -175,7 +174,6 @@ save_npx (void)
 :     "%eax");
 }
 
-/* *INDENT-ON* */
 
 
 /* ------------------------------------------------------------------------- */

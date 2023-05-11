@@ -1,5 +1,5 @@
 /* Symbol, variable and name lookup.
-   Copyright (C) 2019-2022 Free Software Foundation, Inc.
+   Copyright (C) 2019-2023 Free Software Foundation, Inc.
 
    This file is part of libctf.
 
@@ -402,7 +402,13 @@ ctf_lookup_variable (ctf_dict_t *fp, const char *name)
   if (ent == NULL)
     {
       if (fp->ctf_parent != NULL)
-	return ctf_lookup_variable (fp->ctf_parent, name);
+        {
+          ctf_id_t ptype;
+
+          if ((ptype = ctf_lookup_variable (fp->ctf_parent, name)) != CTF_ERR)
+            return ptype;
+          return (ctf_set_errno (fp, ctf_errno (fp->ctf_parent)));
+        }
 
       return (ctf_set_errno (fp, ECTF_NOTYPEDAT));
     }
@@ -626,7 +632,16 @@ ctf_lookup_symbol_idx (ctf_dict_t *fp, const char *symname)
 
  try_parent:
   if (fp->ctf_parent)
-    return ctf_lookup_symbol_idx (fp->ctf_parent, symname);
+    {
+      unsigned long psym;
+
+      if ((psym = ctf_lookup_symbol_idx (fp->ctf_parent, symname))
+          != (unsigned long) -1)
+        return psym;
+
+      ctf_set_errno (fp, ctf_errno (fp->ctf_parent));
+      return (unsigned long) -1;
+    }
   else
     {
       ctf_set_errno (fp, err);
@@ -651,7 +666,7 @@ ctf_id_t
 ctf_symbol_next (ctf_dict_t *fp, ctf_next_t **it, const char **name,
 		 int functions)
 {
-  ctf_id_t sym;
+  ctf_id_t sym = CTF_ERR;
   ctf_next_t *i = *it;
   int err;
 

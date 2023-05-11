@@ -1,6 +1,6 @@
 /* Language independent support for printing types for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -125,7 +125,7 @@ void
 print_offset_data::update (struct type *type, unsigned int field_idx,
 			   struct ui_file *stream)
 {
-  if (field_is_static (&type->field (field_idx)))
+  if (type->field (field_idx).is_static ())
     {
       print_spaces (indentation, stream);
       return;
@@ -309,7 +309,6 @@ const char *
 typedef_hash_table::find_global_typedef (const struct type_print_options *flags,
 					 struct type *t)
 {
-  char *applied;
   void **slot;
   struct decl_field tf, *new_tf;
 
@@ -334,14 +333,12 @@ typedef_hash_table::find_global_typedef (const struct type_print_options *flags,
 
   *slot = new_tf;
 
-  applied = apply_ext_lang_type_printers (flags->global_printers, t);
+  gdb::unique_xmalloc_ptr<char> applied
+    = apply_ext_lang_type_printers (flags->global_printers, t);
 
-  if (applied != NULL)
-    {
-      new_tf->name = obstack_strdup (&flags->global_typedefs->m_storage,
-				     applied);
-      xfree (applied);
-    }
+  if (applied != nullptr)
+    new_tf->name = obstack_strdup (&flags->global_typedefs->m_storage,
+				   applied.get ());
 
   return new_tf->name;
 }
@@ -514,8 +511,8 @@ whatis_exp (const char *exp, int show)
 	 "whatis" prints the type of the expression without stripping
 	 any typedef level.  "ptype" always strips all levels of
 	 typedefs.  */
-      val = evaluate_type (expr.get ());
-      type = value_type (val);
+      val = expr->evaluate_type ();
+      type = val->type ();
 
       if (show == -1 && expr->first_opcode () == OP_TYPE)
 	{
@@ -536,7 +533,13 @@ whatis_exp (const char *exp, int show)
   else
     {
       val = access_value_history (0);
-      type = value_type (val);
+      type = val->type ();
+    }
+
+  if (flags.print_offsets && is_dynamic_type (type))
+    {
+      warning (_("ptype/o does not work with dynamic types; disabling '/o'"));
+      flags.print_offsets = 0;
     }
 
   get_user_print_options (&opts);
@@ -705,8 +708,8 @@ maintenance_print_type (const char *type_name, int from_tty)
   if (type_name != NULL)
     {
       expression_up expr = parse_expression (type_name);
-      struct value *val = evaluate_type (expr.get ());
-      struct type *type = value_type (val);
+      struct value *val = expr->evaluate_type ();
+      struct type *type = val->type ();
 
       if (type != nullptr)
 	recursive_dump_type (type, 0);
@@ -839,9 +842,9 @@ Available FLAGS are:\n\
   /T    print typedefs defined in a class\n\
   /o    print offsets and sizes of fields in a struct (like pahole)\n\
   /x    use hexadecimal notation when displaying sizes and offsets\n\
-        of struct members\n\
+	of struct members\n\
   /d    use decimal notation when displaying sizes and offsets\n\
-        of struct members "));
+	of struct members "));
   set_cmd_completer (c, expression_completer);
 
   c = add_com ("whatis", class_vars, whatis_command,

@@ -1,7 +1,7 @@
 /* Target-struct-independent code to start (run) and stop an inferior
    process.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -34,6 +34,7 @@
 #include "annotate.h"
 #include "symfile.h"
 #include "top.h"
+#include "ui.h"
 #include "inf-loop.h"
 #include "regcache.h"
 #include "value.h"
@@ -73,6 +74,8 @@
 #include "test-target.h"
 #include "gdbsupport/common-debug.h"
 #include "gdbsupport/buildargv.h"
+#include "extension.h"
+#include "disasm.h"
 
 /* Prototypes for local functions */
 
@@ -149,10 +152,29 @@ show_step_stop_if_no_debug (struct ui_file *file, int from_tty,
 }
 
 /* proceed and normal_stop use this to notify the user when the
-   inferior stopped in a different thread than it had been running
-   in.  */
+   inferior stopped in a different thread than it had been running in.
+   It can also be used to find for which thread normal_stop last
+   reported a stop.  */
+static thread_info_ref previous_thread;
 
-static ptid_t previous_inferior_ptid;
+/* See infrun.h.  */
+
+void
+update_previous_thread ()
+{
+  if (inferior_ptid == null_ptid)
+    previous_thread = nullptr;
+  else
+    previous_thread = thread_info_ref::new_reference (inferior_thread ());
+}
+
+/* See infrun.h.  */
+
+thread_info *
+get_previous_thread ()
+{
+  return previous_thread.get ();
+}
 
 /* If set (default for legacy reasons), when following a fork, GDB
    will detach from one of the fork branches, child or parent.
@@ -478,7 +500,7 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
 	  child_inf->attach_flag = parent_inf->attach_flag;
 	  copy_terminal_info (child_inf, parent_inf);
 	  child_inf->gdbarch = parent_inf->gdbarch;
-	  copy_inferior_target_desc_info (child_inf, parent_inf);
+	  child_inf->tdesc_info = parent_inf->tdesc_info;
 
 	  child_inf->symfile_flags = SYMFILE_NO_READ;
 
@@ -495,15 +517,15 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
 		 with the shared region.  Keep track of the
 		 parent.  */
 	      child_inf->vfork_parent = parent_inf;
-	      child_inf->pending_detach = 0;
+	      child_inf->pending_detach = false;
 	      parent_inf->vfork_child = child_inf;
-	      parent_inf->pending_detach = 0;
+	      parent_inf->pending_detach = false;
 	    }
 	  else
 	    {
 	      child_inf->aspace = new address_space ();
 	      child_inf->pspace = new program_space (child_inf->aspace);
-	      child_inf->removable = 1;
+	      child_inf->removable = true;
 	      clone_program_space (child_inf->pspace, parent_inf->pspace);
 	    }
 	}
@@ -546,7 +568,7 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
       child_inf->attach_flag = parent_inf->attach_flag;
       copy_terminal_info (child_inf, parent_inf);
       child_inf->gdbarch = parent_inf->gdbarch;
-      copy_inferior_target_desc_info (child_inf, parent_inf);
+      child_inf->tdesc_info = parent_inf->tdesc_info;
 
       if (has_vforked)
 	{
@@ -585,7 +607,7 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
 	{
 	  child_inf->aspace = new address_space ();
 	  child_inf->pspace = new program_space (child_inf->aspace);
-	  child_inf->removable = 1;
+	  child_inf->removable = true;
 	  child_inf->symfile_flags = SYMFILE_NO_READ;
 	  clone_program_space (child_inf->pspace, parent_inf->pspace);
 	}
@@ -602,6 +624,8 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
      from CHILD_PTID.  */
   target_follow_fork (child_inf, child_ptid, fork_kind, follow_child,
 		      detach_fork);
+
+  gdb::observers::inferior_forked.notify (parent_inf, child_inf, fork_kind);
 
   /* target_follow_fork must leave the parent as the current inferior.  If we
      want to follow the child, we make it the current one below.  */
@@ -625,7 +649,7 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
 
      The former case will have pending_follow cleared, the later will have
      pending_follow set.  */
-  thread_info *parent_thread = find_thread_ptid (parent_inf, parent_ptid);
+  thread_info *parent_thread = parent_inf->find_thread (parent_ptid);
   gdb_assert (parent_thread != nullptr);
   parent_thread->pending_follow.set_spurious ();
 
@@ -647,7 +671,7 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
 	  gdb_assert (child_inf->vfork_parent == nullptr);
 	  gdb_assert (parent_inf->vfork_child == nullptr);
 	  child_inf->vfork_parent = parent_inf;
-	  child_inf->pending_detach = 0;
+	  child_inf->pending_detach = false;
 	  parent_inf->vfork_child = child_inf;
 	  parent_inf->pending_detach = detach_fork;
 	}
@@ -673,7 +697,7 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
   if (child_inf != nullptr)
     {
       /* If FOLLOW_CHILD, we leave CHILD_INF as the current inferior
-         (do not restore the parent as the current inferior).  */
+	 (do not restore the parent as the current inferior).  */
       gdb::optional<scoped_restore_current_thread> maybe_restore;
 
       if (!follow_child)
@@ -684,6 +708,15 @@ holding the child stopped.  Try \"set detach-on-fork\" or \
     }
 
   return false;
+}
+
+/* Set the last target status as TP having stopped.  */
+
+static void
+set_last_target_status_stopped (thread_info *tp)
+{
+  set_last_target_status (tp->inf->process_target (), tp->ptid,
+			  target_waitstatus {}.set_stopped (GDB_SIGNAL_0));
 }
 
 /* Tell the target to follow the fork we're stopped at.  Returns true
@@ -710,32 +743,76 @@ follow_fork ()
 
   if (!non_stop)
     {
-      process_stratum_target *wait_target;
-      ptid_t wait_ptid;
-      struct target_waitstatus wait_status;
+      thread_info *cur_thr = inferior_thread ();
 
-      /* Get the last target status returned by target_wait().  */
-      get_last_target_status (&wait_target, &wait_ptid, &wait_status);
+      ptid_t resume_ptid
+	= user_visible_resume_ptid (cur_thr->control.stepping_command);
+      process_stratum_target *resume_target
+	= user_visible_resume_target (resume_ptid);
 
-      /* If not stopped at a fork event, then there's nothing else to
-	 do.  */
-      if (wait_status.kind () != TARGET_WAITKIND_FORKED
-	  && wait_status.kind () != TARGET_WAITKIND_VFORKED)
-	return 1;
-
-      /* Check if we switched over from WAIT_PTID, since the event was
-	 reported.  */
-      if (wait_ptid != minus_one_ptid
-	  && (current_inferior ()->process_target () != wait_target
-	      || inferior_ptid != wait_ptid))
+      /* Check if there's a thread that we're about to resume, other
+	 than the current, with an unfollowed fork/vfork.  If so,
+	 switch back to it, to tell the target to follow it (in either
+	 direction).  We'll afterwards refuse to resume, and inform
+	 the user what happened.  */
+      for (thread_info *tp : all_non_exited_threads (resume_target,
+						     resume_ptid))
 	{
-	  /* We did.  Switch back to WAIT_PTID thread, to tell the
-	     target to follow it (in either direction).  We'll
-	     afterwards refuse to resume, and inform the user what
-	     happened.  */
-	  thread_info *wait_thread = find_thread_ptid (wait_target, wait_ptid);
-	  switch_to_thread (wait_thread);
-	  should_resume = false;
+	  if (tp == cur_thr)
+	    continue;
+
+	  /* follow_fork_inferior clears tp->pending_follow, and below
+	     we'll need the value after the follow_fork_inferior
+	     call.  */
+	  target_waitkind kind = tp->pending_follow.kind ();
+
+	  if (kind != TARGET_WAITKIND_SPURIOUS)
+	    {
+	      infrun_debug_printf ("need to follow-fork [%s] first",
+				   tp->ptid.to_string ().c_str ());
+
+	      switch_to_thread (tp);
+
+	      /* Set up inferior(s) as specified by the caller, and
+		 tell the target to do whatever is necessary to follow
+		 either parent or child.  */
+	      if (follow_child)
+		{
+		  /* The thread that started the execution command
+		     won't exist in the child.  Abort the command and
+		     immediately stop in this thread, in the child,
+		     inside fork.  */
+		  should_resume = false;
+		}
+	      else
+		{
+		  /* Following the parent, so let the thread fork its
+		     child freely, it won't influence the current
+		     execution command.  */
+		  if (follow_fork_inferior (follow_child, detach_fork))
+		    {
+		      /* Target refused to follow, or there's some
+			 other reason we shouldn't resume.  */
+		      switch_to_thread (cur_thr);
+		      set_last_target_status_stopped (cur_thr);
+		      return false;
+		    }
+
+		  /* If we're following a vfork, when we need to leave
+		     the just-forked thread as selected, as we need to
+		     solo-resume it to collect the VFORK_DONE event.
+		     If we're following a fork, however, switch back
+		     to the original thread that we continue stepping
+		     it, etc.  */
+		  if (kind != TARGET_WAITKIND_VFORKED)
+		    {
+		      gdb_assert (kind == TARGET_WAITKIND_FORKED);
+		      switch_to_thread (cur_thr);
+		    }
+		}
+
+	      break;
+	    }
 	}
     }
 
@@ -799,21 +876,16 @@ follow_fork ()
 	  }
 	else
 	  {
-	    /* This makes sure we don't try to apply the "Switched
-	       over from WAIT_PID" logic above.  */
-	    nullify_last_target_wait_ptid ();
-
 	    /* If we followed the child, switch to it...  */
 	    if (follow_child)
 	      {
-		thread_info *child_thr = find_thread_ptid (parent_targ, child);
-		switch_to_thread (child_thr);
+		tp = parent_targ->find_thread (child);
+		switch_to_thread (tp);
 
 		/* ... and preserve the stepping state, in case the
 		   user was stepping over the fork call.  */
 		if (should_resume)
 		  {
-		    tp = inferior_thread ();
 		    tp->control.step_resume_breakpoint
 		      = step_resume_breakpoint;
 		    tp->control.step_range_start = step_range_start;
@@ -852,6 +924,8 @@ follow_fork ()
       break;
     }
 
+  if (!should_resume)
+    set_last_target_status_stopped (tp);
   return should_resume;
 }
 
@@ -942,7 +1016,7 @@ handle_vfork_child_exec_or_exit (int exec)
 
 	  /* follow-fork child, detach-on-fork on.  */
 
-	  vfork_parent->pending_detach = 0;
+	  vfork_parent->pending_detach = false;
 
 	  scoped_restore_current_pspace_and_thread restore_thread;
 
@@ -998,7 +1072,7 @@ handle_vfork_child_exec_or_exit (int exec)
 	     child a new address space.  */
 	  inf->pspace = new program_space (maybe_new_address_space ());
 	  inf->aspace = inf->pspace->aspace;
-	  inf->removable = 1;
+	  inf->removable = true;
 	  set_current_program_space (inf->pspace);
 
 	  resume_parent = vfork_parent;
@@ -1023,7 +1097,7 @@ handle_vfork_child_exec_or_exit (int exec)
 	  inf->pspace = new program_space (maybe_new_address_space ());
 	  inf->aspace = inf->pspace->aspace;
 	  set_current_program_space (inf->pspace);
-	  inf->removable = 1;
+	  inf->removable = true;
 	  inf->symfile_flags = SYMFILE_NO_READ;
 	  clone_program_space (inf->pspace, vfork_parent->pspace);
 
@@ -1222,7 +1296,8 @@ follow_exec (ptid_t ptid, const char *exec_file_target)
      previous incarnation of this process.  */
   no_shared_libraries (nullptr, 0);
 
-  struct inferior *inf = current_inferior ();
+  inferior *execing_inferior = current_inferior ();
+  inferior *following_inferior;
 
   if (follow_exec_mode_string == follow_exec_mode_new)
     {
@@ -1233,19 +1308,19 @@ follow_exec (ptid_t ptid, const char *exec_file_target)
 	 inferior's pid.  Having two inferiors with the same pid would confuse
 	 find_inferior_p(t)id.  Transfer the terminal state and info from the
 	  old to the new inferior.  */
-      inferior *new_inferior = add_inferior_with_spaces ();
+      following_inferior = add_inferior_with_spaces ();
 
-      swap_terminal_info (new_inferior, inf);
-      exit_inferior_silent (inf);
+      swap_terminal_info (following_inferior, execing_inferior);
+      exit_inferior_silent (execing_inferior);
 
-      new_inferior->pid = pid;
-      target_follow_exec (new_inferior, ptid, exec_file_target);
-
-      /* We continue with the new inferior.  */
-      inf = new_inferior;
+      following_inferior->pid = pid;
     }
   else
     {
+      /* follow-exec-mode is "same", we continue execution in the execing
+	 inferior.  */
+      following_inferior = execing_inferior;
+
       /* The old description may no longer be fit for the new image.
 	 E.g, a 64-bit process exec'ed a 32-bit process.  Clear the
 	 old description; we'll read a new one below.  No need to do
@@ -1253,18 +1328,20 @@ follow_exec (ptid_t ptid, const char *exec_file_target)
 	 around (its description is later cleared/refetched on
 	 restart).  */
       target_clear_description ();
-      target_follow_exec (inf, ptid, exec_file_target);
     }
 
-  gdb_assert (current_inferior () == inf);
-  gdb_assert (current_program_space == inf->pspace);
+  target_follow_exec (following_inferior, ptid, exec_file_target);
+
+  gdb_assert (current_inferior () == following_inferior);
+  gdb_assert (current_program_space == following_inferior->pspace);
 
   /* Attempt to open the exec file.  SYMFILE_DEFER_BP_RESET is used
      because the proper displacement for a PIE (Position Independent
      Executable) main symbol file will only be computed by
      solib_create_inferior_hook below.  breakpoint_re_set would fail
      to insert the breakpoints with the zero displacement.  */
-  try_open_exec_file (exec_file_host.get (), inf, SYMFILE_DEFER_BP_RESET);
+  try_open_exec_file (exec_file_host.get (), following_inferior,
+		      SYMFILE_DEFER_BP_RESET);
 
   /* If the target can specify a description, read it.  Must do this
      after flipping to the new executable (because the target supplied
@@ -1274,7 +1351,7 @@ follow_exec (ptid_t ptid, const char *exec_file_target)
      registers.  */
   target_find_description ();
 
-  gdb::observers::inferior_execd.notify (inf);
+  gdb::observers::inferior_execd.notify (execing_inferior, following_inferior);
 
   breakpoint_re_set ();
 
@@ -1551,15 +1628,15 @@ infrun_inferior_exit (struct inferior *inf)
 }
 
 static void
-infrun_inferior_execd (inferior *inf)
+infrun_inferior_execd (inferior *exec_inf, inferior *follow_inf)
 {
   /* If some threads where was doing a displaced step in this inferior at the
      moment of the exec, they no longer exist.  Even if the exec'ing thread
      doing a displaced step, we don't want to to any fixup nor restore displaced
      stepping buffer bytes.  */
-  inf->displaced_step_state.reset ();
+  follow_inf->displaced_step_state.reset ();
 
-  for (thread_info *thread : inf->threads ())
+  for (thread_info *thread : follow_inf->threads ())
     thread->displaced_step_state.reset ();
 
   /* Since an in-line step is done with everything else stopped, if there was
@@ -1567,7 +1644,7 @@ infrun_inferior_execd (inferior *inf)
      thread.  */
   clear_step_over_info ();
 
-  inf->thread_waiting_for_vfork_done = nullptr;
+  follow_inf->thread_waiting_for_vfork_done = nullptr;
 }
 
 /* If ON, and the architecture supports it, GDB will use displaced
@@ -1654,24 +1731,6 @@ displaced_step_reset (displaced_step_thread_state *displaced)
 
 using displaced_step_reset_cleanup = FORWARD_SCOPE_EXIT (displaced_step_reset);
 
-/* See infrun.h.  */
-
-std::string
-displaced_step_dump_bytes (const gdb_byte *buf, size_t len)
-{
-  std::string ret;
-
-  for (size_t i = 0; i < len; i++)
-    {
-      if (i == 0)
-	ret += string_printf ("%02x", buf[i]);
-      else
-	ret += string_printf (" %02x", buf[i]);
-    }
-
-  return ret;
-}
-
 /* Prepare to single-step, using displaced stepping.
 
    Note that we cannot use displaced stepping when we have a signal to
@@ -1737,6 +1796,30 @@ displaced_step_prepare_throw (thread_info *tp)
   CORE_ADDR original_pc = regcache_read_pc (regcache);
   CORE_ADDR displaced_pc;
 
+  /* Display the instruction we are going to displaced step.  */
+  if (debug_displaced)
+    {
+      string_file tmp_stream;
+      int dislen = gdb_print_insn (gdbarch, original_pc, &tmp_stream,
+				   nullptr);
+
+      if (dislen > 0)
+	{
+	  gdb::byte_vector insn_buf (dislen);
+	  read_memory (original_pc, insn_buf.data (), insn_buf.size ());
+
+	  std::string insn_bytes = bytes_to_string (insn_buf);
+
+	  displaced_debug_printf ("original insn %s: %s \t %s",
+				  paddress (gdbarch, original_pc),
+				  insn_bytes.c_str (),
+				  tmp_stream.string ().c_str ());
+	}
+      else
+	displaced_debug_printf ("original insn %s: invalid length: %d",
+				paddress (gdbarch, original_pc), dislen);
+    }
+
   displaced_step_prepare_status status
     = gdbarch_displaced_step_prepare (gdbarch, tp, displaced_pc);
 
@@ -1774,6 +1857,47 @@ displaced_step_prepare_throw (thread_info *tp)
 			  tp->ptid.to_string ().c_str (),
 			  paddress (gdbarch, original_pc),
 			  paddress (gdbarch, displaced_pc));
+
+  /* Display the new displaced instruction(s).  */
+  if (debug_displaced)
+    {
+      string_file tmp_stream;
+      CORE_ADDR addr = displaced_pc;
+
+      /* If displaced stepping is going to use h/w single step then we know
+	 that the replacement instruction can only be a single instruction,
+	 in that case set the end address at the next byte.
+
+	 Otherwise the displaced stepping copy instruction routine could
+	 have generated multiple instructions, and all we know is that they
+	 must fit within the LEN bytes of the buffer.  */
+      CORE_ADDR end
+	= addr + (gdbarch_displaced_step_hw_singlestep (gdbarch)
+		  ? 1 : gdbarch_displaced_step_buffer_length (gdbarch));
+
+      while (addr < end)
+	{
+	  int dislen = gdb_print_insn (gdbarch, addr, &tmp_stream, nullptr);
+	  if (dislen <= 0)
+	    {
+	      displaced_debug_printf
+		("replacement insn %s: invalid length: %d",
+		 paddress (gdbarch, addr), dislen);
+	      break;
+	    }
+
+	  gdb::byte_vector insn_buf (dislen);
+	  read_memory (addr, insn_buf.data (), insn_buf.size ());
+
+	  std::string insn_bytes = bytes_to_string (insn_buf);
+	  std::string insn_str = tmp_stream.release ();
+	  displaced_debug_printf ("replacement insn %s: %s \t %s",
+				  paddress (gdbarch, addr),
+				  insn_bytes.c_str (),
+				  insn_str.c_str ());
+	  addr += dislen;
+	}
+    }
 
   return DISPLACED_STEP_PREPARE_STATUS_OK;
 }
@@ -1825,7 +1949,8 @@ displaced_step_prepare (thread_info *thread)
    DISPLACED_STEP_FINISH_STATUS_OK as well.  */
 
 static displaced_step_finish_status
-displaced_step_finish (thread_info *event_thread, enum gdb_signal signal)
+displaced_step_finish (thread_info *event_thread,
+		       const target_waitstatus &event_status)
 {
   displaced_step_thread_state *displaced = &event_thread->displaced_step_state;
 
@@ -1847,61 +1972,39 @@ displaced_step_finish (thread_info *event_thread, enum gdb_signal signal)
   /* Do the fixup, and release the resources acquired to do the displaced
      step. */
   return gdbarch_displaced_step_finish (displaced->get_original_gdbarch (),
-					event_thread, signal);
+					event_thread, event_status);
 }
 
 /* Data to be passed around while handling an event.  This data is
    discarded between events.  */
 struct execution_control_state
 {
-  execution_control_state ()
+  explicit execution_control_state (thread_info *thr = nullptr)
+    : ptid (thr == nullptr ? null_ptid : thr->ptid),
+      event_thread (thr)
   {
-    this->reset ();
   }
 
-  void reset ()
-  {
-    this->target = nullptr;
-    this->ptid = null_ptid;
-    this->event_thread = nullptr;
-    ws = target_waitstatus ();
-    stop_func_filled_in = 0;
-    stop_func_start = 0;
-    stop_func_end = 0;
-    stop_func_name = nullptr;
-    wait_some_more = 0;
-    hit_singlestep_breakpoint = 0;
-  }
-
-  process_stratum_target *target;
+  process_stratum_target *target = nullptr;
   ptid_t ptid;
   /* The thread that got the event, if this was a thread event; NULL
      otherwise.  */
   struct thread_info *event_thread;
 
   struct target_waitstatus ws;
-  int stop_func_filled_in;
-  CORE_ADDR stop_func_start;
-  CORE_ADDR stop_func_end;
-  const char *stop_func_name;
-  int wait_some_more;
+  int stop_func_filled_in = 0;
+  CORE_ADDR stop_func_alt_start = 0;
+  CORE_ADDR stop_func_start = 0;
+  CORE_ADDR stop_func_end = 0;
+  const char *stop_func_name = nullptr;
+  int wait_some_more = 0;
 
   /* True if the event thread hit the single-step breakpoint of
      another thread.  Thus the event doesn't cause a stop, the thread
      needs to be single-stepped past the single-step breakpoint before
      we can switch back to the original stepping thread.  */
-  int hit_singlestep_breakpoint;
+  int hit_singlestep_breakpoint = 0;
 };
-
-/* Clear ECS and set it to point at TP.  */
-
-static void
-reset_ecs (struct execution_control_state *ecs, struct thread_info *tp)
-{
-  ecs->reset ();
-  ecs->event_thread = tp;
-  ecs->ptid = tp->ptid;
-}
 
 static void keep_going_pass_signal (struct execution_control_state *ecs);
 static void prepare_to_wait (struct execution_control_state *ecs);
@@ -1955,8 +2058,6 @@ start_step_over (void)
 
   for (thread_info *tp : range)
     {
-      struct execution_control_state ecss;
-      struct execution_control_state *ecs = &ecss;
       step_over_what step_what;
       int must_be_in_line;
 
@@ -2027,10 +2128,10 @@ start_step_over (void)
 	continue;
 
       switch_to_thread (tp);
-      reset_ecs (ecs, tp);
-      keep_going_pass_signal (ecs);
+      execution_control_state ecs (tp);
+      keep_going_pass_signal (&ecs);
 
-      if (!ecs->wait_some_more)
+      if (!ecs.wait_some_more)
 	error (_("Command aborted."));
 
       /* If the thread's step over could not be initiated because no buffers
@@ -2199,6 +2300,29 @@ user_visible_resume_target (ptid_t resume_ptid)
 	  : current_inferior ()->process_target ());
 }
 
+/* Find a thread from the inferiors that we'll resume that is waiting
+   for a vfork-done event.  */
+
+static thread_info *
+find_thread_waiting_for_vfork_done ()
+{
+  gdb_assert (!target_is_non_stop_p ());
+
+  if (sched_multi)
+    {
+      for (inferior *inf : all_non_exited_inferiors ())
+	if (inf->thread_waiting_for_vfork_done != nullptr)
+	  return inf->thread_waiting_for_vfork_done;
+    }
+  else
+    {
+      inferior *cur_inf = current_inferior ();
+      if (cur_inf->thread_waiting_for_vfork_done != nullptr)
+	return cur_inf->thread_waiting_for_vfork_done;
+    }
+  return nullptr;
+}
+
 /* Return a ptid representing the set of threads that we will resume,
    in the perspective of the target, assuming run control handling
    does not require leaving some threads stopped (e.g., stepping past
@@ -2239,14 +2363,18 @@ internal_resume_ptid (int user_step)
      Since we don't have that flexibility (we can only pass one ptid), just
      resume the first thread waiting for a vfork-done event we find (e.g. thread
      2.1).  */
-  if (sched_multi)
+  thread_info *thr = find_thread_waiting_for_vfork_done ();
+  if (thr != nullptr)
     {
-      for (inferior *inf : all_non_exited_inferiors ())
-	if (inf->thread_waiting_for_vfork_done != nullptr)
-	  return inf->thread_waiting_for_vfork_done->ptid;
+      /* If we have a thread that is waiting for a vfork-done event,
+	 then we should have switched to it earlier.  Calling
+	 target_resume with thread scope is only possible when the
+	 current thread matches the thread scope.  */
+      gdb_assert (thr->ptid == inferior_ptid);
+      gdb_assert (thr->inf->process_target ()
+		  == inferior_thread ()->inf->process_target ());
+      return thr->ptid;
     }
-  else if (current_inferior ()->thread_waiting_for_vfork_done != nullptr)
-    return current_inferior ()->thread_waiting_for_vfork_done->ptid;
 
   return user_visible_resume_ptid (user_step);
 }
@@ -2638,23 +2766,6 @@ resume_1 (enum gdb_signal sig)
 	step = false;
     }
 
-  if (debug_displaced
-      && tp->control.trap_expected
-      && use_displaced_stepping (tp)
-      && !step_over_info_valid_p ())
-    {
-      struct regcache *resume_regcache = get_thread_regcache (tp);
-      struct gdbarch *resume_gdbarch = resume_regcache->arch ();
-      CORE_ADDR actual_pc = regcache_read_pc (resume_regcache);
-      gdb_byte buf[4];
-
-      read_memory (actual_pc, buf, sizeof (buf));
-      displaced_debug_printf ("run %s: %s",
-			      paddress (resume_gdbarch, actual_pc),
-			      displaced_step_dump_bytes
-				(buf, sizeof (buf)).c_str ());
-    }
-
   if (tp->control.may_range_step)
     {
       /* If we're resuming a thread with the PC out of the step
@@ -3017,7 +3128,7 @@ scoped_disable_commit_resumed::reset ()
   if (m_prev_enable_commit_resumed)
     {
       /* This is the outermost instance, re-enable
-         COMMIT_RESUMED_STATE on the targets where it's possible.  */
+	 COMMIT_RESUMED_STATE on the targets where it's possible.  */
       maybe_set_commit_resumed_all_targets ();
     }
   else
@@ -3161,8 +3272,6 @@ proceed (CORE_ADDR addr, enum gdb_signal siggnal)
   struct regcache *regcache;
   struct gdbarch *gdbarch;
   CORE_ADDR pc;
-  struct execution_control_state ecss;
-  struct execution_control_state *ecs = &ecss;
 
   /* If we're stopped at a fork/vfork, follow the branch set by the
      "set follow-fork-mode" command; otherwise, we'll just proceed
@@ -3177,7 +3286,7 @@ proceed (CORE_ADDR addr, enum gdb_signal siggnal)
     }
 
   /* We'll update this if & when we switch to a new thread.  */
-  previous_inferior_ptid = inferior_ptid;
+  update_previous_thread ();
 
   regcache = get_current_regcache ();
   gdbarch = regcache->arch ();
@@ -3374,10 +3483,10 @@ proceed (CORE_ADDR addr, enum gdb_signal siggnal)
 	    infrun_debug_printf ("resuming %s",
 				 tp->ptid.to_string ().c_str ());
 
-	    reset_ecs (ecs, tp);
+	    execution_control_state ecs (tp);
 	    switch_to_thread (tp);
-	    keep_going_pass_signal (ecs);
-	    if (!ecs->wait_some_more)
+	    keep_going_pass_signal (&ecs);
+	    if (!ecs.wait_some_more)
 	      error (_("Command aborted."));
 	  }
       }
@@ -3390,10 +3499,10 @@ proceed (CORE_ADDR addr, enum gdb_signal siggnal)
 		  && cur_thr->inf->thread_waiting_for_vfork_done != nullptr))
       {
 	/* The thread wasn't started, and isn't queued, run it now.  */
-	reset_ecs (ecs, cur_thr);
+	execution_control_state ecs (cur_thr);
 	switch_to_thread (cur_thr);
-	keep_going_pass_signal (ecs);
-	if (!ecs->wait_some_more)
+	keep_going_pass_signal (&ecs);
+	if (!ecs.wait_some_more)
 	  error (_("Command aborted."));
       }
 
@@ -3460,7 +3569,7 @@ init_wait_for_inferior (void)
 
   nullify_last_target_wait_ptid ();
 
-  previous_inferior_ptid = inferior_ptid;
+  update_previous_thread ();
 }
 
 
@@ -3534,14 +3643,6 @@ infrun_thread_stop_requested (ptid_t ptid)
 	 do_target_wait.  */
       tp->set_resumed (true);
     }
-}
-
-static void
-infrun_thread_thread_exit (struct thread_info *tp, int silent)
-{
-  if (target_last_proc_target == tp->inf->process_target ()
-      && target_last_wait_ptid == tp->ptid)
-    nullify_last_target_wait_ptid ();
 }
 
 /* Delete the step resume, single-step and longjmp/exception resume
@@ -3666,7 +3767,7 @@ do_target_wait_1 (inferior *inf, ptid_t ptid,
 			   ptid.to_string ().c_str ());
 
       /* We have a specific thread to check.  */
-      tp = find_thread_ptid (inf, ptid);
+      tp = inf->find_thread (ptid);
       gdb_assert (tp != nullptr);
       if (!tp->has_pending_waitstatus ())
 	tp = nullptr;
@@ -4001,8 +4102,7 @@ wait_for_inferior (inferior *inf)
 
   while (1)
     {
-      struct execution_control_state ecss;
-      struct execution_control_state *ecs = &ecss;
+      execution_control_state ecs;
 
       overlay_cache_invalid = 1;
 
@@ -4012,16 +4112,16 @@ wait_for_inferior (inferior *inf)
 	 don't get any event.  */
       target_dcache_invalidate ();
 
-      ecs->ptid = do_target_wait_1 (inf, minus_one_ptid, &ecs->ws, 0);
-      ecs->target = inf->process_target ();
+      ecs.ptid = do_target_wait_1 (inf, minus_one_ptid, &ecs.ws, 0);
+      ecs.target = inf->process_target ();
 
       if (debug_infrun)
-	print_target_wait_results (minus_one_ptid, ecs->ptid, ecs->ws);
+	print_target_wait_results (minus_one_ptid, ecs.ptid, ecs.ws);
 
       /* Now figure out what to do with the result of the result.  */
-      handle_inferior_event (ecs);
+      handle_inferior_event (&ecs);
 
-      if (!ecs->wait_some_more)
+      if (!ecs.wait_some_more)
 	break;
     }
 
@@ -4133,6 +4233,44 @@ all_uis_on_sync_execution_starting (void)
     }
 }
 
+/* A quit_handler callback installed while we're handling inferior
+   events.  */
+
+static void
+infrun_quit_handler ()
+{
+  if (target_terminal::is_ours ())
+    {
+      /* Do nothing.
+
+	 default_quit_handler would throw a quit in this case, but if
+	 we're handling an event while we have the terminal, it means
+	 the target is running a background execution command, and
+	 thus when users press Ctrl-C, they're wanting to interrupt
+	 whatever command they were executing in the command line.
+	 E.g.:
+
+	  (gdb) c&
+	  (gdb) foo bar whatever<ctrl-c>
+
+	 That Ctrl-C should clear the input line, not interrupt event
+	 handling if it happens that the user types Ctrl-C at just the
+	 "wrong" time!
+
+	 It's as-if background event handling was handled by a
+	 separate background thread.
+
+	 To be clear, the Ctrl-C is not lost -- it will be processed
+	 by the next QUIT call once we're out of fetch_inferior_event
+	 again.  */
+    }
+  else
+    {
+      if (check_quit_flag ())
+	target_pass_ctrlc ();
+    }
+}
+
 /* Asynchronous version of wait_for_inferior.  It is called by the
    event loop whenever a change of state is detected on the file
    descriptor corresponding to the target.  It can be called more than
@@ -4147,8 +4285,7 @@ fetch_inferior_event ()
 {
   INFRUN_SCOPED_DEBUG_ENTER_EXIT;
 
-  struct execution_control_state ecss;
-  struct execution_control_state *ecs = &ecss;
+  execution_control_state ecs;
   int cmd_done = 0;
 
   /* Events are always processed with the main UI as current UI.  This
@@ -4161,6 +4298,21 @@ fetch_inferior_event ()
      exit and could leave GDB in a half-baked state.  */
   scoped_restore save_pagination
     = make_scoped_restore (&pagination_enabled, false);
+
+  /* Install a quit handler that does nothing if we have the terminal
+     (meaning the target is running a background execution command),
+     so that Ctrl-C never interrupts GDB before the event is fully
+     handled.  */
+  scoped_restore restore_quit_handler
+    = make_scoped_restore (&quit_handler, infrun_quit_handler);
+
+  /* Make sure a SIGINT does not interrupt an extension language while
+     we're handling an event.  That could interrupt a Python unwinder
+     or a Python observer or some such.  A Ctrl-C should either be
+     forwarded to the inferior if the inferior has the terminal, or,
+     if GDB has the terminal, should interrupt the command the user is
+     typing in the CLI.  */
+  scoped_disable_cooperative_sigint_handling restore_coop_sigint;
 
   /* End up with readline processing input, if necessary.  */
   {
@@ -4198,27 +4350,31 @@ fetch_inferior_event ()
        the event.  */
     scoped_disable_commit_resumed disable_commit_resumed ("handling event");
 
-    if (!do_target_wait (ecs, TARGET_WNOHANG))
+    if (!do_target_wait (&ecs, TARGET_WNOHANG))
       {
 	infrun_debug_printf ("do_target_wait returned no event");
 	disable_commit_resumed.reset_and_commit ();
 	return;
       }
 
-    gdb_assert (ecs->ws.kind () != TARGET_WAITKIND_IGNORE);
+    gdb_assert (ecs.ws.kind () != TARGET_WAITKIND_IGNORE);
 
-    /* Switch to the target that generated the event, so we can do
-       target calls.  */
-    switch_to_target_no_thread (ecs->target);
+    /* Switch to the inferior that generated the event, so we can do
+       target calls.  If the event was not associated to a ptid,  */
+    if (ecs.ptid != null_ptid
+	&& ecs.ptid != minus_one_ptid)
+      switch_to_inferior_no_thread (find_inferior_ptid (ecs.target, ecs.ptid));
+    else
+      switch_to_target_no_thread (ecs.target);
 
     if (debug_infrun)
-      print_target_wait_results (minus_one_ptid, ecs->ptid, ecs->ws);
+      print_target_wait_results (minus_one_ptid, ecs.ptid, ecs.ws);
 
     /* If an error happens while handling the event, propagate GDB's
        knowledge of the executing state to the frontend/user running
        state.  */
-    ptid_t finish_ptid = !target_is_non_stop_p () ? minus_one_ptid : ecs->ptid;
-    scoped_finish_thread_state finish_state (ecs->target, finish_ptid);
+    ptid_t finish_ptid = !target_is_non_stop_p () ? minus_one_ptid : ecs.ptid;
+    scoped_finish_thread_state finish_state (ecs.target, finish_ptid);
 
     /* Get executed before scoped_restore_current_thread above to apply
        still for the thread which has thrown the exception.  */
@@ -4228,13 +4384,13 @@ fetch_inferior_event ()
       = make_scope_exit (delete_just_stopped_threads_infrun_breakpoints);
 
     /* Now figure out what to do with the result of the result.  */
-    handle_inferior_event (ecs);
+    handle_inferior_event (&ecs);
 
-    if (!ecs->wait_some_more)
+    if (!ecs.wait_some_more)
       {
-	struct inferior *inf = find_inferior_ptid (ecs->target, ecs->ptid);
+	struct inferior *inf = find_inferior_ptid (ecs.target, ecs.ptid);
 	bool should_stop = true;
-	struct thread_info *thr = ecs->event_thread;
+	struct thread_info *thr = ecs.event_thread;
 
 	delete_just_stopped_threads_infrun_breakpoints ();
 
@@ -4243,16 +4399,16 @@ fetch_inferior_event ()
 
 	if (!should_stop)
 	  {
-	    keep_going (ecs);
+	    keep_going (&ecs);
 	  }
 	else
 	  {
 	    bool should_notify_stop = true;
-	    int proceeded = 0;
+	    bool proceeded = false;
 
 	    stop_all_threads_if_all_stop_mode ();
 
-	    clean_up_just_stopped_threads_fsms (ecs);
+	    clean_up_just_stopped_threads_fsms (&ecs);
 
 	    if (thr != nullptr && thr->thread_fsm () != nullptr)
 	      should_notify_stop
@@ -4281,7 +4437,7 @@ fetch_inferior_event ()
 	       selected.".  */
 	    if (!non_stop
 		&& cmd_done
-		&& ecs->ws.kind () != TARGET_WAITKIND_NO_RESUMED)
+		&& ecs.ws.kind () != TARGET_WAITKIND_NO_RESUMED)
 	      restore_thread.dont_restore ();
 	  }
       }
@@ -4709,6 +4865,11 @@ fill_in_stop_func (struct gdbarch *gdbarch,
 	  ecs->stop_func_start
 	    += gdbarch_deprecated_function_start_offset (gdbarch);
 
+	  /* PowerPC functions have a Local Entry Point (LEP) and a Global
+	     Entry Point (GEP).  There is only one Entry Point (GEP = LEP) for
+	     other architectures.  */
+	  ecs->stop_func_alt_start = ecs->stop_func_start;
+
 	  if (gdbarch_skip_entrypoint_p (gdbarch))
 	    ecs->stop_func_start
 	      = gdbarch_skip_entrypoint (gdbarch, ecs->stop_func_start);
@@ -4965,7 +5126,7 @@ handle_one (const wait_one_event &event)
 	}
       else
 	{
-	  t = find_thread_ptid (event.target, event.ptid);
+	  t = event.target->find_thread (event.ptid);
 	  /* Check if this is the first time we see this thread.
 	     Don't bother adding if it individually exited.  */
 	  if (t == nullptr
@@ -4986,7 +5147,7 @@ handle_one (const wait_one_event &event)
     }
   else
     {
-      thread_info *t = find_thread_ptid (event.target, event.ptid);
+      thread_info *t = event.target->find_thread (event.ptid);
       if (t == nullptr)
 	t = add_thread (event.target, event.ptid);
 
@@ -5009,7 +5170,7 @@ handle_one (const wait_one_event &event)
 	  /* We caught the event that we intended to catch, so
 	     there's no event to save as pending.  */
 
-	  if (displaced_step_finish (t, GDB_SIGNAL_0)
+	  if (displaced_step_finish (t, event.ws)
 	      == DISPLACED_STEP_FINISH_STATUS_NOT_EXECUTED)
 	    {
 	      /* Add it back to the step-over queue.  */
@@ -5024,7 +5185,6 @@ handle_one (const wait_one_event &event)
 	}
       else
 	{
-	  enum gdb_signal sig;
 	  struct regcache *regcache;
 
 	  infrun_debug_printf
@@ -5035,10 +5195,7 @@ handle_one (const wait_one_event &event)
 	  /* Record for later.  */
 	  save_waitstatus (t, event.ws);
 
-	  sig = (event.ws.kind () == TARGET_WAITKIND_STOPPED
-		 ? event.ws.sig () : GDB_SIGNAL_0);
-
-	  if (displaced_step_finish (t, sig)
+	  if (displaced_step_finish (t, event.ws)
 	      == DISPLACED_STEP_FINISH_STATUS_NOT_EXECUTED)
 	    {
 	      /* Add it back to the step-over queue.  */
@@ -5391,7 +5548,7 @@ handle_inferior_event (struct execution_control_state *ecs)
   if (ecs->ws.kind () != TARGET_WAITKIND_EXITED
       && ecs->ws.kind () != TARGET_WAITKIND_SIGNALLED)
     {
-      ecs->event_thread = find_thread_ptid (ecs->target, ecs->ptid);
+      ecs->event_thread = ecs->target->find_thread (ecs->ptid);
       /* If it's a new thread, add it to the thread database.  */
       if (ecs->event_thread == nullptr)
 	ecs->event_thread = add_thread (ecs->target, ecs->ptid);
@@ -5540,7 +5697,7 @@ handle_inferior_event (struct execution_control_state *ecs)
 	   need to have access to the just-exited thread.  That is the
 	   case of GNU/Linux's "checkpoint" support, for example.
 	   Call the switch_to_xxx routine as appropriate.  */
-	thread_info *thr = find_thread_ptid (ecs->target, ecs->ptid);
+	thread_info *thr = ecs->target->find_thread (ecs->ptid);
 	if (thr != nullptr)
 	  switch_to_thread (thr);
 	else
@@ -5563,7 +5720,7 @@ handle_inferior_event (struct execution_control_state *ecs)
 				   (LONGEST) ecs->ws.exit_status ());
 
 	  /* Also record this in the inferior itself.  */
-	  current_inferior ()->has_exit_code = 1;
+	  current_inferior ()->has_exit_code = true;
 	  current_inferior ()->exit_code = (LONGEST) ecs->ws.exit_status ();
 
 	  /* Support the --return-child-result option.  */
@@ -5640,7 +5797,7 @@ handle_inferior_event (struct execution_control_state *ecs)
 	       has been done.  Perform cleanup for parent process here.  Note
 	       that this operation also cleans up the child process for vfork,
 	       because their pages are shared.  */
-	    displaced_step_finish (ecs->event_thread, GDB_SIGNAL_TRAP);
+	    displaced_step_finish (ecs->event_thread, ecs->ws);
 	    /* Start a new step-over in another thread if there's one
 	       that needs it.  */
 	    start_step_over ();
@@ -5653,7 +5810,7 @@ handle_inferior_event (struct execution_control_state *ecs)
 	       list yet at this point.  */
 
 	    child_regcache
-	      = get_thread_arch_aspace_regcache (parent_inf->process_target (),
+	      = get_thread_arch_aspace_regcache (parent_inf,
 						 ecs->ws.child_ptid (),
 						 gdbarch,
 						 parent_inf->aspace);
@@ -5727,7 +5884,7 @@ handle_inferior_event (struct execution_control_state *ecs)
 	  /* Note that one of these may be an invalid pointer,
 	     depending on detach_fork.  */
 	  thread_info *parent = ecs->event_thread;
-	  thread_info *child = find_thread_ptid (targ, ecs->ws.child_ptid ());
+	  thread_info *child = targ->find_thread (ecs->ws.child_ptid ());
 
 	  /* At this point, the parent is marked running, and the
 	     child is marked stopped.  */
@@ -5765,7 +5922,7 @@ handle_inferior_event (struct execution_control_state *ecs)
 	  if (should_resume)
 	    {
 	      /* Never call switch_back_to_stepped_thread if we are waiting for
-	         vfork-done (waiting for an external vfork child to exec or
+		 vfork-done (waiting for an external vfork child to exec or
 		 exit).  We will resume only the vforking thread for the purpose
 		 of collecting the vfork-done event, and we will restart any
 		 step once the critical shared address space window is done.  */
@@ -5977,14 +6134,11 @@ restart_threads (struct thread_info *event_thread, inferior *inf)
 	}
       else
 	{
-	  struct execution_control_state ecss;
-	  struct execution_control_state *ecs = &ecss;
-
 	  infrun_debug_printf ("restart threads: [%s] continuing",
 			       tp->ptid.to_string ().c_str ());
-	  reset_ecs (ecs, tp);
+	  execution_control_state ecs (tp);
 	  switch_to_thread (tp);
-	  keep_going_pass_signal (ecs);
+	  keep_going_pass_signal (&ecs);
 	}
     }
 }
@@ -6008,7 +6162,7 @@ resumed_thread_with_pending_status (struct thread_info *tp,
 static int
 finish_step_over (struct execution_control_state *ecs)
 {
-  displaced_step_finish (ecs->event_thread, ecs->event_thread->stop_signal ());
+  displaced_step_finish (ecs->event_thread, ecs->ws);
 
   bool had_step_over_info = step_over_info_valid_p ();
 
@@ -7301,6 +7455,24 @@ process_event_stop_test (struct execution_control_state *ecs)
 	}
     }
 
+  if (execution_direction == EXEC_REVERSE
+      && ecs->event_thread->control.proceed_to_finish
+      && ecs->event_thread->stop_pc () >= ecs->stop_func_alt_start
+      && ecs->event_thread->stop_pc () < ecs->stop_func_start)
+    {
+      /* We are executing the reverse-finish command.
+	 If the system supports multiple entry points and we are finishing a
+	 function in reverse.   If we are between the entry points singe-step
+	 back to the alternate entry point.  If we are at the alternate entry
+	 point -- just   need to back up by one more single-step, which
+	 should take us back to the function call.  */
+      ecs->event_thread->control.step_range_start
+	= ecs->event_thread->control.step_range_end = 1;
+      keep_going (ecs);
+      return;
+
+    }
+
   if (ecs->event_thread->control.step_range_end == 1)
     {
       /* It is stepi or nexti.  We always want to stop stepping after
@@ -7408,7 +7580,7 @@ process_event_stop_test (struct execution_control_state *ecs)
 	  return;
 	}
       else if (get_frame_id (get_current_frame ())
-               == ecs->event_thread->control.step_frame_id)
+	       == ecs->event_thread->control.step_frame_id)
 	{
 	  /* We are not at the start of a statement, and we have not changed
 	     frame.
@@ -7660,8 +7832,7 @@ restart_after_all_stop_detach (process_stratum_target *proc_target)
       if (thr->state != THREAD_RUNNING)
 	continue;
 
-      execution_control_state ecs;
-      reset_ecs (&ecs, thr);
+      execution_control_state ecs (thr);
       switch_to_thread (thr);
       keep_going (&ecs);
       return;
@@ -7676,8 +7847,6 @@ static bool
 keep_going_stepped_thread (struct thread_info *tp)
 {
   frame_info_ptr frame;
-  struct execution_control_state ecss;
-  struct execution_control_state *ecs = &ecss;
 
   /* If the stepping thread exited, then don't try to switch back and
      resume it, which could fail in several different ways depending
@@ -7708,7 +7877,7 @@ keep_going_stepped_thread (struct thread_info *tp)
 
   infrun_debug_printf ("resuming previously stepped thread");
 
-  reset_ecs (ecs, tp);
+  execution_control_state ecs (tp);
   switch_to_thread (tp);
 
   tp->set_stop_pc (regcache_read_pc (get_thread_regcache (tp)));
@@ -7757,7 +7926,7 @@ keep_going_stepped_thread (struct thread_info *tp)
     {
       infrun_debug_printf ("expected thread still hasn't advanced");
 
-      keep_going_pass_signal (ecs);
+      keep_going_pass_signal (&ecs);
     }
 
   return true;
@@ -8024,13 +8193,16 @@ insert_exception_resume_breakpoint (struct thread_info *tp,
 					b, VAR_DOMAIN);
       value = read_var_value (vsym.symbol, vsym.block, frame);
       /* If the value was optimized out, revert to the old behavior.  */
-      if (! value_optimized_out (value))
+      if (! value->optimized_out ())
 	{
 	  handler = value_as_address (value);
 
 	  infrun_debug_printf ("exception resume at %lx",
 			       (unsigned long) handler);
 
+	  /* set_momentary_breakpoint_at_pc creates a thread-specific
+	     breakpoint for the current inferior thread.  */
+	  gdb_assert (tp == inferior_thread ());
 	  bp = set_momentary_breakpoint_at_pc (get_frame_arch (frame),
 					       handler,
 					       bp_exception_resume).release ();
@@ -8038,8 +8210,7 @@ insert_exception_resume_breakpoint (struct thread_info *tp,
 	  /* set_momentary_breakpoint_at_pc invalidates FRAME.  */
 	  frame = nullptr;
 
-	  bp->thread = tp->global_num;
-	  inferior_thread ()->control.exception_resume_breakpoint = bp;
+	  tp->control.exception_resume_breakpoint = bp;
 	}
     }
   catch (const gdb_exception_error &e)
@@ -8069,10 +8240,12 @@ insert_exception_resume_from_probe (struct thread_info *tp,
   infrun_debug_printf ("exception resume at %s",
 		       paddress (probe->objfile->arch (), handler));
 
+  /* set_momentary_breakpoint_at_pc creates a thread-specific breakpoint
+     for the current inferior thread.  */
+  gdb_assert (tp == inferior_thread ());
   bp = set_momentary_breakpoint_at_pc (get_frame_arch (frame),
 				       handler, bp_exception_resume).release ();
-  bp->thread = tp->global_num;
-  inferior_thread ()->control.exception_resume_breakpoint = bp;
+  tp->control.exception_resume_breakpoint = bp;
 }
 
 /* This is called when an exception has been intercepted.  Check to
@@ -8104,8 +8277,6 @@ check_exception_resume (struct execution_control_state *ecs,
   try
     {
       const struct block *b;
-      struct block_iterator iter;
-      struct symbol *sym;
       int argno = 0;
 
       /* The exception breakpoint is a thread-specific breakpoint on
@@ -8123,7 +8294,7 @@ check_exception_resume (struct execution_control_state *ecs,
 	 handler.  */
 
       b = func->value_block ();
-      ALL_BLOCK_SYMBOLS (b, iter, sym)
+      for (struct symbol *sym : block_iterator_range (b))
 	{
 	  if (!sym->is_argument ())
 	    continue;
@@ -8329,18 +8500,6 @@ end_stepping_range (struct execution_control_state *ecs)
    with whatever uiout is right.  */
 
 void
-print_end_stepping_range_reason (struct ui_out *uiout)
-{
-  /* For CLI-like interpreters, print nothing.  */
-
-  if (uiout->is_mi_like_p ())
-    {
-      uiout->field_string ("reason",
-			   async_reason_lookup (EXEC_ASYNC_END_STEPPING_RANGE));
-    }
-}
-
-void
 print_signal_exited_reason (struct ui_out *uiout, enum gdb_signal siggnal)
 {
   annotate_signalled ();
@@ -8393,6 +8552,8 @@ print_signal_received_reason (struct ui_out *uiout, enum gdb_signal siggnal)
 {
   struct thread_info *thr = inferior_thread ();
 
+  infrun_debug_printf ("signal = %s", gdb_signal_to_string (siggnal));
+
   annotate_signal ();
 
   if (uiout->is_mi_like_p ())
@@ -8441,7 +8602,10 @@ print_signal_received_reason (struct ui_out *uiout, enum gdb_signal siggnal)
 void
 print_no_history_reason (struct ui_out *uiout)
 {
-  uiout->text ("\nNo more reverse-execution history.\n");
+  if (uiout->is_mi_like_p ())
+    uiout->field_string ("reason", async_reason_lookup (EXEC_ASYNC_NO_HISTORY));
+  else
+    uiout->text ("\nNo more reverse-execution history.\n");
 }
 
 /* Print current location without a level number, if we have changed
@@ -8614,8 +8778,8 @@ stop_context::changed () const
 
 /* See infrun.h.  */
 
-int
-normal_stop (void)
+bool
+normal_stop ()
 {
   struct target_waitstatus last;
 
@@ -8682,21 +8846,24 @@ normal_stop (void)
      the current thread back to the thread the user had selected right
      after this event is handled, so we're not really switching, only
      informing of a stop.  */
-  if (!non_stop
-      && previous_inferior_ptid != inferior_ptid
-      && target_has_execution ()
-      && last.kind () != TARGET_WAITKIND_SIGNALLED
-      && last.kind () != TARGET_WAITKIND_EXITED
-      && last.kind () != TARGET_WAITKIND_NO_RESUMED)
+  if (!non_stop)
     {
-      SWITCH_THRU_ALL_UIS ()
+      if ((last.kind () != TARGET_WAITKIND_SIGNALLED
+	   && last.kind () != TARGET_WAITKIND_EXITED
+	   && last.kind () != TARGET_WAITKIND_NO_RESUMED)
+	  && target_has_execution ()
+	  && previous_thread != inferior_thread ())
 	{
-	  target_terminal::ours_for_output ();
-	  gdb_printf (_("[Switching to %s]\n"),
-		      target_pid_to_str (inferior_ptid).c_str ());
-	  annotate_thread_changed ();
+	  SWITCH_THRU_ALL_UIS ()
+	    {
+	      target_terminal::ours_for_output ();
+	      gdb_printf (_("[Switching to %s]\n"),
+			  target_pid_to_str (inferior_ptid).c_str ());
+	      annotate_thread_changed ();
+	    }
 	}
-      previous_inferior_ptid = inferior_ptid;
+
+      update_previous_thread ();
     }
 
   if (last.kind () == TARGET_WAITKIND_NO_RESUMED)
@@ -8762,7 +8929,7 @@ normal_stop (void)
     {
       execute_cmd_pre_hook (stop_command);
     }
-  catch (const gdb_exception &ex)
+  catch (const gdb_exception_error &ex)
     {
       exception_fprintf (gdb_stderr, ex,
 			 "Error while running hook_stop:\n");
@@ -8774,7 +8941,7 @@ normal_stop (void)
      the observers would print a stop for the wrong
      thread/inferior.  */
   if (saved_context.changed ())
-    return 1;
+    return true;
 
   /* Notify observers about the stop.  This is where the interpreters
      print the stop event.  */
@@ -8796,7 +8963,7 @@ normal_stop (void)
 	breakpoint_auto_delete (inferior_thread ()->control.stop_bpstat);
     }
 
-  return 0;
+  return false;
 }
 
 int
@@ -9173,11 +9340,11 @@ siginfo_value_read (struct value *v)
     target_read (current_inferior ()->top_target (),
 		 TARGET_OBJECT_SIGNAL_INFO,
 		 nullptr,
-		 value_contents_all_raw (v).data (),
-		 value_offset (v),
-		 value_type (v)->length ());
+		 v->contents_all_raw ().data (),
+		 v->offset (),
+		 v->type ()->length ());
 
-  if (transferred != value_type (v)->length ())
+  if (transferred != v->type ()->length ())
     error (_("Unable to read siginfo"));
 }
 
@@ -9196,11 +9363,11 @@ siginfo_value_write (struct value *v, struct value *fromval)
   transferred = target_write (current_inferior ()->top_target (),
 			      TARGET_OBJECT_SIGNAL_INFO,
 			      nullptr,
-			      value_contents_all_raw (fromval).data (),
-			      value_offset (v),
-			      value_type (fromval)->length ());
+			      fromval->contents_all_raw ().data (),
+			      v->offset (),
+			      fromval->type ()->length ());
 
-  if (transferred != value_type (fromval)->length ())
+  if (transferred != fromval->type ()->length ())
     error (_("Unable to write siginfo"));
 }
 
@@ -9224,10 +9391,10 @@ siginfo_make_value (struct gdbarch *gdbarch, struct internalvar *var,
     {
       struct type *type = gdbarch_get_siginfo_type (gdbarch);
 
-      return allocate_computed_value (type, &siginfo_value_funcs, nullptr);
+      return value::allocate_computed (type, &siginfo_value_funcs, nullptr);
     }
 
-  return allocate_value (builtin_type (gdbarch)->builtin_void);
+  return value::allocate (builtin_type (gdbarch)->builtin_void);
 }
 
 
@@ -9902,7 +10069,6 @@ enabled by default on some platforms."),
 					      "infrun");
   gdb::observers::thread_stop_requested.attach (infrun_thread_stop_requested,
 						"infrun");
-  gdb::observers::thread_exit.attach (infrun_thread_thread_exit, "infrun");
   gdb::observers::inferior_exit.attach (infrun_inferior_exit, "infrun");
   gdb::observers::inferior_execd.attach (infrun_inferior_execd, "infrun");
 

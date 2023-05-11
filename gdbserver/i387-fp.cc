@@ -1,5 +1,5 @@
 /* i387-specific utility functions, for the remote server for GDB.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -322,7 +322,7 @@ i387_cache_to_xsave (struct regcache *regcache, void *buf)
       if ((clear_bv & X86_XSTATE_ZMM))
 	{
 	  for (i = 0; i < num_avx512_zmmh_high_registers; i++)
-	    memset (((char *) &fp->zmmh_low_space[0]) + 32 + i * 64, 0, 32);
+	    memset (((char *) &fp->zmmh_high_space[0]) + 32 + i * 64, 0, 32);
 	  for (i = 0; i < num_avx512_xmm_registers; i++)
 	    memset (((char *) &fp->zmmh_high_space[0]) + i * 64, 0, 16);
 	  for (i = 0; i < num_avx512_ymmh_registers; i++)

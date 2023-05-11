@@ -1,4 +1,4 @@
-# Copyright 2014-2022 Free Software Foundation, Inc.
+# Copyright 2014-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -99,4 +99,42 @@ proc gdb_get_bp_addr { num } {
 	}
     }
     return ""
+}
+
+# Compare the version numbers in L1 to those in L2 using OP, and
+# return 1 if the comparison is true.  OP can be "<", "<=", or "==".
+# It is ok if the lengths of the lists differ.
+
+proc version_compare { l1 op l2 } {
+    switch -exact $op {
+	"=="    -
+	"<="    -
+	"<"     {}
+	default { error "unsupported op: $op" }
+    }
+
+    # Handle ops < and ==.
+    foreach v1 $l1 v2 $l2 {
+	if {$v1 == ""} {
+	    # This is: "1.2 OP 1.2.1".
+	    if {$op != "=="} {
+		return 1
+	    }
+	    return 0
+	}
+	if {$v2 == ""} {
+	    # This is: "1.2.1 OP 1.2".
+	    return 0
+	}
+	if {$v1 == $v2} {
+	    continue
+	}
+	return [expr $v1 $op $v2]
+    }
+
+    if {$op == "<"} {
+	# They are equal.
+	return 0
+    }
+    return 1
 }

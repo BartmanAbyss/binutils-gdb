@@ -1,4 +1,4 @@
-# Copyright 2022 Free Software Foundation, Inc.
+# Copyright 2022-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@ if {[prepare_for_testing "failed to prepare" "${testfile}" \
 }
 
 # The bug was that gdb would crash when saving.
-set output_dir [standard_output_file ""]
+set output_dir [host_standard_output_file ""]
 set cmd "save gdb-index"
 gdb_test_multiple "$cmd $output_dir" $cmd {
     -re -wrap "Cannot use an index to create the index.*" {

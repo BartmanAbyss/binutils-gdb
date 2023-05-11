@@ -1,6 +1,6 @@
 /* Source-language-related definitions for GDB.
 
-   Copyright (C) 1991-2022 Free Software Foundation, Inc.
+   Copyright (C) 1991-2023 Free Software Foundation, Inc.
 
    Contributed by the Department of Computer Science at the State University
    of New York at Buffalo.
@@ -471,7 +471,7 @@ struct language_defn
      If that PC falls in a trampoline belonging to this language, return
      the address of the first pc in the real function, or 0 if it isn't a
      language tramp for this language.  */
-  virtual CORE_ADDR skip_trampoline (frame_info_ptr fi, CORE_ADDR pc) const
+  virtual CORE_ADDR skip_trampoline (const frame_info_ptr &fi, CORE_ADDR pc) const
   {
     return (CORE_ADDR) 0;
   }
@@ -548,7 +548,7 @@ struct language_defn
 			  struct ui_file * stream) const;
 
 /* Print the character string STRING, printing at most LENGTH characters.
-   Printing stops early if the number hits print_max; repeat counts
+   Printing stops early if the number hits print_max_chars; repeat counts
    are printed as appropriate.  Print ellipses at the end if we
    had to stop before printing LENGTH characters, or if FORCE_ELLIPSES.  */
 
@@ -761,8 +761,9 @@ struct symbol *
 
 extern void language_info ();
 
-extern enum language set_language (enum language);
-
+/* Set the current language to LANG.  */
+
+extern void set_language (enum language lang);
 
 /* Test a character to decide whether it can be printed in literal form
    or needs to be printed in another representation.  For example,
@@ -789,12 +790,7 @@ extern const char *language_str (enum language);
 
 /* Check for a language-specific trampoline.  */
 
-extern CORE_ADDR skip_language_trampoline (frame_info_ptr, CORE_ADDR pc);
-
-/* Return demangled language symbol, or NULL.  */
-extern gdb::unique_xmalloc_ptr<char> language_demangle
-     (const struct language_defn *current_language,
-      const char *mangled, int options);
+extern CORE_ADDR skip_language_trampoline (const frame_info_ptr &, CORE_ADDR pc);
 
 /* Return information about whether TYPE should be passed
    (and returned) by reference at the language level.  */

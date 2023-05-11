@@ -1,6 +1,6 @@
 /* TUI window generic functions.
 
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -36,6 +36,7 @@
 #include "gdbsupport/event-loop.h"
 #include "gdbcmd.h"
 #include "async-event.h"
+#include "utils.h"
 
 #include "tui/tui.h"
 #include "tui/tui-io.h"
@@ -362,13 +363,19 @@ show_tui_resize_message (struct ui_file *file, int from_tty,
 
 
 /* Generic window name completion function.  Complete window name pointed
-   to by TEXT and WORD.  If INCLUDE_NEXT_PREV_P is true then the special
-   window names 'next' and 'prev' will also be considered as possible
-   completions of the window name.  */
+   to by TEXT and WORD.
+
+   If EXCLUDE_CANNOT_FOCUS_P is true, then windows that can't take focus
+   will be excluded from the completions, otherwise they will be included.
+
+   If INCLUDE_NEXT_PREV_P is true then the special window names 'next' and
+   'prev' will also be considered as possible completions of the window
+   name.  This is independent of EXCLUDE_CANNOT_FOCUS_P.  */
 
 static void
 window_name_completer (completion_tracker &tracker,
-		       int include_next_prev_p,
+		       bool include_next_prev_p,
+		       bool exclude_cannot_focus_p,
 		       const char *text, const char *word)
 {
   std::vector<const char *> completion_name_vec;
@@ -377,8 +384,12 @@ window_name_completer (completion_tracker &tracker,
     {
       const char *completion_name = NULL;
 
-      /* We can't focus on an invisible window.  */
+      /* Don't include an invisible window.  */
       if (!win_info->is_visible ())
+	continue;
+
+      /* If requested, exclude windows that can't be focused.  */
+      if (exclude_cannot_focus_p && !win_info->can_focus ())
 	continue;
 
       completion_name = win_info->name ();
@@ -415,7 +426,7 @@ focus_completer (struct cmd_list_element *ignore,
 		 completion_tracker &tracker,
 		 const char *text, const char *word)
 {
-  window_name_completer (tracker, 1, text, word);
+  window_name_completer (tracker, true, true, text, word);
 }
 
 /* Complete possible window names for winheight command.  TEXT is the
@@ -432,7 +443,7 @@ winheight_completer (struct cmd_list_element *ignore,
   if (word != text)
     return;
 
-  window_name_completer (tracker, 0, text, word);
+  window_name_completer (tracker, false, false, text, word);
 }
 
 /* Update gdb's knowledge of the terminal size.  */
@@ -518,6 +529,8 @@ tui_resize_all (void)
   int screenheight, screenwidth;
 
   rl_get_screen_size (&screenheight, &screenwidth);
+  screenwidth += readline_hidden_cols;
+
   width_diff = screenwidth - tui_term_width ();
   height_diff = screenheight - tui_term_height ();
   if (height_diff || width_diff)
@@ -566,6 +579,7 @@ tui_async_resize_screen (gdb_client_data arg)
       int screen_height, screen_width;
 
       rl_get_screen_size (&screen_height, &screen_width);
+      screen_width += readline_hidden_cols;
       set_screen_width_and_height (screen_width, screen_height);
 
       /* win_resized is left set so that the next call to tui_enable()
@@ -711,17 +725,59 @@ tui_set_focus_command (const char *arg, int from_tty)
 
   struct tui_win_info *win_info = NULL;
 
-  if (subset_compare (arg, "next"))
+  if (startswith ("next", arg))
     win_info = tui_next_win (tui_win_with_focus ());
-  else if (subset_compare (arg, "prev"))
+  else if (startswith ("prev", arg))
     win_info = tui_prev_win (tui_win_with_focus ());
   else
     win_info = tui_partial_win_by_name (arg);
 
-  if (win_info == NULL)
-    error (_("Unrecognized window name \"%s\""), arg);
-  if (!win_info->is_visible ())
-    error (_("Window \"%s\" is not visible"), arg);
+  if (win_info == nullptr)
+    {
+      /* When WIN_INFO is nullptr this can either mean that the window name
+	 is unknown to GDB, or that the window is not in the current
+	 layout.  To try and help the user, give a different error
+	 depending on which of these is the case.  */
+      std::string matching_window_name;
+      bool is_ambiguous = false;
+
+      for (const std::string &name : all_known_window_names ())
+	{
+	  /* Look through all windows in the current layout, if the window
+	     is in the current layout then we're not interested is it.  */
+	  for (tui_win_info *item : all_tui_windows ())
+	    if (item->name () == name)
+	      continue;
+
+	  if (startswith (name, arg))
+	    {
+	      if (matching_window_name.empty ())
+		matching_window_name = name;
+	      else
+		is_ambiguous = true;
+	    }
+	};
+
+      if (!matching_window_name.empty ())
+	{
+	  if (is_ambiguous)
+	    error (_("No windows matching \"%s\" in the current layout"),
+		   arg);
+	  else
+	    error (_("Window \"%s\" is not in the current layout"),
+		   matching_window_name.c_str ());
+	}
+      else
+	error (_("Unrecognized window name \"%s\""), arg);
+    }
+
+  /* If a window is part of the current layout then it will have a
+     tui_win_info associated with it and be visible, otherwise, there will
+     be no tui_win_info and the above error will have been raised.  */
+  gdb_assert (win_info->is_visible ());
+
+  if (!win_info->can_focus ())
+    error (_("Window \"%s\" cannot be focused"), arg);
 
   tui_set_win_focus_to (win_info);
   gdb_printf (_("Focus set to %s window.\n"),
@@ -1059,6 +1115,10 @@ tui_window_command (const char *args, int from_tty)
   help_list (tui_window_cmds, "tui window ", all_commands, gdb_stdout);
 }
 
+/* See tui-win.h.  */
+
+bool tui_left_margin_verbose = false;
+
 /* Function to initialize gdb commands, for tui window
    manipulation.  */
 
@@ -1214,8 +1274,7 @@ When enabled GDB will print a message when the terminal is resized."),
 Set whether the TUI source window is compact."), _("\
 Show whether the TUI source window is compact."), _("\
 This variable controls whether the TUI source window is shown\n\
-in a compact form.  The compact form puts the source closer to\n\
-the line numbers and uses less horizontal space."),
+in a compact form.  The compact form uses less horizontal space."),
 			   tui_set_compact_source, tui_show_compact_source,
 			   &tui_setlist, &tui_showlist);
 
@@ -1231,6 +1290,18 @@ position indicator is styled."),
 			   show_style_tui_current_position,
 			   &style_set_list,
 			   &style_show_list);
+
+  add_setshow_boolean_cmd ("tui-left-margin-verbose", class_maintenance,
+			   &tui_left_margin_verbose, _("\
+Set whether the left margin should use '_' and '0' instead of spaces."),
+			   _("\
+Show whether the left margin should use '_' and '0' instead of spaces."),
+			   _("\
+When enabled, the left margin will use '_' and '0' instead of spaces."),
+			   nullptr,
+			   nullptr,
+			   &maintenance_set_cmdlist,
+			   &maintenance_show_cmdlist);
 
   tui_border_style.changed.attach (tui_rehighlight_all, "tui-win");
   tui_active_border_style.changed.attach (tui_rehighlight_all, "tui-win");

@@ -1,6 +1,6 @@
 /* Target-dependent code for the Renesas RX for GDB, the GNU debugger.
 
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    Contributed by Red Hat, Inc.
 
@@ -520,7 +520,7 @@ rx_frame_prev_register (frame_info_ptr this_frame, void **this_cache,
 	  psw_val = rx_frame_prev_register (this_frame, this_cache,
 					    RX_PSW_REGNUM);
 	  psw = extract_unsigned_integer
-	    (value_contents_all (psw_val).data (), 4,
+	    (psw_val->contents_all ().data (), 4,
 	     gdbarch_byte_order (get_frame_arch (this_frame)));
 
 	  if ((psw & 0x20000 /* U bit */) != 0)
@@ -668,7 +668,7 @@ rx_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   CORE_ADDR cfa;
   int num_register_candidate_args;
 
-  struct type *func_type = value_type (function);
+  struct type *func_type = function->type ();
 
   /* Dereference function pointer types.  */
   while (func_type->code () == TYPE_CODE_PTR)
@@ -725,8 +725,8 @@ rx_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       for (i = 0; i < nargs; i++)
 	{
 	  struct value *arg = args[i];
-	  const gdb_byte *arg_bits = value_contents_all (arg).data ();
-	  struct type *arg_type = check_typedef (value_type (arg));
+	  const gdb_byte *arg_bits = arg->contents_all ().data ();
+	  struct type *arg_type = check_typedef (arg->type ());
 	  ULONGEST arg_size = arg_type->length ();
 
 	  if (i == 0 && struct_addr != 0
@@ -944,7 +944,6 @@ rx_dwarf_reg_to_regnum (struct gdbarch *gdbarch, int reg)
 static struct gdbarch *
 rx_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   int elf_flags;
   tdesc_arch_data_up tdesc_data;
   const struct target_desc *tdesc = info.target_desc;
@@ -997,8 +996,10 @@ rx_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   gdb_assert(tdesc_data != NULL);
 
-  rx_gdbarch_tdep *tdep = new rx_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new rx_gdbarch_tdep));
+  rx_gdbarch_tdep *tdep = gdbarch_tdep<rx_gdbarch_tdep> (gdbarch);
+
   tdep->elf_flags = elf_flags;
 
   set_gdbarch_num_regs (gdbarch, RX_NUM_REGS);

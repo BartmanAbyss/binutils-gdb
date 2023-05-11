@@ -1,6 +1,6 @@
 /* Dynamic architecture support for GDB, the GNU debugger.
 
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -68,6 +68,8 @@ struct gdbarch_tdep_base
 {
   virtual ~gdbarch_tdep_base() = default;
 };
+
+using gdbarch_tdep_up = std::unique_ptr<gdbarch_tdep_base>;
 
 /* The architecture associated with the inferior through the
    connection to the target.
@@ -268,10 +270,12 @@ struct gdbarch_info
 
 typedef struct gdbarch *(gdbarch_init_ftype) (struct gdbarch_info info, struct gdbarch_list *arches);
 typedef void (gdbarch_dump_tdep_ftype) (struct gdbarch *gdbarch, struct ui_file *file);
+typedef bool (gdbarch_supports_arch_info_ftype) (const struct bfd_arch_info *);
 
 extern void gdbarch_register (enum bfd_architecture architecture,
 			      gdbarch_init_ftype *init,
-			      gdbarch_dump_tdep_ftype *dump_tdep = nullptr);
+			      gdbarch_dump_tdep_ftype *dump_tdep = nullptr,
+			      gdbarch_supports_arch_info_ftype *supports_arch_info = nullptr);
 
 
 /* Return a vector of the valid architecture names.  Since architectures are
@@ -292,7 +296,8 @@ extern struct gdbarch_list *gdbarch_list_lookup_by_info (struct gdbarch_list *ar
    parameters.  set_gdbarch_*() functions are called to complete the
    initialization of the object.  */
 
-extern struct gdbarch *gdbarch_alloc (const struct gdbarch_info *info, struct gdbarch_tdep_base *tdep);
+extern struct gdbarch *gdbarch_alloc (const struct gdbarch_info *info,
+				      gdbarch_tdep_up tdep);
 
 
 /* Helper function.  Free a partially-constructed ``struct gdbarch''.
@@ -300,6 +305,14 @@ extern struct gdbarch *gdbarch_alloc (const struct gdbarch_info *info, struct gd
    gdbarch_tdep''.  */
 
 extern void gdbarch_free (struct gdbarch *);
+
+struct gdbarch_deleter
+{
+  void operator() (gdbarch *arch) const
+  { gdbarch_free (arch); }
+};
+
+using gdbarch_up = std::unique_ptr<gdbarch, gdbarch_deleter>;
 
 /* Get the obstack owned by ARCH.  */
 

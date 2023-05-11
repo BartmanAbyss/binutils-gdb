@@ -1,6 +1,6 @@
 /* Target-dependent code for the LoongArch architecture, for GDB.
 
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,6 +24,7 @@
 #include "frame-unwind.h"
 #include "gdbcore.h"
 #include "loongarch-tdep.h"
+#include "reggroups.h"
 #include "target.h"
 #include "target-descriptions.h"
 #include "trad-frame.h"
@@ -386,6 +387,14 @@ loongarch_software_single_step (struct regcache *regcache)
   return {next_pc};
 }
 
+/* Callback function for user_reg_add.  */
+
+static struct value *
+value_of_loongarch_user_reg (frame_info_ptr frame, const void *baton)
+{
+  return value_of_register ((long long) baton, frame);
+}
+
 /* Implement the frame_align gdbarch method.  */
 
 static CORE_ADDR
@@ -511,6 +520,10 @@ compute_struct_member (struct type *type,
 {
   for (int i = 0; i < type->num_fields (); i++)
     {
+      /* Ignore any static fields.  */
+      if (type->field (i).is_static ())
+	continue;
+
       struct type *field_type = check_typedef (type->field (i).type ());
 
       if (field_type->code () == TYPE_CODE_INT
@@ -565,12 +578,12 @@ loongarch_push_dummy_call (struct gdbarch *gdbarch,
   for (int i = 0; i < nargs; i++)
     {
       struct value *arg = args[i];
-      const gdb_byte *val = value_contents (arg).data ();
-      struct type *type = check_typedef (value_type (arg));
+      const gdb_byte *val = arg->contents ().data ();
+      struct type *type = check_typedef (arg->type ());
       size_t len = type->length ();
       int align = type_align (type);
       enum type_code code = type->code ();
-      struct type *func_type = check_typedef (value_type (function));
+      struct type *func_type = check_typedef (function->type ());
       bool varargs = (func_type->has_varargs () && i >= func_type->num_fields ());
 
       switch (code)
@@ -589,12 +602,12 @@ loongarch_push_dummy_call (struct gdbarch *gdbarch,
 	       and the signed integer scalars are sign-extended.  */
 	  if (type->is_unsigned ())
 	    {
-              ULONGEST data = extract_unsigned_integer (val, len, BFD_ENDIAN_LITTLE);
+	      ULONGEST data = extract_unsigned_integer (val, len, BFD_ENDIAN_LITTLE);
 	      if (gar > 0)
 		pass_in_gar (regcache, gar--, (gdb_byte *) &data);
 	      else
 		pass_on_stack (regcache, (gdb_byte *) &data, len, align, &addr);
-            }
+	    }
 	  else
 	    {
 	      LONGEST data = extract_signed_integer (val, len, BFD_ENDIAN_LITTLE);
@@ -602,7 +615,7 @@ loongarch_push_dummy_call (struct gdbarch *gdbarch,
 		pass_in_gar (regcache, gar--, (gdb_byte *) &data);
 	      else
 		pass_on_stack (regcache, (gdb_byte *) &data, len, align, &addr);
-            }
+	    }
 	  }
 	  break;
 	case TYPE_CODE_FLT:
@@ -962,7 +975,7 @@ loongarch_push_dummy_call (struct gdbarch *gdbarch,
 	      }
 	    else if (len > 2 * regsize)
 	      {
-	        /* It's passed by reference and are replaced in the argument list with the address.
+		/* It's passed by reference and are replaced in the argument list with the address.
 		   If there is an available GAR, the reference is passed in the GAR,
 		   and passed on the stack if no GAR is available.  */
 		sp = align_down (sp - len, 16);
@@ -1433,6 +1446,43 @@ loongarch_find_default_target_description (const struct gdbarch_info info)
   return loongarch_lookup_target_description (features);
 }
 
+static int
+loongarch_register_reggroup_p (struct gdbarch *gdbarch, int regnum,
+			       const struct reggroup *group)
+{
+  if (gdbarch_register_name (gdbarch, regnum) == NULL
+      || *gdbarch_register_name (gdbarch, regnum) == '\0')
+    return 0;
+
+  int raw_p = regnum < gdbarch_num_regs (gdbarch);
+
+  if (group == save_reggroup || group == restore_reggroup)
+    return raw_p;
+
+  if (group == all_reggroup)
+    return 1;
+
+  if (0 <= regnum && regnum <= LOONGARCH_BADV_REGNUM)
+    return group == general_reggroup;
+
+  /* Only ORIG_A0, PC, BADV in general_reggroup */
+  if (group == general_reggroup)
+    return 0;
+
+  if (LOONGARCH_FIRST_FP_REGNUM <= regnum && regnum <= LOONGARCH_FCSR_REGNUM)
+    return group == float_reggroup;
+
+  /* Only $fx / $fccx / $fcsr in float_reggroup */
+  if (group == float_reggroup)
+    return 0;
+
+  int ret = tdesc_register_in_reggroup_p (gdbarch, regnum, group);
+  if (ret != -1)
+    return ret;
+
+  return default_register_reggroup_p (gdbarch, regnum, group);
+}
+
 /* Initialize the current architecture based on INFO  */
 
 static struct gdbarch *
@@ -1441,7 +1491,6 @@ loongarch_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   size_t regnum = 0;
   struct loongarch_gdbarch_features features;
   tdesc_arch_data_up tdesc_data = tdesc_data_alloc ();
-  loongarch_gdbarch_tdep *tdep = new loongarch_gdbarch_tdep;
   const struct target_desc *tdesc = info.target_desc;
 
   /* Ensure we always have a target description.  */
@@ -1531,7 +1580,10 @@ loongarch_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     return arches->gdbarch;
 
   /* None found, so create a new architecture from the information provided.  */
-  struct gdbarch *gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new loongarch_gdbarch_tdep));
+  loongarch_gdbarch_tdep *tdep = gdbarch_tdep<loongarch_gdbarch_tdep> (gdbarch);
+
   tdep->abi_features = abi_features;
 
   /* Target data types.  */
@@ -1548,6 +1600,19 @@ loongarch_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   info.target_desc = tdesc;
   info.tdesc_data = tdesc_data.get ();
+
+  for (int i = 0; i < ARRAY_SIZE (loongarch_r_lp64_name); ++i)
+    if (loongarch_r_lp64_name[i][0] != '\0')
+      user_reg_add (gdbarch, loongarch_r_lp64_name[i] + 1,
+	value_of_loongarch_user_reg, (void *) (size_t) i);
+
+  for (int i = 0; i < ARRAY_SIZE (loongarch_f_lp64_name); ++i)
+    {
+      if (loongarch_f_lp64_name[i][0] != '\0')
+	user_reg_add (gdbarch, loongarch_f_lp64_name[i] + 1,
+		      value_of_loongarch_user_reg,
+		      (void *) (size_t) (LOONGARCH_FIRST_FP_REGNUM + i));
+    }
 
   /* Information about registers.  */
   set_gdbarch_num_regs (gdbarch, regnum);
@@ -1584,6 +1649,7 @@ loongarch_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   /* Hook in OS ABI-specific overrides, if they have been registered.  */
   gdbarch_init_osabi (info, gdbarch);
+  set_gdbarch_register_reggroup_p (gdbarch, loongarch_register_reggroup_p);
 
   return gdbarch;
 }

@@ -1,5 +1,5 @@
 /* RISC-V disassembler
-   Copyright (C) 2011-2022 Free Software Foundation, Inc.
+   Copyright (C) 2011-2023 Free Software Foundation, Inc.
 
    Contributed by Andrew Waterman (andrew@sifive.com).
    Based on MIPS target.
@@ -64,6 +64,9 @@ struct riscv_private_data
 /* Used for mapping symbols.  */
 static int last_map_symbol = -1;
 static bfd_vma last_stop_offset = 0;
+static bfd_vma last_map_symbol_boundary = 0;
+static enum riscv_seg_mstate last_map_state = MAP_NONE;
+static asection *last_map_section = NULL;
 
 /* Register names as used by the disassembler.  */
 static const char * const *riscv_gpr_names;
@@ -473,11 +476,6 @@ print_insn_args (const char *oparg, insn_t l, bfd_vma pc, disassemble_info *info
 		 (int)EXTRACT_STYPE_IMM (l));
 	  break;
 
-	case 'f':
-	  print (info->stream, dis_style_address_offset, "%d",
-		 (int)EXTRACT_STYPE_IMM (l));
-	  break;
-
 	case 'a':
 	  info->target = EXTRACT_JTYPE_IMM (l) + pc;
 	  (*info->print_address_func) (info->target, info);
@@ -582,6 +580,27 @@ print_insn_args (const char *oparg, insn_t l, bfd_vma pc, disassemble_info *info
 	  print (info->stream, dis_style_immediate, "%d", rs1);
 	  break;
 
+	case 'W': /* Various operands.  */
+	  {
+	    switch (*++oparg)
+	      {
+	      case 'i':
+		switch (*++oparg)
+		  {
+		  case 'f':
+		    print (info->stream, dis_style_address_offset, "%d",
+			   (int) EXTRACT_STYPE_IMM (l));
+		    break;
+		  default:
+		    goto undefined_modifier;
+		  }
+		  break;
+	      default:
+		goto undefined_modifier;
+	      }
+	  }
+	  break;
+
 	case 'X': /* Integer immediate.  */
 	  {
 	    size_t n;
@@ -641,13 +660,17 @@ print_insn_args (const char *oparg, insn_t l, bfd_vma pc, disassemble_info *info
    this is little-endian code.  */
 
 static int
-riscv_disassemble_insn (bfd_vma memaddr, insn_t word, disassemble_info *info)
+riscv_disassemble_insn (bfd_vma memaddr,
+			insn_t word,
+			const bfd_byte *packet,
+			disassemble_info *info)
 {
   const struct riscv_opcode *op;
   static bool init = false;
   static const struct riscv_opcode *riscv_hash[OP_MASK_OP + 1];
   struct riscv_private_data *pd;
-  int insnlen;
+  int insnlen, i;
+  bool printed;
 
 #define OP_HASH_IDX(i) ((i) & (riscv_insn_length (i) == 2 ? 0x3 : OP_MASK_OP))
 
@@ -663,8 +686,6 @@ riscv_disassemble_insn (bfd_vma memaddr, insn_t word, disassemble_info *info)
 
   if (info->private_data == NULL)
     {
-      int i;
-
       pd = info->private_data = xcalloc (1, sizeof (struct riscv_private_data));
       pd->gp = 0;
       pd->print_addr = 0;
@@ -780,38 +801,28 @@ riscv_disassemble_insn (bfd_vma memaddr, insn_t word, disassemble_info *info)
 	}
     }
 
-  /* We did not find a match, so just print the instruction bits.  */
+  /* We did not find a match, so just print the instruction bits in
+     the shape of an assembler .insn directive.  */
   info->insn_type = dis_noninsn;
-  switch (insnlen)
+  (*info->fprintf_styled_func)
+    (info->stream, dis_style_assembler_directive, ".insn");
+  (*info->fprintf_styled_func) (info->stream, dis_style_text, "\t");
+  (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				"%d", insnlen);
+  (*info->fprintf_styled_func) (info->stream, dis_style_text, ", ");
+  (*info->fprintf_styled_func) (info->stream, dis_style_immediate, "0x");
+  for (i = insnlen, printed = false; i >= 2; )
     {
-    case 2:
-    case 4:
-    case 8:
-      (*info->fprintf_styled_func)
-	(info->stream, dis_style_assembler_directive, ".%dbyte", insnlen);
-      (*info->fprintf_styled_func) (info->stream, dis_style_text, "\t");
+      i -= 2;
+      word = bfd_get_bits (packet + i, 16, false);
+      if (!word && !printed)
+	continue;
+
       (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
-				    "0x%llx", (unsigned long long) word);
-      break;
-    default:
-      {
-        int i;
-	(*info->fprintf_styled_func)
-	  (info->stream, dis_style_assembler_directive, ".byte");
-	(*info->fprintf_styled_func) (info->stream, dis_style_text, "\t");
-        for (i = 0; i < insnlen; ++i)
-          {
-            if (i > 0)
-	      (*info->fprintf_styled_func) (info->stream, dis_style_text,
-					    ", ");
-	    (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
-					  "0x%02x",
-					  (unsigned int) (word & 0xff));
-            word >>= 8;
-          }
-      }
-      break;
+				    "%04x", (unsigned int) word);
+      printed = true;
     }
+
   return insnlen;
 }
 
@@ -859,6 +870,14 @@ riscv_search_mapping_symbol (bfd_vma memaddr,
   bool found = false;
   int symbol = -1;
   int n;
+
+  /* Return the last map state if the address is still within the range of the
+     last mapping symbol.  */
+  if (last_map_section == info->section
+      && (memaddr < last_map_symbol_boundary))
+    return last_map_state;
+
+  last_map_section = info->section;
 
   /* Decide whether to print the data or instruction by default, in case
      we can not find the corresponding mapping symbols.  */
@@ -931,6 +950,36 @@ riscv_search_mapping_symbol (bfd_vma memaddr,
 	}
     }
 
+  if (found)
+    {
+      /* Find the next mapping symbol to determine the boundary of this mapping
+	 symbol.  */
+
+      bool found_next = false;
+      /* Try to found next mapping symbol.  */
+      for (n = symbol + 1; n < info->symtab_size; n++)
+	{
+	  if (info->symtab[symbol]->section != info->symtab[n]->section)
+	    continue;
+
+	  bfd_vma addr = bfd_asymbol_value (info->symtab[n]);
+	  const char *sym_name = bfd_asymbol_name(info->symtab[n]);
+	  if (sym_name[0] == '$' && (sym_name[1] == 'x' || sym_name[1] == 'd'))
+	    {
+	      /* The next mapping symbol has been found, and it represents the
+		 boundary of this mapping symbol.  */
+	      found_next = true;
+	      last_map_symbol_boundary = addr;
+	      break;
+	    }
+	}
+
+      /* No further mapping symbol has been found, indicating that the boundary
+	 of the current mapping symbol is the end of this section.  */
+      if (!found_next)
+	last_map_symbol_boundary = info->section->vma + info->section->size;
+    }
+
   /* Save the information for next use.  */
   last_map_symbol = symbol;
   last_stop_offset = info->stop_offset;
@@ -983,6 +1032,7 @@ riscv_data_length (bfd_vma memaddr,
 static int
 riscv_disassemble_data (bfd_vma memaddr ATTRIBUTE_UNUSED,
 			insn_t data,
+			const bfd_byte *packet ATTRIBUTE_UNUSED,
 			disassemble_info *info)
 {
   info->display_endian = info->endian;
@@ -1037,7 +1087,8 @@ print_insn_riscv (bfd_vma memaddr, struct disassemble_info *info)
   bfd_vma dump_size;
   int status;
   enum riscv_seg_mstate mstate;
-  int (*riscv_disassembler) (bfd_vma, insn_t, struct disassemble_info *);
+  int (*riscv_disassembler) (bfd_vma, insn_t, const bfd_byte *,
+			     struct disassemble_info *);
 
   if (info->disassembler_options != NULL)
     {
@@ -1049,6 +1100,8 @@ print_insn_riscv (bfd_vma memaddr, struct disassemble_info *info)
     set_default_riscv_dis_options ();
 
   mstate = riscv_search_mapping_symbol (memaddr, info);
+  /* Save the last mapping state.  */
+  last_map_state = mstate;
 
   /* Set the size to dump.  */
   if (mstate == MAP_DATA
@@ -1065,7 +1118,7 @@ print_insn_riscv (bfd_vma memaddr, struct disassemble_info *info)
       if (status != 0)
 	{
 	  (*info->memory_error_func) (status, memaddr, info);
-	  return status;
+	  return -1;
 	}
       insn = (insn_t) bfd_getl16 (packet);
       dump_size = riscv_insn_length (insn);
@@ -1077,11 +1130,11 @@ print_insn_riscv (bfd_vma memaddr, struct disassemble_info *info)
   if (status != 0)
     {
       (*info->memory_error_func) (status, memaddr, info);
-      return status;
+      return -1;
     }
   insn = (insn_t) bfd_get_bits (packet, dump_size * 8, false);
 
-  return (*riscv_disassembler) (memaddr, insn, info);
+  return (*riscv_disassembler) (memaddr, insn, packet, info);
 }
 
 disassembler_ftype

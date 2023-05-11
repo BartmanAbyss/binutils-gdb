@@ -1,6 +1,6 @@
 /* Target-dependent code for Renesas Super-H, for GDB.
 
-   Copyright (C) 1993-2022 Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -49,7 +49,7 @@
 #include "elf/sh.h"
 #include "dwarf2.h"
 /* registers numbers shared with the simulator.  */
-#include "gdb/sim-sh.h"
+#include "sim/sim-sh.h"
 #include <algorithm>
 
 /* List of "set sh ..." and "show sh ..." commands.  */
@@ -883,12 +883,12 @@ sh_justify_value_in_reg (struct gdbarch *gdbarch, struct value *val, int len)
     {
       /* value gets right-justified in the register or stack word.  */
       if (gdbarch_byte_order (gdbarch) == BFD_ENDIAN_BIG)
-	memcpy (valbuf + (4 - len), value_contents (val).data (), len);
+	memcpy (valbuf + (4 - len), val->contents ().data (), len);
       else
-	memcpy (valbuf, value_contents (val).data (), len);
+	memcpy (valbuf, val->contents ().data (), len);
       return valbuf;
     }
-  return value_contents (val).data ();
+  return val->contents ().data ();
 }
 
 /* Helper function to eval number of bytes to allocate on stack.  */
@@ -897,7 +897,7 @@ sh_stack_allocsize (int nargs, struct value **args)
 {
   int stack_alloc = 0;
   while (nargs-- > 0)
-    stack_alloc += ((value_type (args[nargs])->length () + 3) & ~3);
+    stack_alloc += ((args[nargs]->type ()->length () + 3) & ~3);
   return stack_alloc;
 }
 
@@ -1030,7 +1030,7 @@ sh_push_dummy_call_fpu (struct gdbarch *gdbarch,
   int argreg = ARG0_REGNUM;
   int flt_argreg = 0;
   int argnum;
-  struct type *func_type = value_type (function);
+  struct type *func_type = function->type ();
   struct type *type;
   CORE_ADDR regval;
   const gdb_byte *val;
@@ -1060,7 +1060,7 @@ sh_push_dummy_call_fpu (struct gdbarch *gdbarch,
      in four registers available.  Loop thru args from first to last.  */
   for (argnum = 0; argnum < nargs; argnum++)
     {
-      type = value_type (args[argnum]);
+      type = args[argnum]->type ();
       len = type->length ();
       val = sh_justify_value_in_reg (gdbarch, args[argnum], len);
 
@@ -1172,7 +1172,7 @@ sh_push_dummy_call_nofpu (struct gdbarch *gdbarch,
   int stack_offset = 0;
   int argreg = ARG0_REGNUM;
   int argnum;
-  struct type *func_type = value_type (function);
+  struct type *func_type = function->type ();
   struct type *type;
   CORE_ADDR regval;
   const gdb_byte *val;
@@ -1198,7 +1198,7 @@ sh_push_dummy_call_nofpu (struct gdbarch *gdbarch,
      in four registers available.  Loop thru args from first to last.  */
   for (argnum = 0; argnum < nargs; argnum++)
     {
-      type = value_type (args[argnum]);
+      type = args[argnum]->type ();
       len = type->length ();
       val = sh_justify_value_in_reg (gdbarch, args[argnum], len);
 
@@ -1364,7 +1364,7 @@ sh_return_value_nofpu (struct gdbarch *gdbarch, struct value *function,
 		       struct type *type, struct regcache *regcache,
 		       gdb_byte *readbuf, const gdb_byte *writebuf)
 {
-  struct type *func_type = function ? value_type (function) : NULL;
+  struct type *func_type = function ? function->type () : NULL;
 
   if (sh_use_struct_convention_nofpu
 	(sh_is_renesas_calling_convention (func_type), type))
@@ -1381,7 +1381,7 @@ sh_return_value_fpu (struct gdbarch *gdbarch, struct value *function,
 		     struct type *type, struct regcache *regcache,
 		     gdb_byte *readbuf, const gdb_byte *writebuf)
 {
-  struct type *func_type = function ? value_type (function) : NULL;
+  struct type *func_type = function ? function->type () : NULL;
 
   if (sh_use_struct_convention (
 	sh_is_renesas_calling_convention (func_type), type))
@@ -1516,9 +1516,12 @@ sh_littlebyte_bigword_type (struct gdbarch *gdbarch)
   sh_gdbarch_tdep *tdep = gdbarch_tdep<sh_gdbarch_tdep> (gdbarch);
 
   if (tdep->sh_littlebyte_bigword_type == NULL)
-    tdep->sh_littlebyte_bigword_type
-      = arch_float_type (gdbarch, -1, "builtin_type_sh_littlebyte_bigword",
-			 floatformats_ieee_double_littlebyte_bigword);
+    {
+      type_allocator alloc (gdbarch);
+      tdep->sh_littlebyte_bigword_type
+	= init_float_type (alloc, -1, "builtin_type_sh_littlebyte_bigword",
+			   floatformats_ieee_double_littlebyte_bigword);
+    }
 
   return tdep->sh_littlebyte_bigword_type;
 }
@@ -2195,8 +2198,6 @@ sh_return_in_first_hidden_param_p (struct gdbarch *gdbarch,
 static struct gdbarch *
 sh_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
-
   /* If there is already a candidate, use it.  */
   arches = gdbarch_list_lookup_by_info (arches, &info);
   if (arches != NULL)
@@ -2204,8 +2205,8 @@ sh_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   /* None found, create a new architecture from the information
      provided.  */
-  sh_gdbarch_tdep *tdep = new sh_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new sh_gdbarch_tdep));
 
   set_gdbarch_short_bit (gdbarch, 2 * TARGET_CHAR_BIT);
   set_gdbarch_int_bit (gdbarch, 4 * TARGET_CHAR_BIT);

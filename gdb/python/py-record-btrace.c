@@ -1,6 +1,6 @@
 /* Python interface to btrace instruction history.
 
-   Copyright 2016-2022 Free Software Foundation, Inc.
+   Copyright 2016-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -816,7 +816,7 @@ static PyMappingMethods btpy_list_mapping_methods =
 
 /* Sets up the btrace record API.  */
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_btrace (void)
 {
   btpy_list_type.tp_new = PyType_GenericNew;
@@ -837,3 +837,5 @@ gdbpy_initialize_btrace (void)
 
   return PyType_Ready (&btpy_list_type);
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_btrace);

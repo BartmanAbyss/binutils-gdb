@@ -1,5 +1,5 @@
 /* Data structures associated with breakpoints in GDB.
-   Copyright (C) 1992-2022 Free Software Foundation, Inc.
+   Copyright (C) 1992-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -317,6 +317,7 @@ enum bp_loc_type
   bp_loc_hardware_breakpoint,
   bp_loc_software_watchpoint,
   bp_loc_hardware_watchpoint,
+  bp_loc_tracepoint,
   bp_loc_other			/* Miscellaneous...  */
 };
 
@@ -664,7 +665,8 @@ struct breakpoint
 			      const target_waitstatus &ws);
 
   /* Check internal conditions of the breakpoint referred to by BS.
-     If we should not stop for this breakpoint, set BS->stop to 0.  */
+     If we should not stop for this breakpoint, set BS->stop to
+     false.  */
   virtual void check_status (struct bpstat *bs)
   {
     /* Always stop.  */
@@ -801,9 +803,9 @@ struct breakpoint
      care.  */
   int thread = -1;
 
-  /* Ada task number for task-specific breakpoint, or 0 if don't
+  /* Ada task number for task-specific breakpoint, or -1 if don't
      care.  */
-  int task = 0;
+  int task = -1;
 
   /* Count of the number of times this breakpoint was taken, dumped
      with the info, but not used for anything else.  Useful for seeing
@@ -897,6 +899,10 @@ protected:
        (location_spec *locspec,
 	struct program_space *search_pspace,
 	int *found);
+
+  /* Helper for breakpoint and tracepoint breakpoint->mention
+     callbacks.  */
+  void say_where () const;
 };
 
 /* An instance of this type is used to represent a watchpoint,
@@ -1326,11 +1332,11 @@ struct bpstat
     /* Old value associated with a watchpoint.  */
     value_ref_ptr old_val;
 
-    /* Nonzero if this breakpoint tells us to print the frame.  */
-    char print;
+    /* True if this breakpoint tells us to print the frame.  */
+    bool print;
 
-    /* Nonzero if this breakpoint tells us to stop.  */
-    char stop;
+    /* True if this breakpoint tells us to stop.  */
+    bool stop;
 
     /* Tell bpstat_print and print_bp_stop_message how to print stuff
        associated with this element of the bpstat chain.  */
@@ -1479,10 +1485,12 @@ extern void
    target and breakpoint_created observers of its existence.  If
    INTERNAL is non-zero, the breakpoint number will be allocated from
    the internal breakpoint count.  If UPDATE_GLL is non-zero,
-   update_global_location_list will be called.  */
+   update_global_location_list will be called.
 
-extern void install_breakpoint (int internal, std::unique_ptr<breakpoint> &&b,
-				int update_gll);
+   Takes ownership of B, and returns a non-owning reference to it.  */
+
+extern breakpoint *install_breakpoint
+  (int internal, std::unique_ptr<breakpoint> &&b, int update_gll);
 
 /* Returns the breakpoint ops appropriate for use with with LOCSPEC
    and according to IS_TRACEPOINT.  Use this to ensure, for example,
@@ -1666,7 +1674,17 @@ extern void breakpoint_set_commands (struct breakpoint *b,
 
 extern void breakpoint_set_silent (struct breakpoint *b, int silent);
 
+/* Set the thread for this breakpoint.  If THREAD is -1, make the
+   breakpoint work for any thread.  Passing a value other than -1 for
+   THREAD should only be done if b->task is 0; it is not valid to try and
+   set both a thread and task restriction on a breakpoint.  */
+
 extern void breakpoint_set_thread (struct breakpoint *b, int thread);
+
+/* Set the task for this breakpoint.  If TASK is -1, make the breakpoint
+   work for any task.  Passing a value other than -1 for TASK should only
+   be done if b->thread is -1; it is not valid to try and set both a thread
+   and task restriction on a breakpoint.  */
 
 extern void breakpoint_set_task (struct breakpoint *b, int task);
 

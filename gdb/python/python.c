@@ -1,6 +1,6 @@
 /* General python/gdb code
 
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -64,6 +64,7 @@ static const char *gdbpy_should_print_stack = python_excp_message;
 #include "cli/cli-decode.h"
 #include "charset.h"
 #include "top.h"
+#include "ui.h"
 #include "python-internal.h"
 #include "linespec.h"
 #include "source.h"
@@ -112,7 +113,8 @@ static void gdbpy_start_type_printers (const struct extension_language_defn *,
 				       struct ext_lang_type_printers *);
 static enum ext_lang_rc gdbpy_apply_type_printers
   (const struct extension_language_defn *,
-   const struct ext_lang_type_printers *, struct type *, char **);
+   const struct ext_lang_type_printers *, struct type *,
+   gdb::unique_xmalloc_ptr<char> *);
 static void gdbpy_free_type_printers (const struct extension_language_defn *,
 				      struct ext_lang_type_printers *);
 static void gdbpy_set_quit_flag (const struct extension_language_defn *);
@@ -504,27 +506,45 @@ gdbpy_parameter_value (const setting &var)
 	  Py_RETURN_NONE;
       }
 
-    case var_integer:
-      if (var.get<int> () == INT_MAX)
-	Py_RETURN_NONE;
-      /* Fall through.  */
-    case var_zinteger:
-    case var_zuinteger_unlimited:
-      return gdb_py_object_from_longest (var.get<int> ()).release ();
-
     case var_uinteger:
+    case var_integer:
+    case var_pinteger:
       {
-	unsigned int val = var.get<unsigned int> ();
+	LONGEST value
+	  = (var.type () == var_uinteger
+	     ? static_cast<LONGEST> (var.get<unsigned int> ())
+	     : static_cast<LONGEST> (var.get<int> ()));
 
-	if (val == UINT_MAX)
-	  Py_RETURN_NONE;
-	return gdb_py_object_from_ulongest (val).release ();
-      }
+	if (var.extra_literals () != nullptr)
+	  for (const literal_def *l = var.extra_literals ();
+	       l->literal != nullptr;
+	       l++)
+	    if (value == l->use)
+	      {
+		if (strcmp (l->literal, "unlimited") == 0)
+		  {
+		    /* Compatibility hack for API brokenness.  */
+		    if (var.type () == var_pinteger
+			&& l->val.has_value ()
+			&& *l->val == -1)
+		      value = -1;
+		    else
+		      Py_RETURN_NONE;
+		  }
+		else if (l->val.has_value ())
+		  value = *l->val;
+		else
+		  return host_string_to_python_string (l->literal).release ();
+	      }
 
-    case var_zuinteger:
-      {
-	unsigned int val = var.get<unsigned int> ();
-	return gdb_py_object_from_ulongest (val).release ();
+	if (var.type () == var_uinteger)
+	  return
+	    gdb_py_object_from_ulongest
+	      (static_cast<unsigned int> (value)).release ();
+	else
+	  return
+	    gdb_py_object_from_longest
+	      (static_cast<int> (value)).release ();
       }
     }
 
@@ -603,31 +623,32 @@ static PyObject *
 execute_gdb_command (PyObject *self, PyObject *args, PyObject *kw)
 {
   const char *arg;
-  PyObject *from_tty_obj = NULL, *to_string_obj = NULL;
-  int from_tty, to_string;
-  static const char *keywords[] = { "command", "from_tty", "to_string", NULL };
+  PyObject *from_tty_obj = nullptr;
+  PyObject *to_string_obj = nullptr;
+  static const char *keywords[] = { "command", "from_tty", "to_string",
+				    nullptr };
 
   if (!gdb_PyArg_ParseTupleAndKeywords (args, kw, "s|O!O!", keywords, &arg,
 					&PyBool_Type, &from_tty_obj,
 					&PyBool_Type, &to_string_obj))
-    return NULL;
+    return nullptr;
 
-  from_tty = 0;
-  if (from_tty_obj)
+  bool from_tty = false;
+  if (from_tty_obj != nullptr)
     {
       int cmp = PyObject_IsTrue (from_tty_obj);
       if (cmp < 0)
-	return NULL;
-      from_tty = cmp;
+	return nullptr;
+      from_tty = (cmp != 0);
     }
 
-  to_string = 0;
-  if (to_string_obj)
+  bool to_string = false;
+  if (to_string_obj != nullptr)
     {
       int cmp = PyObject_IsTrue (to_string_obj);
       if (cmp < 0)
-	return NULL;
-      to_string = cmp;
+	return nullptr;
+      to_string = (cmp != 0);
     }
 
   std::string to_string_res;
@@ -644,7 +665,7 @@ execute_gdb_command (PyObject *self, PyObject *args, PyObject *kw)
       bool first = true;
       char *save_ptr = nullptr;
       auto reader
-	= [&] ()
+	= [&] (std::string &buffer)
 	  {
 	    const char *result = strtok_r (first ? &arg_copy[0] : nullptr,
 					   "\n", &save_ptr);
@@ -951,22 +972,24 @@ static PyObject *
 gdbpy_parse_and_eval (PyObject *self, PyObject *args)
 {
   const char *expr_str;
-  struct value *result = NULL;
 
   if (!PyArg_ParseTuple (args, "s", &expr_str))
     return NULL;
 
+  PyObject *result = nullptr;
   try
     {
       gdbpy_allow_threads allow_threads;
-      result = parse_and_eval (expr_str);
+      scoped_value_mark free_values;
+      struct value *val = parse_and_eval (expr_str);
+      result = value_to_value_object (val);
     }
   catch (const gdb_exception &except)
     {
       GDB_PY_HANDLE_EXCEPTION (except);
     }
 
-  return value_to_value_object (result);
+  return result;
 }
 
 /* Implementation of gdb.invalidate_cached_frames.  */
@@ -1679,7 +1702,7 @@ gdbpy_start_type_printers (const struct extension_language_defn *extlang,
 
 /* If TYPE is recognized by some type printer, store in *PRETTIED_TYPE
    a newly allocated string holding the type's replacement name, and return
-   EXT_LANG_RC_OK.  The caller is responsible for freeing the string.
+   EXT_LANG_RC_OK.
    If there's a Python error return EXT_LANG_RC_ERROR.
    Otherwise, return EXT_LANG_RC_NOP.
    This is the extension_language_ops.apply_type_printers "method".  */
@@ -1687,7 +1710,8 @@ gdbpy_start_type_printers (const struct extension_language_defn *extlang,
 static enum ext_lang_rc
 gdbpy_apply_type_printers (const struct extension_language_defn *extlang,
 			   const struct ext_lang_type_printers *ext_printers,
-			   struct type *type, char **prettied_type)
+			   struct type *type,
+			   gdb::unique_xmalloc_ptr<char> *prettied_type)
 {
   PyObject *printers_obj = (PyObject *) ext_printers->py_type_printers;
   gdb::unique_xmalloc_ptr<char> result;
@@ -1742,7 +1766,7 @@ gdbpy_apply_type_printers (const struct extension_language_defn *extlang,
       return EXT_LANG_RC_ERROR;
     }
 
-  *prettied_type = result.release ();
+  *prettied_type = std::move (result);
   return EXT_LANG_RC_OK;
 }
 
@@ -1931,7 +1955,8 @@ finalize_python (void *ignore)
   (void) PyGILState_Ensure ();
   gdbpy_enter::finalize ();
 
-  gdbpy_finalize_micommands ();
+  /* Call the gdbpy_finalize_* functions from every *.c file.  */
+  gdbpy_initialize_file::finalize_all ();
 
   Py_Finalize ();
 
@@ -2056,7 +2081,7 @@ do_start_initialization ()
 
   PyConfig_InitPythonConfig (&config);
   PyStatus status = PyConfig_SetString (&config, &config.program_name,
-                                        progname_copy);
+					progname_copy);
   if (PyStatus_Exception (status))
     goto init_done;
 
@@ -2119,41 +2144,8 @@ init_done:
 				 gdbpy_gdberror_exc) < 0)
     return false;
 
-  gdbpy_initialize_gdb_readline ();
-
-  if (gdbpy_initialize_auto_load () < 0
-      || gdbpy_initialize_values () < 0
-      || gdbpy_initialize_disasm () < 0
-      || gdbpy_initialize_frames () < 0
-      || gdbpy_initialize_commands () < 0
-      || gdbpy_initialize_instruction () < 0
-      || gdbpy_initialize_record () < 0
-      || gdbpy_initialize_btrace () < 0
-      || gdbpy_initialize_symbols () < 0
-      || gdbpy_initialize_symtabs () < 0
-      || gdbpy_initialize_blocks () < 0
-      || gdbpy_initialize_functions () < 0
-      || gdbpy_initialize_parameters () < 0
-      || gdbpy_initialize_types () < 0
-      || gdbpy_initialize_pspace () < 0
-      || gdbpy_initialize_objfile () < 0
-      || gdbpy_initialize_breakpoints () < 0
-      || gdbpy_initialize_breakpoint_locations () < 0
-      || gdbpy_initialize_finishbreakpoints () < 0
-      || gdbpy_initialize_lazy_string () < 0
-      || gdbpy_initialize_linetable () < 0
-      || gdbpy_initialize_thread () < 0
-      || gdbpy_initialize_inferior () < 0
-      || gdbpy_initialize_eventregistry () < 0
-      || gdbpy_initialize_event () < 0
-      || gdbpy_initialize_arch () < 0
-      || gdbpy_initialize_registers () < 0
-      || gdbpy_initialize_xmethods () < 0
-      || gdbpy_initialize_unwind () < 0
-      || gdbpy_initialize_membuf () < 0
-      || gdbpy_initialize_connection () < 0
-      || gdbpy_initialize_tui () < 0
-      || gdbpy_initialize_micommands () < 0)
+  /* Call the gdbpy_initialize_* functions from every *.c file.  */
+  if (!gdbpy_initialize_file::initialize_all ())
     return false;
 
 #define GDB_PY_DEFINE_EVENT_TYPE(name, py_name, doc, base)	\

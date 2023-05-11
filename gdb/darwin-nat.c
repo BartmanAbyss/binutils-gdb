@@ -1,5 +1,5 @@
 /* Darwin support for GDB, the GNU debugger.
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    Contributed by AdaCore.
 
@@ -360,7 +360,7 @@ darwin_nat_target::check_new_threads (inferior *inf)
 	{
 	  /* A thread was removed.  */
 	  struct thread_info *thr
-	    = find_thread_ptid (this, ptid_t (inf->pid, 0, old_id));
+	    = this->find_thread (ptid_t (inf->pid, 0, old_id));
 	  delete_thread (thr);
 	  kret = mach_port_deallocate (gdb_task, old_id);
 	  MACH_CHECK_ERROR (kret);
@@ -1105,7 +1105,7 @@ darwin_nat_target::decode_message (mach_msg_header_t *hdr,
 	      if (WIFEXITED (wstatus))
 		{
 		  status->set_exited (WEXITSTATUS (wstatus));
-	          inferior_debug (4, _("darwin_wait: pid=%d exit, status=0x%x\n"),
+		  inferior_debug (4, _("darwin_wait: pid=%d exit, status=0x%x\n"),
 				  res_pid, wstatus);
 		}
 	      else if (WIFSTOPPED (wstatus))
@@ -1128,7 +1128,7 @@ darwin_nat_target::decode_message (mach_msg_header_t *hdr,
 		{
 		  status->set_ignore ();
 		  warning (_("Unexpected wait status after MACH_NOTIFY_DEAD_NAME "
-		             "notification: 0x%x"), wstatus);
+			     "notification: 0x%x"), wstatus);
 		  return minus_one_ptid;
 		}
 
@@ -2037,7 +2037,7 @@ darwin_nat_target::attach (const char *args, int from_tty)
 
   inf = current_inferior ();
   inferior_appeared (inf, pid);
-  inf->attach_flag = 1;
+  inf->attach_flag = true;
 
   darwin_attach_pid (inf);
 

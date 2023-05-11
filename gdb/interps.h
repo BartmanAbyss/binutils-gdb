@@ -1,6 +1,6 @@
 /* Manages interpreters for GDB, the GNU debugger.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Written by Jim Ingham <jingham@apple.com> of Apple Computer, Inc.
 
@@ -22,6 +22,8 @@
 #ifndef INTERPS_H
 #define INTERPS_H
 
+#include "gdbsupport/intrusive_list.h"
+
 struct ui_out;
 struct interp;
 struct ui;
@@ -32,14 +34,15 @@ typedef struct interp *(*interp_factory_func) (const char *name);
 /* Each interpreter kind (CLI, MI, etc.) registers itself with a call
    to this function, passing along its name, and a pointer to a
    function that creates a new instance of an interpreter with that
-   name.  */
+   name.
+
+   The memory for NAME must have static storage duration.  */
 extern void interp_factory_register (const char *name,
 				     interp_factory_func func);
 
-extern struct gdb_exception interp_exec (struct interp *interp,
-					 const char *command);
+extern void interp_exec (struct interp *interp, const char *command);
 
-class interp
+class interp : public intrusive_list_node<interp>
 {
 public:
   explicit interp (const char *name);
@@ -51,7 +54,7 @@ public:
   virtual void resume () = 0;
   virtual void suspend () = 0;
 
-  virtual gdb_exception exec (const char *command) = 0;
+  virtual void exec (const char *command) = 0;
 
   /* Returns the ui_out currently used to collect results for this
      interpreter.  It can be a formatter for stdout, as is the case
@@ -77,19 +80,13 @@ public:
   { return false; }
 
   const char *name () const
-  {
-    return m_name.get ();
-  }
+  { return m_name; }
 
 private:
-  /* This is the name in "-i=" and "set interpreter".  */
-  gdb::unique_xmalloc_ptr<char> m_name;
+  /* The memory for this is static, it comes from literal strings (e.g. "cli").  */
+  const char *m_name;
 
 public:
-  /* Interpreters are stored in a linked list, this is the next
-     one...  */
-  struct interp *next;
-
   /* Has the init method been run?  */
   bool inited = false;
 };
@@ -175,7 +172,6 @@ extern void interpreter_completer (struct cmd_list_element *ignore,
 
 /* well-known interpreters */
 #define INTERP_CONSOLE		"console"
-#define INTERP_MI1             "mi1"
 #define INTERP_MI2             "mi2"
 #define INTERP_MI3             "mi3"
 #define INTERP_MI4             "mi4"

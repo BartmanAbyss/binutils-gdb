@@ -1,5 +1,5 @@
 /* Support routines for building symbol tables in GDB's internal format.
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -211,9 +211,10 @@ buildsym_compunit::finish_block_internal
   struct pending_block *pblock;
   struct pending_block *opblock;
 
-  block = (is_global
-	   ? allocate_global_block (&m_objfile->objfile_obstack)
-	   : allocate_block (&m_objfile->objfile_obstack));
+  if (is_global)
+    block = new (&m_objfile->objfile_obstack) global_block;
+  else
+    block = new (&m_objfile->objfile_obstack) struct block;
 
   if (symbol)
     {
@@ -243,8 +244,8 @@ buildsym_compunit::finish_block_internal
   if (symbol)
     {
       struct type *ftype = symbol->type ();
-      struct mdict_iterator miter;
       symbol->set_value_block (block);
+      symbol->set_section_index (SECT_OFF_TEXT (m_objfile));
       block->set_function (symbol);
 
       if (ftype->num_fields () <= 0)
@@ -253,11 +254,10 @@ buildsym_compunit::finish_block_internal
 	     function's type.  Set that from the type of the
 	     parameter symbols.  */
 	  int nparams = 0, iparams;
-	  struct symbol *sym;
 
 	  /* Here we want to directly access the dictionary, because
 	     we haven't fully initialized the block yet.  */
-	  ALL_DICT_SYMBOLS (block->multidict (), miter, sym)
+	  for (struct symbol *sym : block->multidict_symbols ())
 	    {
 	      if (sym->is_argument ())
 		nparams++;
@@ -272,7 +272,7 @@ buildsym_compunit::finish_block_internal
 	      iparams = 0;
 	      /* Here we want to directly access the dictionary, because
 		 we haven't fully initialized the block yet.  */
-	      ALL_DICT_SYMBOLS (block->multidict (), miter, sym)
+	      for (struct symbol *sym : block->multidict_symbols ())
 		{
 		  if (iparams == nparams)
 		    break;
@@ -371,11 +371,10 @@ buildsym_compunit::finish_block_internal
       opblock = pblock;
     }
 
-  block_set_using (block,
-		   (is_global
-		    ? m_global_using_directives
-		    : m_local_using_directives),
-		   &m_objfile->objfile_obstack);
+  block->set_using ((is_global
+		     ? m_global_using_directives
+		     : m_local_using_directives),
+		    &m_objfile->objfile_obstack);
   if (is_global)
     m_global_using_directives = NULL;
   else
@@ -628,7 +627,7 @@ buildsym_compunit::pop_subfile ()
 
 void
 buildsym_compunit::record_line (struct subfile *subfile, int line,
-				CORE_ADDR pc, linetable_entry_flags flags)
+				unrelocated_addr pc, linetable_entry_flags flags)
 {
   m_have_line_numbers = true;
 
@@ -654,7 +653,7 @@ buildsym_compunit::record_line (struct subfile *subfile, int line,
 	  linetable_entry *last = &subfile->line_vector_entries.back ();
 	  last_line = last->line;
 
-	  if (last->pc != pc)
+	  if (last->raw_pc () != pc)
 	    break;
 
 	  subfile->line_vector_entries.pop_back ();
@@ -669,7 +668,7 @@ buildsym_compunit::record_line (struct subfile *subfile, int line,
   linetable_entry &e = subfile->line_vector_entries.back ();
   e.line = line;
   e.is_stmt = (flags & LEF_IS_STMT) != 0;
-  e.pc = pc;
+  e.set_raw_pc (pc);
   e.prologue_end = (flags & LEF_PROLOGUE_END) != 0;
 }
 
@@ -788,10 +787,9 @@ buildsym_compunit::end_compunit_symtab_get_static_block (CORE_ADDR end_addr,
 	}
     }
 
-  /* Reordered executables may have out of order pending blocks; if
-     OBJF_REORDERED is true, then sort the pending blocks.  */
-
-  if ((m_objfile->flags & OBJF_REORDERED) && m_pending_blocks)
+  /* Executables may have out of order pending blocks; sort the
+     pending blocks.  */
+  if (m_pending_blocks != nullptr)
     {
       struct pending_block *pb;
 
@@ -854,7 +852,7 @@ buildsym_compunit::end_compunit_symtab_get_static_block (CORE_ADDR end_addr,
 
 struct compunit_symtab *
 buildsym_compunit::end_compunit_symtab_with_blockvector
-  (struct block *static_block, int section, int expandable)
+  (struct block *static_block, int expandable)
 {
   struct compunit_symtab *cu = m_compunit_symtab;
   struct blockvector *blockvector;
@@ -891,26 +889,13 @@ buildsym_compunit::end_compunit_symtab_with_blockvector
     {
       if (!subfile->line_vector_entries.empty ())
 	{
-	  const auto lte_is_less_than
-	    = [] (const linetable_entry &ln1,
-		  const linetable_entry &ln2) -> bool
-	      {
-		if (ln1.pc == ln2.pc
-		    && ((ln1.line == 0) != (ln2.line == 0)))
-		  return ln1.line == 0;
-
-		return (ln1.pc < ln2.pc);
-	      };
-
-	  /* Like the pending blocks, the line table may be scrambled in
-	     reordered executables.  Sort it if OBJF_REORDERED is true.  It
-	     is important to preserve the order of lines at the same
-	     address, as this maintains the inline function caller/callee
+	  /* Like the pending blocks, the line table may be scrambled
+	     in reordered executables.  Sort it.  It is important to
+	     preserve the order of lines at the same address, as this
+	     maintains the inline function caller/callee
 	     relationships, this is why std::stable_sort is used.  */
-	  if (m_objfile->flags & OBJF_REORDERED)
-	    std::stable_sort (subfile->line_vector_entries.begin (),
-			      subfile->line_vector_entries.end (),
-			      lte_is_less_than);
+	  std::stable_sort (subfile->line_vector_entries.begin (),
+			    subfile->line_vector_entries.end ());
 	}
 
       /* Allocate a symbol table if necessary.  */
@@ -929,13 +914,15 @@ buildsym_compunit::end_compunit_symtab_with_blockvector
 	  size_t entry_array_size = n_entries * sizeof (struct linetable_entry);
 	  int linetablesize = sizeof (struct linetable) + entry_array_size;
 
-	  symtab->set_linetable
-	    (XOBNEWVAR (&m_objfile->objfile_obstack, struct linetable,
-			linetablesize));
+	  struct linetable *new_table
+	    = XOBNEWVAR (&m_objfile->objfile_obstack, struct linetable,
+			 linetablesize);
 
-	  symtab->linetable ()->nitems = n_entries;
-	  memcpy (symtab->linetable ()->item,
+	  new_table->nitems = n_entries;
+	  memcpy (new_table->item,
 		  subfile->line_vector_entries.data (), entry_array_size);
+
+	  symtab->set_linetable (new_table);
 	}
       else
 	symtab->set_linetable (nullptr);
@@ -971,10 +958,8 @@ buildsym_compunit::end_compunit_symtab_with_blockvector
   {
     struct block *b = blockvector->global_block ();
 
-    set_block_compunit_symtab (b, cu);
+    b->set_compunit_symtab (cu);
   }
-
-  cu->set_block_line_section (section);
 
   cu->set_macro_table (release_macros ());
 
@@ -988,8 +973,6 @@ buildsym_compunit::end_compunit_symtab_with_blockvector
     for (block_i = 0; block_i < blockvector->num_blocks (); block_i++)
       {
 	struct block *block = blockvector->block (block_i);
-	struct symbol *sym;
-	struct mdict_iterator miter;
 
 	/* Inlined functions may have symbols not in the global or
 	   static symbol lists.  */
@@ -998,9 +981,10 @@ buildsym_compunit::end_compunit_symtab_with_blockvector
 	    block->function ()->set_symtab (symtab);
 
 	/* Note that we only want to fix up symbols from the local
-	   blocks, not blocks coming from included symtabs.  That is why
-	   we use ALL_DICT_SYMBOLS here and not ALL_BLOCK_SYMBOLS.  */
-	ALL_DICT_SYMBOLS (block->multidict (), miter, sym)
+	   blocks, not blocks coming from included symtabs.  That is
+	   why we use an mdict iterator here and not a block
+	   iterator.  */
+	for (struct symbol *sym : block->multidict_symbols ())
 	  if (sym->symtab () == NULL)
 	    sym->set_symtab (symtab);
       }
@@ -1014,15 +998,12 @@ buildsym_compunit::end_compunit_symtab_with_blockvector
 /* Implementation of the second part of end_compunit_symtab.  Pass STATIC_BLOCK
    as value returned by end_compunit_symtab_get_static_block.
 
-   SECTION is the same as for end_compunit_symtab: the section number
-   (in objfile->section_offsets) of the blockvector and linetable.
-
    If EXPANDABLE is non-zero the GLOBAL_BLOCK dictionary is made
    expandable.  */
 
 struct compunit_symtab *
 buildsym_compunit::end_compunit_symtab_from_static_block
-  (struct block *static_block, int section, int expandable)
+  (struct block *static_block, int expandable)
 {
   struct compunit_symtab *cu;
 
@@ -1040,7 +1021,7 @@ buildsym_compunit::end_compunit_symtab_from_static_block
       cu = NULL;
     }
   else
-    cu = end_compunit_symtab_with_blockvector (static_block, section, expandable);
+    cu = end_compunit_symtab_with_blockvector (static_block, expandable);
 
   return cu;
 }
@@ -1050,9 +1031,7 @@ buildsym_compunit::end_compunit_symtab_from_static_block
    them), then make the struct symtab for that file and put it in the
    list of all such.
 
-   END_ADDR is the address of the end of the file's text.  SECTION is
-   the section number (in objfile->section_offsets) of the blockvector
-   and linetable.
+   END_ADDR is the address of the end of the file's text.
 
    Note that it is possible for end_compunit_symtab() to return NULL.  In
    particular, for the DWARF case at least, it will return NULL when
@@ -1067,24 +1046,24 @@ buildsym_compunit::end_compunit_symtab_from_static_block
    end_compunit_symtab_from_static_block yourself.  */
 
 struct compunit_symtab *
-buildsym_compunit::end_compunit_symtab (CORE_ADDR end_addr, int section)
+buildsym_compunit::end_compunit_symtab (CORE_ADDR end_addr)
 {
   struct block *static_block;
 
   static_block = end_compunit_symtab_get_static_block (end_addr, 0, 0);
-  return end_compunit_symtab_from_static_block (static_block, section, 0);
+  return end_compunit_symtab_from_static_block (static_block, 0);
 }
 
 /* Same as end_compunit_symtab except create a symtab that can be later added
    to.  */
 
 struct compunit_symtab *
-buildsym_compunit::end_expandable_symtab (CORE_ADDR end_addr, int section)
+buildsym_compunit::end_expandable_symtab (CORE_ADDR end_addr)
 {
   struct block *static_block;
 
   static_block = end_compunit_symtab_get_static_block (end_addr, 1, 0);
-  return end_compunit_symtab_from_static_block (static_block, section, 1);
+  return end_compunit_symtab_from_static_block (static_block, 1);
 }
 
 /* Subroutine of augment_type_symtab to simplify it.

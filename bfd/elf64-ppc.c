@@ -1,5 +1,5 @@
 /* PowerPC64-specific support for 64-bit ELF.
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Written by Linus Nordberg, Swox AB <info@swox.com>,
    based on elf32-ppc.c by Ian Lance Taylor.
    Largely rewritten by Alan Modra.
@@ -2472,7 +2472,9 @@ ppc64_elf_get_synthetic_symtab (bfd *abfd,
       asection *dynamic, *glink = NULL, *relplt = NULL;
       arelent *p;
 
-      if (opd != NULL && !bfd_malloc_and_get_section (abfd, opd, &contents))
+      if (opd != NULL
+	  && ((opd->flags & SEC_HAS_CONTENTS) == 0
+	      || !bfd_malloc_and_get_section (abfd, opd, &contents)))
 	{
 	free_contents_and_exit_err:
 	  count = -1;
@@ -2507,7 +2509,8 @@ ppc64_elf_get_synthetic_symtab (bfd *abfd,
 	  size_t extdynsize;
 	  void (*swap_dyn_in) (bfd *, const void *, Elf_Internal_Dyn *);
 
-	  if (!bfd_malloc_and_get_section (abfd, dynamic, &dynbuf))
+	  if ((dynamic->flags & SEC_HAS_CONTENTS) == 0
+	      || !bfd_malloc_and_get_section (abfd, dynamic, &dynbuf))
 	    goto free_contents_and_exit_err;
 
 	  extdynsize = get_elf_backend_data (abfd)->s->sizeof_dyn;
@@ -2573,7 +2576,7 @@ ppc64_elf_get_synthetic_symtab (bfd *abfd,
 	      if (!(*slurp_relocs) (abfd, relplt, dyn_syms, true))
 		goto free_contents_and_exit_err;
 
-	      plt_count = relplt->size / sizeof (Elf64_External_Rela);
+	      plt_count = NUM_SHDR_ENTRIES (&elf_section_data (relplt)->this_hdr);
 	      size += plt_count * sizeof (asymbol);
 
 	      p = relplt->relocation;
@@ -5536,7 +5539,8 @@ opd_entry_value (asection *opd_sec,
 
       if (contents == NULL)
 	{
-	  if (!bfd_malloc_and_get_section (opd_bfd, opd_sec, &contents))
+	  if ((opd_sec->flags & SEC_HAS_CONTENTS) == 0
+	      || !bfd_malloc_and_get_section (opd_bfd, opd_sec, &contents))
 	    return (bfd_vma) -1;
 	  ppc64_elf_tdata (opd_bfd)->opd.contents = contents;
 	}
@@ -7361,7 +7365,9 @@ ppc64_elf_edit_opd (struct bfd_link_info *info)
 	continue;
 
       sec = bfd_get_section_by_name (ibfd, ".opd");
-      if (sec == NULL || sec->size == 0)
+      if (sec == NULL
+	  || sec->size == 0
+	  || (sec->flags & SEC_HAS_CONTENTS) == 0)
 	continue;
 
       if (sec->sec_info_type == SEC_INFO_TYPE_JUST_SYMS)
@@ -8922,6 +8928,7 @@ ppc64_elf_edit_toc (struct bfd_link_info *info)
       toc = bfd_get_section_by_name (ibfd, ".toc");
       if (toc == NULL
 	  || toc->size == 0
+	  || (toc->flags & SEC_HAS_CONTENTS) == 0
 	  || toc->sec_info_type == SEC_INFO_TYPE_JUST_SYMS
 	  || discarded_section (toc))
 	continue;
@@ -11701,25 +11708,6 @@ ppc_build_one_stub (struct bfd_hash_entry *gen_entry, void *in_arg)
   stub_entry = (struct ppc_stub_hash_entry *) gen_entry;
   info = in_arg;
 
-  /* Fail if the target section could not be assigned to an output
-     section.  The user should fix his linker script.  */
-  if (stub_entry->target_section != NULL
-      && stub_entry->target_section->output_section == NULL
-      && info->non_contiguous_regions)
-    info->callbacks->einfo (_("%F%P: Could not assign '%pA' to an output section. "
-			      "Retry without --enable-non-contiguous-regions.\n"),
-			    stub_entry->target_section);
-
-  /* Same for the group.  */
-  if (stub_entry->group->stub_sec != NULL
-      && stub_entry->group->stub_sec->output_section == NULL
-      && info->non_contiguous_regions)
-    info->callbacks->einfo (_("%F%P: Could not assign group %pA target %pA to an "
-			      "output section. Retry without "
-			      "--enable-non-contiguous-regions.\n"),
-			    stub_entry->group->stub_sec,
-			    stub_entry->target_section);
-
   htab = ppc_hash_table (info);
   if (htab == NULL)
     return false;
@@ -12254,7 +12242,7 @@ ppc_size_one_stub (struct bfd_hash_entry *gen_entry, void *in_arg)
   if (stub_entry->target_section != NULL
       && stub_entry->target_section->output_section == NULL
       && info->non_contiguous_regions)
-    info->callbacks->einfo (_("%F%P: Could not assign %pA to an output section. "
+    info->callbacks->einfo (_("%F%P: Could not assign `%pA' to an output section. "
 			      "Retry without --enable-non-contiguous-regions.\n"),
 			    stub_entry->target_section);
 
@@ -12262,11 +12250,9 @@ ppc_size_one_stub (struct bfd_hash_entry *gen_entry, void *in_arg)
   if (stub_entry->group->stub_sec != NULL
       && stub_entry->group->stub_sec->output_section == NULL
       && info->non_contiguous_regions)
-    info->callbacks->einfo (_("%F%P: Could not assign group %pA target %pA to an "
-			      "output section. Retry without "
-			      "--enable-non-contiguous-regions.\n"),
-			    stub_entry->group->stub_sec,
-			    stub_entry->target_section);
+    info->callbacks->einfo (_("%F%P: Could not assign `%pA' to an output section. "
+			      "Retry without --enable-non-contiguous-regions.\n"),
+			    stub_entry->group->stub_sec);
 
   /* Make a note of the offset within the stubs for this entry.  */
   stub_offset = stub_entry->group->stub_sec->size;

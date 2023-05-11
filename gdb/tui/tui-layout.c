@@ -1,6 +1,6 @@
 /* TUI layout window management.
 
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -29,7 +29,6 @@
 #include "cli/cli-decode.h"
 #include "cli/cli-utils.h"
 #include <ctype.h>
-#include <unordered_map>
 #include <unordered_set>
 
 #include "tui/tui.h"
@@ -44,7 +43,7 @@
 #include "tui/tui-layout.h"
 #include "tui/tui-source.h"
 #include "gdb_curses.h"
-#include "safe-ctype.h"
+#include "gdbsupport/gdb-safe-ctype.h"
 
 static void extract_display_start_addr (struct gdbarch **, CORE_ADDR *);
 
@@ -344,14 +343,19 @@ make_standard_window (const char *)
   return tui_win_list[V];
 }
 
-/* A map holding all the known window types, keyed by name.  Note that
-   this is heap-allocated and "leaked" at gdb exit.  This avoids
-   ordering issues with destroying elements in the map at shutdown.
-   In particular, destroying this map can occur after Python has been
-   shut down, causing crashes if any window destruction requires
-   running Python code.  */
+/* A map holding all the known window types, keyed by name.  */
 
-static std::unordered_map<std::string, window_factory> *known_window_types;
+static window_types_map known_window_types;
+
+/* See tui-layout.h.  */
+
+known_window_names_range
+all_known_window_names ()
+{
+  auto begin = known_window_names_iterator (known_window_types.begin ());
+  auto end = known_window_names_iterator (known_window_types.end ());
+  return known_window_names_range (begin, end);
+}
 
 /* Helper function that returns a TUI window, given its name.  */
 
@@ -362,8 +366,8 @@ tui_get_window_by_name (const std::string &name)
     if (name == window->name ())
       return window;
 
-  auto iter = known_window_types->find (name);
-  if (iter == known_window_types->end ())
+  auto iter = known_window_types.find (name);
+  if (iter == known_window_types.end ())
     error (_("Unknown window type \"%s\""), name.c_str ());
 
   tui_win_info *result = iter->second (name.c_str ());
@@ -377,20 +381,18 @@ tui_get_window_by_name (const std::string &name)
 static void
 initialize_known_windows ()
 {
-  known_window_types = new std::unordered_map<std::string, window_factory>;
-
-  known_window_types->emplace (SRC_NAME,
+  known_window_types.emplace (SRC_NAME,
 			       make_standard_window<SRC_WIN,
 						    tui_source_window>);
-  known_window_types->emplace (CMD_NAME,
+  known_window_types.emplace (CMD_NAME,
 			       make_standard_window<CMD_WIN, tui_cmd_window>);
-  known_window_types->emplace (DATA_NAME,
+  known_window_types.emplace (DATA_NAME,
 			       make_standard_window<DATA_WIN,
 						    tui_data_window>);
-  known_window_types->emplace (DISASSEM_NAME,
+  known_window_types.emplace (DISASSEM_NAME,
 			       make_standard_window<DISASSEM_WIN,
 						    tui_disasm_window>);
-  known_window_types->emplace (STATUS_NAME,
+  known_window_types.emplace (STATUS_NAME,
 			       make_standard_window<STATUS_WIN,
 						    tui_locator_window>);
 }
@@ -418,7 +420,15 @@ tui_register_window (const char *name, window_factory &&factory)
   if (!ISALPHA (name_copy[0]))
     error (_("window name must start with a letter, not '%c'"), name_copy[0]);
 
-  known_window_types->emplace (std::move (name_copy),
+  /* We already check above for all the builtin window names.  If we get
+     this far then NAME must be a user defined window.  Remove any existing
+     factory and replace it with this new version.  */
+
+  auto iter = known_window_types.find (name);
+  if (iter != known_window_types.end ())
+    known_window_types.erase (iter);
+
+  known_window_types.emplace (std::move (name_copy),
 			       std::move (factory));
 }
 
@@ -840,7 +850,7 @@ tui_layout_split::apply (int x_, int y_, int width_, int height_,
 	{
 	  /* Save the old cmd window information, in case we need to
 	     restore it later.  */
-          old_cmd_info.emplace (i, info[i].min_size, info[i].max_size);
+	  old_cmd_info.emplace (i, info[i].min_size, info[i].max_size);
 
 	  /* If this layout has never been applied, then it means the
 	     user just changed the layout.  In this situation, it's
@@ -955,11 +965,11 @@ tui_layout_split::apply (int x_, int y_, int width_, int height_,
 		 window non-fixed-size (if possible), and hope we can
 		 shrink this enough to fit the rest of the sub-layouts in.
 
-	         Alternatively, we've made it around the loop without
-	         adjusting any window's size.  This likely means all
-	         windows have hit their min or max size.  Again, our only
-	         hope is to make the cmd window non-fixed-size, and hope
-	         this fixes all our problems.  */
+		 Alternatively, we've made it around the loop without
+		 adjusting any window's size.  This likely means all
+		 windows have hit their min or max size.  Again, our only
+		 hope is to make the cmd window non-fixed-size, and hope
+		 this fixes all our problems.  */
 	      if (old_cmd_info.has_value ()
 		  && ((available_size < used_size)
 		      || !found_window_that_can_grow_p))
@@ -1199,8 +1209,8 @@ initialize_layouts ()
 static bool
 validate_window_name (const std::string &name)
 {
-  auto iter = known_window_types->find (name);
-  return iter != known_window_types->end ();
+  auto iter = known_window_types.find (name);
+  return iter != known_window_types.end ();
 }
 
 /* Implementation of the "tui new-layout" command.  */

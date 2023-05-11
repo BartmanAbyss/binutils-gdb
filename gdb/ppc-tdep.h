@@ -1,6 +1,6 @@
 /* Target-dependent code for GDB, the GNU debugger.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -175,7 +175,9 @@ extern void ppc_collect_vsxregset (const struct regset *regset,
 				  const struct regcache *regcache,
 				  int regnum, void *vsxregs, size_t len);
 
-extern CORE_ADDR ppc64_sysv_get_return_buf_addr (type*, frame_info_ptr);
+/* Implementation of the gdbarch get_return_buf_addr hook.  */
+
+extern CORE_ADDR ppc_sysv_get_return_buf_addr (type*, frame_info_ptr);
 
 /* Private data that this module attaches to struct gdbarch.  */
 
@@ -449,5 +451,11 @@ struct ppc_inferior_data
 };
 
 extern ppc_inferior_data * get_ppc_per_inferior (inferior *inf);
+
+extern const struct target_desc *tdesc_powerpc_vsx64l;
+extern const struct target_desc *tdesc_powerpc_vsx64;
+extern const struct target_desc *tdesc_powerpc_vsx32;
+extern const struct target_desc *tdesc_powerpc_altivec64;
+extern const struct target_desc *tdesc_powerpc_altivec32;
 
 #endif /* ppc-tdep.h */

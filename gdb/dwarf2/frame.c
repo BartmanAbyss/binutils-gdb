@@ -1,6 +1,6 @@
 /* Frame unwinder for frames with DWARF Call Frame Information.
 
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    Contributed by Mark Kettenis.
 
@@ -235,8 +235,8 @@ execute_stack_op (const gdb_byte *exp, ULONGEST len, int addr_size,
   ctx.push_address (initial, initial_in_stack_memory);
   value *result_val = ctx.evaluate (exp, len, true, nullptr, this_frame);
 
-  if (VALUE_LVAL (result_val) == lval_memory)
-    return value_address (result_val);
+  if (result_val->lval () == lval_memory)
+    return result_val->address ();
   else
     return value_as_address (result_val);
 }
@@ -831,6 +831,22 @@ dwarf2_fetch_cfa_info (struct gdbarch *gdbarch, CORE_ADDR pc,
 }
 
 
+/* Custom function data object for architecture specific prev_register
+   implementation.  Main purpose of this object is to allow caching of
+   expensive data lookups in the prev_register handling.  */
+
+struct dwarf2_frame_fn_data
+{
+  /* The cookie to identify the custom function data by.  */
+  fn_prev_register cookie;
+
+  /* The custom function data.  */
+  void *data;
+
+  /* Pointer to the next custom function data object for this frame.  */
+  struct dwarf2_frame_fn_data *next;
+};
+
 struct dwarf2_frame_cache
 {
   /* DWARF Call Frame Address.  */
@@ -862,6 +878,8 @@ struct dwarf2_frame_cache
      dwarf2_tailcall_frame_unwind unwinder so this field does not apply for
      them.  */
   void *tailcall_cache;
+
+  struct dwarf2_frame_fn_data *fn_data;
 };
 
 static struct dwarf2_frame_cache *
@@ -1221,6 +1239,48 @@ dwarf2_frame_prev_register (frame_info_ptr this_frame, void **this_cache,
     }
 }
 
+/* See frame.h.  */
+
+void *
+dwarf2_frame_get_fn_data (frame_info_ptr this_frame, void **this_cache,
+			  fn_prev_register cookie)
+{
+  struct dwarf2_frame_fn_data *fn_data = nullptr;
+  struct dwarf2_frame_cache *cache
+    = dwarf2_frame_cache (this_frame, this_cache);
+
+  /* Find the object for the function.  */
+  for (fn_data = cache->fn_data; fn_data; fn_data = fn_data->next)
+    if (fn_data->cookie == cookie)
+      return fn_data->data;
+
+  return nullptr;
+}
+
+/* See frame.h.  */
+
+void *
+dwarf2_frame_allocate_fn_data (frame_info_ptr this_frame, void **this_cache,
+			       fn_prev_register cookie, unsigned long size)
+{
+  struct dwarf2_frame_fn_data *fn_data = nullptr;
+  struct dwarf2_frame_cache *cache
+    = dwarf2_frame_cache (this_frame, this_cache);
+
+  /* First try to find an existing object.  */
+  void *data = dwarf2_frame_get_fn_data (this_frame, this_cache, cookie);
+  gdb_assert (data == nullptr);
+
+  /* No object found, lets create a new instance.  */
+  fn_data = FRAME_OBSTACK_ZALLOC (struct dwarf2_frame_fn_data);
+  fn_data->cookie = cookie;
+  fn_data->data = frame_obstack_zalloc (size);
+  fn_data->next = cache->fn_data;
+  cache->fn_data = fn_data;
+
+  return fn_data->data;
+}
+
 /* Proxy for tailcall_frame_dealloc_cache for bottom frame of a virtual tail
    call frames chain.  */
 
@@ -1559,6 +1619,9 @@ dwarf2_frame_find_fde (CORE_ADDR *pc, dwarf2_per_objfile **out_per_objfile)
     {
       CORE_ADDR offset;
       CORE_ADDR seek_pc;
+
+      if (objfile->obfd == nullptr)
+	continue;
 
       comp_unit *unit = find_comp_unit (objfile);
       if (unit == NULL)

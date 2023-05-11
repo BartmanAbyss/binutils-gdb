@@ -15,7 +15,7 @@
 @SET_MAKE@
 
 #
-#   Copyright (C) 2012-2022 Free Software Foundation, Inc.
+#   Copyright (C) 2012-2023 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@
 #
 
 #
-#   Copyright (C) 2012-2022 Free Software Foundation, Inc.
+#   Copyright (C) 2012-2023 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -164,14 +164,15 @@ PROGRAMS = $(noinst_PROGRAMS)
 am__objects_1 = app.$(OBJEXT) as.$(OBJEXT) atof-generic.$(OBJEXT) \
 	codeview.$(OBJEXT) compress-debug.$(OBJEXT) cond.$(OBJEXT) \
 	depend.$(OBJEXT) dwarf2dbg.$(OBJEXT) dw2gencfi.$(OBJEXT) \
-	ecoff.$(OBJEXT) ehopt.$(OBJEXT) expr.$(OBJEXT) flonum-copy.$(OBJEXT) \
-	flonum-konst.$(OBJEXT) flonum-mult.$(OBJEXT) frags.$(OBJEXT) \
-	gen-sframe.$(OBJEXT) hash.$(OBJEXT) input-file.$(OBJEXT) \
-	input-scrub.$(OBJEXT) listing.$(OBJEXT) literal.$(OBJEXT) \
-	macro.$(OBJEXT) messages.$(OBJEXT) output-file.$(OBJEXT) \
-	read.$(OBJEXT) remap.$(OBJEXT) sb.$(OBJEXT) \
-	sframe-opt.$(OBJEXT) stabs.$(OBJEXT) subsegs.$(OBJEXT) \
-	symbols.$(OBJEXT) write.$(OBJEXT)
+	ecoff.$(OBJEXT) ehopt.$(OBJEXT) expr.$(OBJEXT) \
+	flonum-copy.$(OBJEXT) flonum-konst.$(OBJEXT) \
+	flonum-mult.$(OBJEXT) frags.$(OBJEXT) gen-sframe.$(OBJEXT) \
+	hash.$(OBJEXT) input-file.$(OBJEXT) input-scrub.$(OBJEXT) \
+	listing.$(OBJEXT) literal.$(OBJEXT) macro.$(OBJEXT) \
+	messages.$(OBJEXT) output-file.$(OBJEXT) read.$(OBJEXT) \
+	remap.$(OBJEXT) sb.$(OBJEXT) sframe-opt.$(OBJEXT) \
+	stabs.$(OBJEXT) subsegs.$(OBJEXT) symbols.$(OBJEXT) \
+	write.$(OBJEXT)
 am_as_new_OBJECTS = $(am__objects_1)
 am__dirstamp = $(am__leading_dot)dirstamp
 as_new_OBJECTS = $(am_as_new_OBJECTS)
@@ -827,7 +828,6 @@ TARG_ENV_HFILES = \
 	config/te-pc532mach.h \
 	config/te-pe.h \
 	config/te-solaris.h \
-	config/te-svr4.h \
 	config/te-tmips.h \
 	config/te-vxworks.h \
 	config/te-wince-pe.h
@@ -904,6 +904,10 @@ EXTRA_as_new_SOURCES = $(CFILES) $(HFILES) $(TARGET_CPU_CFILES) \
 EXPECT = expect
 RUNTEST = runtest
 RUNTESTFLAGS = 
+i386_tbl_deps = $(srcdir)/../opcodes/i386-opc.tbl \
+	$(srcdir)/../opcodes/i386-reg.tbl \
+	$(srcdir)/../opcodes/i386-gen.c $(srcdir)/../opcodes/i386-opc.h
+
 itbl_test_SOURCES = itbl-parse.y itbl-lex.l
 itbl_test_LDADD = itbl-tops.@OBJEXT@ itbl-test.@OBJEXT@ $(GASLIBS) @LEXLIB@
 
@@ -2063,6 +2067,13 @@ check-DEJAGNU: site.exp
 development.exp: $(BFDDIR)/development.sh
 	$(EGREP) "(development|experimental)=" $(BFDDIR)/development.sh  \
 	  | $(AWK) -F= '{ print "set " $$1 " " $$2 }' > $@
+
+config/tc-i386.o: $(srcdir)/../opcodes/i386-init.h $(srcdir)/../opcodes/i386-tbl.h
+
+$(srcdir)/../opcodes/i386%init.h $(srcdir)/../opcodes/i386%tbl.h $(srcdir)/../opcodes/i386%mnem.h: @MAINT@ $(i386_tbl_deps)
+	@echo '"$@" is outdated wrt "$?"' >&2
+	@echo 'Please rebuild from the top level or in $(CURDIR)/../opcodes/' >&2
+	@false
 config/m68k-parse.c: $(srcdir)/config/m68k-parse.y
 	$(SHELL) $(YLWRAP) $(srcdir)/config/m68k-parse.y y.tab.c $@ -- $(YACCCOMPILE)
 config/m68k-parse.h: config/m68k-parse.c
@@ -2219,7 +2230,7 @@ de-stage3:
 
 doc/asconfig.texi: doc/$(CONFIG).texi doc/$(am__dirstamp)
 	$(AM_V_at)rm -f doc/asconfig.texi
-	$(AM_V_GEN)cp $(srcdir)/doc/$(CONFIG).texi doc/asconfig.texi
+	$(AM_V_GEN)cp -p $(srcdir)/doc/$(CONFIG).texi doc/asconfig.texi
 	$(AM_V_at)chmod u+w doc/asconfig.texi
 
 # Maintenance

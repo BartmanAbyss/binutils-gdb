@@ -1,4 +1,4 @@
-# Copyright 2013-2022 Free Software Foundation, Inc.
+# Copyright 2013-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,10 +21,7 @@
 # killed by a signal.  However, if it was killed by an uncaught
 # signal, then there is no way for it to have exited.
 
-if { [target_info exists gdb,nosignals] } {
-    verbose "Skipping exitsignal.exp because of nosignals."
-    return
-}
+require {!target_info exists gdb,nosignals}
 
 standard_testfile segv.c
 

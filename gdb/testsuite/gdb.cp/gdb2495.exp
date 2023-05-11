@@ -1,4 +1,4 @@
-# Copyright 2009-2022 Free Software Foundation, Inc.
+# Copyright 2009-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,28 +31,21 @@
 
 # This test is largely based of gdb.base/callfuncs.exp.
 
-if { [skip_cplus_tests] } { return }
+require allow_cplus_tests
 
-if [target_info exists gdb,nosignals] {
-    verbose "Skipping gdb2495.exp because of nosignals."
-    return
-}
+require {!target_info exists gdb,nosignals}
 
 standard_testfile .cc
 
 # Some targets can't do function calls, so don't even bother with this
 # test.
-if [target_info exists gdb,cannot_call_functions] {
-    unsupported "this target can not call functions"
-    return
-}
+require {!target_info exists gdb,cannot_call_functions}
 
 if {[prepare_for_testing "failed to prepare" $testfile $srcfile {debug c++}]} {
     return -1
 }
 
-if ![runto_main] then {
-    perror "couldn't run to main"
+if {![runto_main]} {
     return
 }
 
@@ -96,8 +89,7 @@ gdb_test "p exceptions.throw_function()" \
     "call a function that raises an exception with unwinding off.."
 
 # Restart the inferior back at main.
-if ![runto_main] then {
-    perror "couldn't run to main"
+if {![runto_main]} {
     return
 }
 

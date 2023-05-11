@@ -1,5 +1,5 @@
 /* as.c - GAS main program.
-   Copyright (C) 1987-2022 Free Software Foundation, Inc.
+   Copyright (C) 1987-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -125,8 +125,6 @@ static struct defsym_list *defsyms;
 
 static long start_time;
 
-static int flag_macro_alternate;
-
 
 #ifdef USE_EMULATIONS
 #define EMULATION_ENVIRON "AS_EMULATION"
@@ -228,6 +226,10 @@ print_version_id (void)
 #ifdef DEFAULT_FLAG_COMPRESS_DEBUG
 enum compressed_debug_section_type flag_compress_debug
   = DEFAULT_COMPRESSED_DEBUG_ALGORITHM;
+#define DEFAULT_COMPRESSED_DEBUG_ALGORITHM_HELP \
+        DEFAULT_COMPRESSED_DEBUG_ALGORITHM
+#else
+#define DEFAULT_COMPRESSED_DEBUG_ALGORITHM_HELP COMPRESS_DEBUG_NONE
 #endif
 
 static void
@@ -256,7 +258,8 @@ Options:\n\
                           compress DWARF debug sections\n")),
   fprintf (stream, _("\
 		            Default: %s\n"),
-	   bfd_get_compression_algorithm_name (flag_compress_debug));
+	   bfd_get_compression_algorithm_name
+             (DEFAULT_COMPRESSED_DEBUG_ALGORITHM_HELP));
 
   fprintf (stream, _("\
   --nocompress-debug-sections\n\
@@ -317,7 +320,7 @@ Options:\n\
   fprintf (stream, _("\
                           generate GNU Build notes if none are present in the input\n"));
   fprintf (stream, _("\
-  --gsframe               generate SFrame unwind info\n"));
+  --gsframe               generate SFrame stack trace information\n"));
 #endif /* OBJ_ELF */
 
   fprintf (stream, _("\
@@ -709,7 +712,7 @@ parse_args (int * pargc, char *** pargv)
 	case OPTION_VERSION:
 	  /* This output is intended to follow the GNU standards document.  */
 	  printf (_("GNU assembler %s\n"), BFD_VERSION_STRING);
-	  printf (_("Copyright (C) 2022 Free Software Foundation, Inc.\n"));
+	  printf (_("Copyright (C) 2023 Free Software Foundation, Inc.\n"));
 	  printf (_("\
 This program is free software; you may redistribute it under the terms of\n\
 the GNU General Public License version 3 or later.\n\
@@ -764,7 +767,7 @@ This program has absolutely no warranty.\n"));
 #endif
 	    }
 	  else
-	    flag_compress_debug = COMPRESS_DEBUG_GABI_ZLIB;
+	    flag_compress_debug = DEFAULT_COMPRESSED_DEBUG_ALGORITHM;
 	  break;
 
 	case OPTION_NOCOMPRESS_DEBUG:
@@ -1162,28 +1165,6 @@ dump_statistics (void)
   obj_print_statistics (stderr);
 #endif
 }
-
-/* The interface between the macro code and gas expression handling.  */
-
-static size_t
-macro_expr (const char *emsg, size_t idx, sb *in, offsetT *val)
-{
-  expressionS ex;
-
-  sb_terminate (in);
-
-  temp_ilp (in->ptr + idx);
-  expression_and_evaluate (&ex);
-  idx = input_line_pointer - in->ptr;
-  restore_ilp ();
-
-  if (ex.X_op != O_constant)
-    as_bad ("%s", emsg);
-
-  *val = ex.X_add_number;
-
-  return idx;
-}
 
 /* Here to attempt 1 pass over each input file.
    We scan argv[*] looking for filenames or exactly "" which is
@@ -1250,7 +1231,6 @@ perform_an_assembly_pass (int argc, char ** argv)
     {
       if (*argv)
 	{			/* Is it a file-name argument?  */
-	  PROGRESS (1);
 	  saw_a_file++;
 	  /* argv->"" if stdin desired, else->filename.  */
 	  read_a_source_file (*argv);
@@ -1267,14 +1247,11 @@ free_notes (void)
   _obstack_free (&notes, NULL);
 }
 
-int
-main (int argc, char ** argv)
+/* Early initialisation, before gas prints messages.  */
+
+static void
+gas_early_init (int *argcp, char ***argvp)
 {
-  char ** argv_orig = argv;
-  struct stat sob;
-
-  int macro_strip_at;
-
   start_time = get_run_time ();
   signal_init ();
 
@@ -1288,17 +1265,6 @@ main (int argc, char ** argv)
   if (debug_memory)
     chunksize = 64;
 
-#ifdef HOST_SPECIAL_INIT
-  HOST_SPECIAL_INIT (argc, argv);
-#endif
-
-  myname = argv[0];
-  xmalloc_set_program_name (myname);
-
-  expandargv (&argc, &argv);
-
-  START_PROGRESS (myname, 0);
-
 #ifndef OBJ_DEFAULT_OUTPUT_FILE_NAME
 #define OBJ_DEFAULT_OUTPUT_FILE_NAME "a.out"
 #endif
@@ -1308,18 +1274,100 @@ main (int argc, char ** argv)
   hex_init ();
   if (bfd_init () != BFD_INIT_MAGIC)
     as_fatal (_("libbfd ABI mismatch"));
-  bfd_set_error_program_name (myname);
-
-#ifdef USE_EMULATIONS
-  select_emulation_mode (argc, argv);
-#endif
 
   obstack_begin (&notes, chunksize);
   xatexit (free_notes);
 
-  PROGRESS (1);
-  /* Call parse_args before any of the init/begin functions
-     so that switches like --hash-size can be honored.  */
+  myname = **argvp;
+  xmalloc_set_program_name (myname);
+  bfd_set_error_program_name (myname);
+
+  expandargv (argcp, argvp);
+
+  init_include_dir ();
+
+#ifdef HOST_SPECIAL_INIT
+  HOST_SPECIAL_INIT (*argcp, *argvp);
+#endif
+
+#ifdef USE_EMULATIONS
+  select_emulation_mode (*argcp, *argvp);
+#endif
+}
+
+/* The bulk of gas initialisation.  This is after args are parsed.  */
+
+static void
+gas_init (void)
+{
+  symbol_begin ();
+  frag_init ();
+  subsegs_begin ();
+  read_begin ();
+  input_scrub_begin ();
+  expr_begin ();
+  eh_begin ();
+
+  macro_init ();
+
+  dwarf2_init ();
+
+  local_symbol_make (".gasversion.", absolute_section,
+		     &predefined_address_frag, BFD_VERSION / 10000UL);
+
+  /* Note: Put new initialisation calls that don't depend on stdoutput
+     being open above this point.  stdoutput must be open for anything
+     that might use stdoutput objalloc memory, eg. calling bfd_alloc
+     or creating global symbols (via bfd_make_empty_symbol).  */
+  xatexit (output_file_close);
+  output_file_create (out_file_name);
+  gas_assert (stdoutput != 0);
+
+  /* Must be called before output_file_close.  xexit calls the xatexit
+     list in reverse order.  */
+  if (flag_print_statistics)
+    xatexit (dump_statistics);
+
+  dot_symbol_init ();
+
+#ifdef tc_init_after_args
+  tc_init_after_args ();
+#endif
+
+  itbl_init ();
+
+  /* Now that we have fully initialized, and have created the output
+     file, define any symbols requested by --defsym command line
+     arguments.  */
+  while (defsyms != NULL)
+    {
+      symbolS *sym;
+      struct defsym_list *next;
+
+      sym = symbol_new (defsyms->name, absolute_section,
+			&zero_address_frag, defsyms->value);
+      /* Make symbols defined on the command line volatile, so that they
+	 can be redefined inside a source file.  This makes this assembler's
+	 behaviour compatible with earlier versions, but it may not be
+	 completely intuitive.  */
+      S_SET_VOLATILE (sym);
+      symbol_table_insert (sym);
+      next = defsyms->next;
+      free (defsyms);
+      defsyms = next;
+    }
+}
+
+int
+main (int argc, char ** argv)
+{
+  char ** argv_orig = argv;
+  struct stat sob;
+
+  gas_early_init (&argc, &argv);
+
+  /* Call parse_args before gas_init so that switches like
+     --hash-size can be honored.  */
   parse_args (&argc, &argv);
 
   if (argc > 1 && stat (out_file_name, &sob) == 0)
@@ -1361,66 +1409,7 @@ main (int argc, char ** argv)
 	}
     }
 
-  symbol_begin ();
-  frag_init ();
-  subsegs_begin ();
-  read_begin ();
-  input_scrub_begin ();
-  expr_begin ();
-
-  /* It has to be called after dump_statistics ().  */
-  xatexit (output_file_close);
-
-  if (flag_print_statistics)
-    xatexit (dump_statistics);
-
-  macro_strip_at = 0;
-#ifdef TC_I960
-  macro_strip_at = flag_mri;
-#endif
-
-  macro_init (flag_macro_alternate, flag_mri, macro_strip_at, macro_expr);
-
-  PROGRESS (1);
-
-  output_file_create (out_file_name);
-  gas_assert (stdoutput != 0);
-
-  dot_symbol_init ();
-
-#ifdef tc_init_after_args
-  tc_init_after_args ();
-#endif
-
-  itbl_init ();
-
-  dwarf2_init ();
-
-  local_symbol_make (".gasversion.", absolute_section,
-		     &predefined_address_frag, BFD_VERSION / 10000UL);
-
-  /* Now that we have fully initialized, and have created the output
-     file, define any symbols requested by --defsym command line
-     arguments.  */
-  while (defsyms != NULL)
-    {
-      symbolS *sym;
-      struct defsym_list *next;
-
-      sym = symbol_new (defsyms->name, absolute_section,
-			&zero_address_frag, defsyms->value);
-      /* Make symbols defined on the command line volatile, so that they
-	 can be redefined inside a source file.  This makes this assembler's
-	 behaviour compatible with earlier versions, but it may not be
-	 completely intuitive.  */
-      S_SET_VOLATILE (sym);
-      symbol_table_insert (sym);
-      next = defsyms->next;
-      free (defsyms);
-      defsyms = next;
-    }
-
-  PROGRESS (1);
+  gas_init ();
 
   /* Assemble it.  */
   perform_an_assembly_pass (argc, argv);
@@ -1496,8 +1485,6 @@ main (int argc, char ** argv)
 #endif
 
   input_scrub_end ();
-
-  END_PROGRESS (myname);
 
   /* Use xexit instead of return, because under VMS environments they
      may not place the same interpretation on the value given.  */

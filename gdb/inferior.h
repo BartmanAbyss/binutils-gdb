@@ -1,7 +1,7 @@
 /* Variables that describe the inferior process running under GDB:
    Where it is, why it stopped, and how to step it.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -167,6 +167,27 @@ extern void default_print_float_info (struct gdbarch *gdbarch,
 				      frame_info_ptr frame,
 				      const char *args);
 
+/* Try to determine whether TTY is GDB's input terminal.  Returns
+   TRIBOOL_UNKNOWN if we can't tell.  */
+
+extern tribool is_gdb_terminal (const char *tty);
+
+/* Helper for sharing_input_terminal.  Try to determine whether pid
+   PID is using the same TTY for input as GDB is.  Returns
+   TRIBOOL_UNKNOWN if we can't tell.  */
+
+extern tribool sharing_input_terminal (int pid);
+
+/* The type of the function that is called when SIGINT is handled.  */
+
+typedef void c_c_handler_ftype (int);
+
+/* Install a new SIGINT handler in a host-dependent way.  The previous
+   handler is returned.  It is fine to pass SIG_IGN for FN, but not
+   SIG_DFL.  */
+
+extern c_c_handler_ftype *install_sigint_handler (c_c_handler_ftype *fn);
+
 extern void child_terminal_info (struct target_ops *self, const char *, int);
 
 extern void child_terminal_ours (struct target_ops *self);
@@ -203,8 +224,6 @@ extern void setup_inferior (int from_tty);
 extern void post_create_inferior (int from_tty);
 
 extern void attach_command (const char *, int);
-
-extern void set_inferior_args_vector (int, char **);
 
 extern void registers_info (const char *, int);
 
@@ -319,6 +338,41 @@ extern void set_current_inferior (inferior *);
    selected.  */
 extern void switch_to_inferior_no_thread (inferior *inf);
 
+/* Ensure INF is the current inferior.
+
+   If the current inferior was changed, return an RAII object that will
+   restore the original current context.  */
+extern gdb::optional<scoped_restore_current_thread> maybe_switch_inferior
+  (inferior *inf);
+
+/* Info about an inferior's target description.  There's one of these
+   for each inferior.  */
+
+struct target_desc_info
+{
+  /* Returns true if this target description information has been supplied by
+     the user.  */
+  bool from_user_p ()
+  { return !this->filename.empty (); }
+
+  /* A flag indicating that a description has already been fetched
+     from the target, so it should not be queried again.  */
+  bool fetched = false;
+
+  /* The description fetched from the target, or NULL if the target
+     did not supply any description.  Only valid when
+     FETCHED is set.  Only the description initialization
+     code should access this; normally, the description should be
+     accessed through the gdbarch object.  */
+  const struct target_desc *tdesc = nullptr;
+
+  /* If not empty, the filename to read a target description from, as set by
+     "set tdesc filename ...".
+
+     If empty, there is not filename specified by the user.  */
+  std::string filename;
+};
+
 /* GDB represents the state of each program execution with an object
    called an inferior.  An inferior typically corresponds to a process
    but is more general and applies also to targets that do not have a
@@ -377,6 +431,22 @@ public:
   target_ops *top_target ()
   { return m_target_stack.top (); }
 
+  /* Unpush all targets except the dummy target from m_target_stack.  As
+     targets are removed from m_target_stack their reference count is
+     decremented, which may cause a target to close.  */
+  void pop_all_targets ()
+  { pop_all_targets_above (dummy_stratum); }
+
+  /* Unpush all targets above STRATUM from m_target_stack.  As targets are
+     removed from m_target_stack their reference count is decremented,
+     which may cause a target to close.  */
+  void pop_all_targets_above (enum strata stratum);
+
+  /* Unpush all targets at and above STRATUM from m_target_stack.  As
+     targets are removed from m_target_stack their reference count is
+     decremented, which may cause a target to close.  */
+  void pop_all_targets_at_and_above (enum strata stratum);
+
   /* Return the target at process_stratum level in this inferior's
      target stack.  */
   struct process_stratum_target *process_target ()
@@ -425,6 +495,9 @@ public:
   inline safe_inf_threads_range threads_safe ()
   { return safe_inf_threads_range (this->thread_list.begin ()); }
 
+  /* Find (non-exited) thread PTID of this inferior.  */
+  thread_info *find_thread (ptid_t ptid);
+
   /* Delete all threads in the thread list.  If SILENT, exit threads
      silently.  */
   void clear_thread_list (bool silent);
@@ -454,6 +527,9 @@ public:
   {
     m_args = std::move (args);
   };
+
+  /* Set the argument string from some strings.  */
+  void set_args (gdb::array_view<char * const> args);
 
   /* Get the argument string to use when running this inferior.
 
@@ -573,7 +649,7 @@ public:
 
   /* Info about an inferior's target description (if it's fetched; the
      user supplied description's filename, if any; etc.).  */
-  target_desc_info *tdesc_info = NULL;
+  target_desc_info tdesc_info;
 
   /* The architecture associated with the inferior through the
      connection to the target.
@@ -595,6 +671,10 @@ public:
   registry<inferior> registry_fields;
 
 private:
+
+  /* Unpush TARGET and assert that it worked.  */
+  void unpush_target_and_assert (struct target_ops *target);
+
   /* The inferior's target stack.  */
   target_stack m_target_stack;
 

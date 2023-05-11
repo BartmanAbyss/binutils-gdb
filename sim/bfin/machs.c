@@ -1,6 +1,6 @@
 /* Simulator for Analog Devices Blackfin processors.
 
-   Copyright (C) 2005-2022 Free Software Foundation, Inc.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc. and Mike Frysinger.
 
    This file is part of simulators.
@@ -24,11 +24,14 @@
 #include <stdlib.h>
 
 #include "sim-main.h"
-#include "gdb/sim-bfin.h"
+#include "sim/sim-bfin.h"
 #include "bfd.h"
 
 #include "sim-hw.h"
+#include "sim-options.h"
+
 #include "devices.h"
+#include "arch.h"
 #include "dv-bfin_cec.h"
 #include "dv-bfin_dmac.h"
 

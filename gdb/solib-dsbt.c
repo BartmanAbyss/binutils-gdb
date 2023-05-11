@@ -1,5 +1,5 @@
 /* Handle TIC6X (DSBT) shared libraries for GDB, the GNU Debugger.
-   Copyright (C) 2010-2022 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -662,14 +662,6 @@ enable_break_failure_warning (void)
 	     "and track explicitly loaded dynamic code."));
 }
 
-/* Helper function for gdb_bfd_lookup_symbol.  */
-
-static int
-cmp_name (const asymbol *sym, const void *data)
-{
-  return (strcmp (sym->name, (const char *) data) == 0);
-}
-
 /* The dynamic linkers has, as part of its debugger interface, support
    for arranging for the inferior to hit a breakpoint after mapping in
    the shared libraries.  This function enables that breakpoint.
@@ -759,8 +751,13 @@ enable_break (void)
 	    = info->interp_plt_sect_low + bfd_section_size (interp_sect);
 	}
 
-      addr = gdb_bfd_lookup_symbol (tmp_bfd.get (), cmp_name,
-				    "_dl_debug_state");
+      addr = (gdb_bfd_lookup_symbol
+	      (tmp_bfd.get (),
+	       [] (const asymbol *sym)
+	       {
+		 return strcmp (sym->name, "_dl_debug_state") == 0;
+	       }));
+
       if (addr != 0)
 	{
 	  if (solib_dsbt_debug)
@@ -805,7 +802,6 @@ dsbt_relocate_main_executable (void)
 {
   struct int_elf32_dsbt_loadmap *ldm;
   int changed;
-  struct obj_section *osect;
   struct dsbt_info *info = get_dsbt_info ();
 
   dsbt_get_initial_loadmaps ();
@@ -819,13 +815,13 @@ dsbt_relocate_main_executable (void)
   section_offsets new_offsets (objf->section_offsets.size ());
   changed = 0;
 
-  ALL_OBJFILE_OSECTIONS (objf, osect)
+  for (obj_section *osect : objf->sections ())
     {
       CORE_ADDR orig_addr, addr, offset;
       int osect_idx;
       int seg;
 
-      osect_idx = osect - objf->sections;
+      osect_idx = osect - objf->sections_start;
 
       /* Current address of section.  */
       addr = osect->addr ();

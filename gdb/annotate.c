@@ -1,5 +1,5 @@
 /* Annotation routines for GDB.
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -25,11 +25,10 @@
 #include "observable.h"
 #include "inferior.h"
 #include "infrun.h"
-#include "top.h"
 #include "source.h"
 #include "objfiles.h"
 #include "source-cache.h"
-
+#include "ui.h"
 
 /* Prototypes for local functions.  */
 

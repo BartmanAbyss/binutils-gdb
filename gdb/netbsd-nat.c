@@ -1,6 +1,6 @@
 /* Native-dependent code for NetBSD.
 
-   Copyright (C) 2006-2022 Free Software Foundation, Inc.
+   Copyright (C) 2006-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -618,7 +618,7 @@ nbsd_nat_target::wait (ptid_t ptid, struct target_waitstatus *ourstatus,
 	 threads might be skipped during post_attach that
 	 have not yet reported their PTRACE_LWP_EXIT event.
 	 Ignore exited events for an unknown LWP.  */
-      thread_info *thr = find_thread_ptid (this, wptid);
+      thread_info *thr = this->find_thread (wptid);
       if (thr == nullptr)
 	  ourstatus->set_spurious ();
       else

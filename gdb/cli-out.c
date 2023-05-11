@@ -1,6 +1,6 @@
 /* Output generating routines for GDB CLI.
 
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions.
    Written by Fernando Nasser for Cygnus.
@@ -26,7 +26,7 @@
 #include "completer.h"
 #include "readline/readline.h"
 #include "cli/cli-style.h"
-#include "top.h"
+#include "ui.h"
 
 /* These are the CLI output functions */
 

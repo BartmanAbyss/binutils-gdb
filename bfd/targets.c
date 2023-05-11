@@ -1,5 +1,5 @@
 /* Generic target-file-type support for the BFD library.
-   Copyright (C) 1990-2022 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -148,6 +148,7 @@ DESCRIPTION
 	the entry points which call them. Too bad we can't have one
 	macro to define them both!
 
+EXTERNAL
 .enum bfd_flavour
 .{
 .  {* N.B. Update bfd_flavour_name if you change this.  *}
@@ -162,10 +163,7 @@ DESCRIPTION
 .  bfd_target_verilog_flavour,
 .  bfd_target_ihex_flavour,
 .  bfd_target_som_flavour,
-.  bfd_target_os9k_flavour,
-.  bfd_target_versados_flavour,
 .  bfd_target_msdos_flavour,
-.  bfd_target_ovax_flavour,
 .  bfd_target_evax_flavour,
 .  bfd_target_mmo_flavour,
 .  bfd_target_mach_o_flavour,
@@ -176,14 +174,12 @@ DESCRIPTION
 .
 .enum bfd_endian { BFD_ENDIAN_BIG, BFD_ENDIAN_LITTLE, BFD_ENDIAN_UNKNOWN };
 .
-.{* Forward declaration.  *}
-.typedef struct bfd_link_info _bfd_link_info;
-.
-.{* Forward declaration.  *}
-.typedef struct flag_info flag_info;
-.
+.{* Forward declarations.  *}
+.struct flag_info;
 .typedef void (*bfd_cleanup) (bfd *);
 .
+
+CODE_FRAGMENT
 .typedef struct bfd_target
 .{
 .  {* Identifies the kind of target, e.g., SunOS4, Ultrix, etc.  *}
@@ -261,9 +257,10 @@ DESCRIPTION
 .  {* Write cached information into a file being written, at <<bfd_close>>.  *}
 .  bool (*_bfd_write_contents[bfd_type_end]) (bfd *);
 .
+
 The general target vector.  These vectors are initialized using the
 BFD_JUMP_TABLE macros.
-.
+
 .  {* Generic entry points.  *}
 .#define BFD_JUMP_TABLE_GENERIC(NAME) \
 .  NAME##_close_and_cleanup, \
@@ -423,7 +420,7 @@ BFD_JUMP_TABLE macros.
 .    while using BFD for everything else.  Currently used by the assembler
 .    when creating COFF files.  *}
 .  asymbol *
-.	(*_bfd_make_debug_symbol) (bfd *, void *, unsigned long size);
+.	(*_bfd_make_debug_symbol) (bfd *);
 .#define bfd_read_minisymbols(b, d, m, s) \
 .	BFD_SEND (b, _read_minisymbols, (b, d, m, s))
 .  long	(*_read_minisymbols) (bfd *, bool, void **, unsigned int *);
@@ -960,7 +957,6 @@ extern const bfd_target binary_vec;
 extern const bfd_target ihex_vec;
 
 /* All of the xvecs for core files.  */
-extern const bfd_target core_aix386_vec;
 extern const bfd_target core_cisco_be_vec;
 extern const bfd_target core_cisco_le_vec;
 extern const bfd_target core_hppabsd_vec;
@@ -969,7 +965,6 @@ extern const bfd_target core_irix_vec;
 extern const bfd_target core_netbsd_vec;
 extern const bfd_target core_osf_vec;
 extern const bfd_target core_ptrace_vec;
-extern const bfd_target core_sco5_vec;
 extern const bfd_target core_trad_vec;
 
 static const bfd_target * const _bfd_target_vector[] =
@@ -1394,9 +1389,6 @@ static const bfd_target * const _bfd_target_vector[] =
 
 /* Add any required traditional-core-file-handler.  */
 
-#ifdef AIX386_CORE
-	&core_aix386_vec,
-#endif
 #if 0
 	/* We don't include cisco_core_*_vec.  Although it has a magic number,
 	   the magic number isn't at the beginning of the file, and thus
@@ -1421,9 +1413,6 @@ static const bfd_target * const _bfd_target_vector[] =
 #endif
 #ifdef PTRACE_CORE
 	&core_ptrace_vec,
-#endif
-#ifdef SCO5_CORE
-	&core_sco5_vec,
 #endif
 #ifdef TRAD_CORE
 	&core_trad_vec,
@@ -1460,7 +1449,8 @@ const bfd_target *const *const bfd_associated_vector = _bfd_associated_vector;
 const size_t _bfd_target_vector_entries = ARRAY_SIZE (_bfd_target_vector);
 
 /* A place to stash a warning from _bfd_check_format.  */
-static const char *per_xvec_warn[ARRAY_SIZE (_bfd_target_vector) + 1];
+static struct per_xvec_message *per_xvec_warn[ARRAY_SIZE (_bfd_target_vector)
+					      + 1];
 
 /* This array maps configuration triplets onto BFD vectors.  */
 
@@ -1481,26 +1471,58 @@ static const struct targmatch bfd_target_match[] = {
 };
 
 /*
+INTERNAL
+.{* Cached _bfd_check_format messages are put in this.  *}
+.struct per_xvec_message
+.{
+.  struct per_xvec_message *next;
+.  char message[];
+.};
+.
 INTERNAL_FUNCTION
 	_bfd_per_xvec_warn
 
 SYNOPSIS
-	const char **_bfd_per_xvec_warn (const bfd_target *);
+	struct per_xvec_message **_bfd_per_xvec_warn (const bfd_target *, size_t);
 
 DESCRIPTION
 	Return a location for the given target xvec to use for
-	warnings specific to that target.
+	warnings specific to that target.  If TARG is NULL, returns
+	the array of per_xvec_message pointers, otherwise if ALLOC is
+	zero, returns a pointer to a pointer to the list of messages
+	for TARG, otherwise (both TARG and ALLOC non-zero), allocates
+	a new 	per_xvec_message with space for a string of ALLOC
+	bytes and returns a pointer to a pointer to it.  May return a
+	pointer to a NULL pointer on allocation failure.
 */
 
-const char **
-_bfd_per_xvec_warn (const bfd_target *targ)
+struct per_xvec_message **
+_bfd_per_xvec_warn (const bfd_target *targ, size_t alloc)
 {
   size_t idx;
 
+  if (!targ)
+    return per_xvec_warn;
   for (idx = 0; idx < ARRAY_SIZE (_bfd_target_vector); idx++)
     if (_bfd_target_vector[idx] == targ)
       break;
-  return per_xvec_warn + idx;
+  struct per_xvec_message **m = per_xvec_warn + idx;
+  if (!alloc)
+    return m;
+  int count = 0;
+  while (*m)
+    {
+      m = &(*m)->next;
+      count++;
+    }
+  /* Anti-fuzzer measure.  Don't cache more than 5 messages.  */
+  if (count < 5)
+    {
+      *m = bfd_malloc (sizeof (**m) + alloc);
+      if (*m != NULL)
+	(*m)->next = NULL;
+    }
+  return m;
 }
 
 /* Find a target vector, given a name or configuration triplet.  */
@@ -1830,10 +1852,7 @@ bfd_flavour_name (enum bfd_flavour flavour)
     case bfd_target_verilog_flavour: return "Verilog";
     case bfd_target_ihex_flavour: return "Ihex";
     case bfd_target_som_flavour: return "SOM";
-    case bfd_target_os9k_flavour: return "OS9K";
-    case bfd_target_versados_flavour: return "Versados";
     case bfd_target_msdos_flavour: return "MSDOS";
-    case bfd_target_ovax_flavour: return "Ovax";
     case bfd_target_evax_flavour: return "Evax";
     case bfd_target_mmo_flavour: return "mmo";
     case bfd_target_mach_o_flavour: return "MACH_O";

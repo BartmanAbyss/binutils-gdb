@@ -1,5 +1,5 @@
 /* IBM RS/6000 "XCOFF" back-end for BFD.
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
    Written by Tom Rix
    Contributed by Red Hat Inc.
 
@@ -141,6 +141,27 @@ xcoff64_core_p (bfd *abfd)
   sec->vma = 0;
   sec->filepos = 0;
   sec->contents = (bfd_byte *)&new_core_hdr->c_flt.r64;
+
+  if (core.c_extctx)
+    {
+      /* vmx section.  */
+      flags = SEC_HAS_CONTENTS;
+      sec = bfd_make_section_anyway_with_flags (abfd, ".aix-vmx", flags);
+      if (sec == NULL)
+	return NULL;
+      sec->size = 560;
+      sec->vma = 0;
+      sec->filepos = core.c_extctx;
+
+      /* vmx section.  */
+      flags = SEC_HAS_CONTENTS;
+      sec = bfd_make_section_anyway_with_flags (abfd, ".aix-vsx", flags);
+      if (sec == NULL)
+	return NULL;
+      sec->size = 256;
+      sec->vma = 0;
+      sec->filepos = core.c_extctx + 584;
+    }
 
   /* .ldinfo section.
      To actually find out how long this section is in this particular

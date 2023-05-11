@@ -1,6 +1,6 @@
 /* Machine independent support for Solaris /proc (process file system) for GDB.
 
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    Written by Michael Snyder at Cygnus Solutions.
    Based on work by Fred Fish, Stu Grossman, Geoff Noer, and others.
@@ -1849,7 +1849,7 @@ do_attach (ptid_t ptid)
   inf = current_inferior ();
   inferior_appeared (inf, pi->pid);
   /* Let GDB know that the inferior was attached.  */
-  inf->attach_flag = 1;
+  inf->attach_flag = true;
 
   /* Create a procinfo for the current lwp.  */
   lwpid = proc_get_current_thread (pi);
@@ -2118,7 +2118,7 @@ wait_again:
 		    if (print_thread_events)
 		      gdb_printf (_("[%s exited]\n"),
 				  target_pid_to_str (retval).c_str ());
-		    delete_thread (find_thread_ptid (this, retval));
+		    delete_thread (this->find_thread (retval));
 		    target_continue_no_signal (ptid);
 		    goto wait_again;
 		  }
@@ -2225,7 +2225,7 @@ wait_again:
 		    if (print_thread_events)
 		      gdb_printf (_("[%s exited]\n"),
 				  target_pid_to_str (retval).c_str ());
-		    delete_thread (find_thread_ptid (this, retval));
+		    delete_thread (this->find_thread (retval));
 		    status->set_spurious ();
 		    return retval;
 		  }
@@ -2533,7 +2533,7 @@ procfs_target::files_info ()
 
   gdb_printf (_("\tUsing the running image of %s %s via /proc.\n"),
 	      inf->attach_flag? "attached": "child",
-	      target_pid_to_str (inferior_ptid).c_str ());
+	      target_pid_to_str (ptid_t (inf->pid)).c_str ());
 }
 
 /* Make it die.  Wait for it to die.  Clean up after it.  Note: this
@@ -2854,7 +2854,7 @@ procfs_notice_thread (procinfo *pi, procinfo *thread, void *ptr)
 {
   ptid_t gdb_threadid = ptid_t (pi->pid, thread->tid, 0);
 
-  thread_info *thr = find_thread_ptid (&the_procfs_target, gdb_threadid);
+  thread_info *thr = the_procfs_target.find_thread (gdb_threadid);
   if (thr == NULL || thr->state == THREAD_EXITED)
     add_thread (&the_procfs_target, gdb_threadid);
 

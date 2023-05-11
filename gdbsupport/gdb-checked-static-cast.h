@@ -1,4 +1,4 @@
-/* Copyright (C) 2022 Free Software Foundation, Inc.
+/* Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -54,6 +54,9 @@ checked_static_cast (V *v)
 		 "types must be related");
 
 #ifdef DEVELOPMENT
+  if (v == nullptr)
+    return nullptr;
+
   T result = dynamic_cast<T> (v);
   gdb_assert (result != nullptr);
 #else

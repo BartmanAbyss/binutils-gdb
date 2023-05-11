@@ -1,6 +1,6 @@
 /* Dynamic architecture support for GDB, the GNU debugger.
 
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -82,6 +82,14 @@ legacy_register_sim_regno (struct gdbarch *gdbarch, int regnum)
     return LEGACY_SIM_REGNO_IGNORE;
 }
 
+/* See arch-utils.h */
+
+CORE_ADDR
+default_remove_non_address_bits (struct gdbarch *gdbarch, CORE_ADDR pointer)
+{
+  /* By default, just return the pointer value.  */
+  return pointer;
+}
 
 /* See arch-utils.h */
 
@@ -1090,6 +1098,19 @@ default_get_return_buf_addr (struct type *val_type, frame_info_ptr cur_frame)
   return 0;
 }
 
+bool
+default_dwarf2_omit_typedef_p (struct type *target_type, const char *producer,
+			       const char *name)
+{
+  return false;
+}
+
+static CORE_ADDR
+default_update_call_site_pc (struct gdbarch *gdbarch, CORE_ADDR pc)
+{
+  return pc;
+}
+
 /* Non-zero if we want to trace architecture code.  */
 
 #ifndef GDBARCH_DEBUG
@@ -1104,13 +1125,13 @@ show_gdbarch_debug (struct ui_file *file, int from_tty,
 }
 
 static const char *
-pformat (const struct floatformat **format)
+pformat (struct gdbarch *gdbarch, const struct floatformat **format)
 {
   if (format == NULL)
     return "(null)";
-  else
-    /* Just print out one of them - this is only for diagnostics.  */
-    return format[0]->name;
+
+  int format_index = gdbarch_byte_order (gdbarch) == BFD_ENDIAN_LITTLE ? 1 : 0;
+  return format[format_index]->name;
 }
 
 static const char *
@@ -1160,6 +1181,24 @@ pstring_list (const char *const *list)
 
 #include "gdbarch.c"
 
+enum return_value_convention
+default_gdbarch_return_value
+     (struct gdbarch *gdbarch, struct value *function, struct type *valtype,
+      struct regcache *regcache, struct value **read_value,
+      const gdb_byte *writebuf)
+{
+  gdb_byte *readbuf = nullptr;
+
+  if (read_value != nullptr)
+    {
+      *read_value = value::allocate (valtype);
+      readbuf = (*read_value)->contents_raw ().data ();
+    }
+
+  return gdbarch->return_value (gdbarch, function, valtype, regcache,
+				readbuf, writebuf);
+}
+
 obstack *gdbarch_obstack (gdbarch *arch)
 {
   return &arch->obstack;
@@ -1195,7 +1234,7 @@ gdbarch_tdep_1 (struct gdbarch *gdbarch)
 {
   if (gdbarch_debug >= 2)
     gdb_printf (gdb_stdlog, "gdbarch_tdep_1 called\n");
-  return gdbarch->tdep;
+  return gdbarch->tdep.get ();
 }
 
 registry<gdbarch> *
@@ -1211,6 +1250,7 @@ struct gdbarch_registration
   enum bfd_architecture bfd_architecture;
   gdbarch_init_ftype *init;
   gdbarch_dump_tdep_ftype *dump_tdep;
+  gdbarch_supports_arch_info_ftype *supports_arch_info;
   struct gdbarch_list *arches;
   struct gdbarch_registration *next;
 };
@@ -1234,7 +1274,9 @@ gdbarch_printable_names ()
 	internal_error (_("gdbarch_architecture_names: multi-arch unknown"));
       do
 	{
-	  arches.push_back (ap->printable_name);
+	  if (rego->supports_arch_info == nullptr
+	      || rego->supports_arch_info (ap))
+	    arches.push_back (ap->printable_name);
 	  ap = ap->next;
 	}
       while (ap != NULL);
@@ -1247,7 +1289,8 @@ gdbarch_printable_names ()
 void
 gdbarch_register (enum bfd_architecture bfd_architecture,
 		  gdbarch_init_ftype *init,
-		  gdbarch_dump_tdep_ftype *dump_tdep)
+		  gdbarch_dump_tdep_ftype *dump_tdep,
+		  gdbarch_supports_arch_info_ftype *supports_arch_info)
 {
   struct gdbarch_registration **curr;
   const struct bfd_arch_info *bfd_arch_info;
@@ -1280,6 +1323,7 @@ gdbarch_register (enum bfd_architecture bfd_architecture,
   (*curr)->bfd_architecture = bfd_architecture;
   (*curr)->init = init;
   (*curr)->dump_tdep = dump_tdep;
+  (*curr)->supports_arch_info = supports_arch_info;
   (*curr)->arches = NULL;
   (*curr)->next = NULL;
 }

@@ -1,6 +1,6 @@
 \input texinfo
 @setfilename ld.info
-@c Copyright (C) 1991-2022 Free Software Foundation, Inc.
+@c Copyright (C) 1991-2023 Free Software Foundation, Inc.
 @syncodeindex ky cp
 @c man begin INCLUDE
 @include configdoc.texi
@@ -57,7 +57,7 @@ This file documents the @sc{gnu} linker LD
 @end ifset
 version @value{VERSION}.
 
-Copyright @copyright{} 1991-2022 Free Software Foundation, Inc.
+Copyright @copyright{} 1991-2023 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU Free Documentation License, Version 1.3
@@ -85,7 +85,7 @@ section entitled ``GNU Free Documentation License''.
 @tex
 {\parskip=0pt
 \hfill Red Hat Inc\par
-\hfill nickc\@credhat.com, doc\@redhat.com\par
+\hfill nickc\@redhat.com, doc\@redhat.com\par
 \hfill {\it The GNU linker}\par
 \hfill Edited by Jeffrey Osier (jeffrey\@cygnus.com)\par
 }
@@ -94,7 +94,7 @@ section entitled ``GNU Free Documentation License''.
 
 @vskip 0pt plus 1filll
 @c man begin COPYRIGHT
-Copyright @copyright{} 1991-2022 Free Software Foundation, Inc.
+Copyright @copyright{} 1991-2023 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU Free Documentation License, Version 1.3
@@ -461,6 +461,22 @@ will contain a colon separated list of audit interfaces to use.  This
 option is only meaningful on ELF platforms supporting the rtld-audit interface.
 The -P option is provided for Solaris compatibility.
 
+@kindex --enable-linker-version
+@item   --enable-linker-version
+Enables the @code{LINKER_VERSION} linker script directive, described
+in @ref{Output Section Data}.  If this directive is used in a linker
+script and this option has been enabled then a string containing the
+linker version will be inserted at the current point.
+
+Note - this location of this option on the linker command line is
+significant.  It will only affect linker scripts that come after it on
+the command line, or which are built into the linker.
+
+@kindex --disable-linker-version
+@item   --disable-linker-version
+Disables the @code{LINKER_VERSION} linker script directive, so that it
+does not insert a version string.  This is the default.
+
 @kindex --enable-non-contiguous-regions
 @item --enable-non-contiguous-regions
 This option avoids generating an error if an input section does not
@@ -473,14 +489,14 @@ sections are evaluated does not change, for instance:
 
 @smallexample
   MEMORY @{
-    MEM1 (rwx) : ORIGIN : 0x1000, LENGTH = 0x14
-    MEM2 (rwx) : ORIGIN : 0x1000, LENGTH = 0x40
-    MEM3 (rwx) : ORIGIN : 0x2000, LENGTH = 0x40
+    MEM1 (rwx) : ORIGIN = 0x1000, LENGTH = 0x14
+    MEM2 (rwx) : ORIGIN = 0x1000, LENGTH = 0x40
+    MEM3 (rwx) : ORIGIN = 0x2000, LENGTH = 0x40
   @}
   SECTIONS @{
     mem1 : @{ *(.data.*); @} > MEM1
     mem2 : @{ *(.data.*); @} > MEM2
-    mem3 : @{ *(.data.*); @} > MEM2
+    mem3 : @{ *(.data.*); @} > MEM3
   @}
 
   with input sections:
@@ -854,6 +870,16 @@ is 0x1, and @file{bar.o}, whose 0xc0010001 property value is 0x1.
 Print (or do not print) the list of discarded and garbage collected sections
 in the link map.  Enabled by default.
 
+@kindex --print-map-locals
+@kindex --no-print-map-locals
+@item --print-map-locals
+@itemx --no-print-map-locals
+Print (or do not print) local symbols in the link map.  Local symbols
+will have the text @samp{(local)} printed before their name, and will
+be listed after all of the global symbols in a given section.
+Temporary local symbols (typically those that start with @samp{.L})
+will not be included in the output.  Disabled by default.
+
 @kindex -n
 @cindex read-only text
 @cindex NMAGIC
@@ -1168,7 +1194,9 @@ in a linker script.
 @itemx --version
 @itemx -V
 Display the version number for @command{ld}.  The @option{-V} option also
-lists the supported emulations.
+lists the supported emulations.  See also the description of the
+@option{--enable-linker-version} in @ref{Options,,Command-line Options}
+which can be used to insert the linker version string into a binary.
 
 @kindex -x
 @kindex --discard-all
@@ -1207,9 +1235,6 @@ for Solaris compatibility.
 @item -z @var{keyword}
 The recognized keywords are:
 @table @samp
-
-@item bndplt
-Always generate BND prefix in PLT entries. Supported for Linux/x86_64.
 
 @item call-nop=prefix-addr
 @itemx call-nop=suffix-nop
@@ -2838,7 +2863,7 @@ section and ELF @code{PT_GNU_EH_FRAME} segment header.
 Request creation of @code{.eh_frame} unwind info for linker
 generated code sections like PLT.  This option is on by default
 if linker generated unwind info is supported.  This option also
-controls the generation of @code{.sframe} unwind info for linker
+controls the generation of @code{.sframe} stack trace info for linker
 generated code sections like PLT.
 
 @kindex --enable-new-dtags
@@ -5311,6 +5336,7 @@ C identifiers because they contain a @samp{.} character.
 @cindex data
 @cindex section data
 @cindex output section data
+@kindex ASCIZ ``@var{string}''
 @kindex BYTE(@var{expression})
 @kindex SHORT(@var{expression})
 @kindex LONG(@var{expression})
@@ -5347,6 +5373,18 @@ When the object file format does not have an explicit endianness, as is
 true of, for example, S-records, the value will be stored in the
 endianness of the first input object file.
 
+You can include a zero-terminated string in an output section by using
+@code{ASCIZ}.  The keyword is followed by a string which is stored at
+the current value of the location counter adding a zero byte at the
+end.  If the string includes spaces it must be enclosed in double
+quotes.  The string may contain '\n', '\r', '\t' and octal numbers.
+Hex numbers are not supported.
+
+For example, this string of 16 characters will create a 17 byte area
+@smallexample
+  ASCIZ "This is 16 bytes"
+@end smallexample
+
 Note---these commands only work inside a section description and not
 between them, so the following will produce an error from the linker:
 @smallexample
@@ -5382,6 +5420,16 @@ part of the section following the @code{FILL} command, rather than the
 entire section.  If both are used, the @code{FILL} command takes
 precedence.  @xref{Output Section Fill}, for details on the fill
 expression.
+
+@kindex LINKER_VERSION
+@cindex LINKER_VERSION
+Inserts a string containing the version of the linker at the current
+point.  Note - by default this directive is disabled and will do
+nothing.  It only becomes active if the
+@option{--enable-linker-version} command line option is used.
+
+Built-in linker scripts for ELF based targets already include this
+directive in their @samp{.comment} section.
 
 @node Output Section Keywords
 @subsection Output Section Keywords
@@ -5548,11 +5596,14 @@ Each output section may have a type.  The type is a keyword in
 parentheses.  The following types are defined:
 
 @table @code
+
 @item NOLOAD
 The section should be marked as not loadable, so that it will not be
 loaded into memory when the program is run.
+
 @item READONLY
 The section should be marked as read-only.
+
 @item DSECT
 @item COPY
 @item INFO
@@ -5561,6 +5612,7 @@ These type names are supported for backward compatibility, and are
 rarely used.  They all have the same effect: the section should be
 marked as not allocatable, so that no memory is allocated for the
 section when the program is run.
+
 @item TYPE = @var{type}
 Set the section type to the integer @var{type}. When generating an ELF
 output file, type names @code{SHT_PROGBITS}, @code{SHT_STRTAB},
@@ -5568,9 +5620,29 @@ output file, type names @code{SHT_PROGBITS}, @code{SHT_STRTAB},
 @code{SHT_FINI_ARRAY}, and @code{SHT_PREINIT_ARRAY} are also allowed
 for @var{type}.  It is the user's responsibility to ensure that any
 special requirements of the section type are met.
+
+Note - the TYPE only is used if some or all of the contents of the
+section do not have an implicit type of their own.  So for example:
+@smallexample
+  .foo . TYPE = SHT_PROGBITS @{ *(.bar) @}
+@end smallexample
+will set the type of section @samp{.foo} to the type of the section
+@samp{.bar} in the input files, which may not be the SHT_PROGBITS
+type.  Whereas:
+@smallexample
+  .foo . TYPE = SHT_PROGBITS @{ BYTE(1) @}
+@end smallexample
+will set the type of @samp{.foo} to SHT_PROGBBITS.  If it is necessary
+to override the type of incoming sections and force the output section
+type then an extra piece of untyped data will be needed:
+@smallexample
+  .foo . TYPE = SHT_PROGBITS @{ BYTE(1); *(.bar) @}
+@end smallexample
+
 @item READONLY ( TYPE = @var{type} )
 This form of the syntax combines the @var{READONLY} type with the
 type specified by @var{type}.
+
 @end table
 
 @kindex NOLOAD
@@ -7181,6 +7253,9 @@ support is implemented with a linker plugin.
 
 Currently there is only one plugin shipped by default, but more may
 be added here later.
+
+Plugins are enabled via the use of the @option{-plugin @var{name}}
+command line option. @xref{Options}.
 
 @menu
 * libdep Plugin::	Static Library Dependencies Plugin

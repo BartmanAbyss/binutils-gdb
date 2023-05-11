@@ -1,6 +1,6 @@
 /* Target-dependent code for FreeBSD/i386.
 
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -133,7 +133,7 @@ const struct regset i386_fbsd_segbases_regset =
 		__sighandler_t		*sf_handler;
 	} sf_ahu;
 	ucontext_t	sf_uc;
-        ...
+	...
    }
 
    ucontext_t is defined as:

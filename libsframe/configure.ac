@@ -1,7 +1,7 @@
 dnl                                            -*- Autoconf -*-
 dnl Process this file with autoconf to produce a configure script.
 dnl
-dnl   Copyright (C) 2022 Free Software Foundation, Inc.
+dnl   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 dnl
 dnl This file is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -22,6 +22,7 @@ AC_INIT([libsframe], BFD_VERSION)
 AC_CONFIG_SRCDIR(sframe.c)
 AC_USE_SYSTEM_EXTENSIONS
 AM_INIT_AUTOMAKE
+AM_SILENT_RULES([yes])
 
 # Checks for programs.
 AC_PROG_MAKE_SET

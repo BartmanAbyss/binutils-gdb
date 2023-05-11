@@ -1,7 +1,5 @@
-/* *INDENT-OFF* */ /* ATTRIBUTE_PRINTF confuses indent, avoid running it
-		      for now.  */
 /* I/O, string, cleanup, and other random utilities for GDB.
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -25,10 +23,6 @@
 #include "gdbsupport/array-view.h"
 #include "gdbsupport/scoped_restore.h"
 #include <chrono>
-
-#ifdef HAVE_LIBXXHASH
-#include <xxhash.h>
-#endif
 
 struct completion_match_for_lcd;
 class compiled_regex;
@@ -98,20 +92,6 @@ extern int strcmp_iw (const char *string1, const char *string2);
 
 extern int strcmp_iw_ordered (const char *, const char *);
 
-/* Return true if the strings are equal.  */
-
-extern bool streq (const char *, const char *);
-
-extern int subset_compare (const char *, const char *);
-
-/* Compare C strings for std::sort.  */
-
-static inline bool
-compare_cstrings (const char *str1, const char *str2)
-{
-  return strcmp (str1, str2) < 0;
-}
-
 /* Reset the prompt_for_continue clock.  */
 void reset_prompt_for_continue_wait_time (void);
 /* Return the time spent in prompt_for_continue.  */
@@ -155,9 +135,6 @@ private:
 
 extern int gdb_filename_fnmatch (const char *pattern, const char *string,
 				 int flags);
-
-extern void substitute_path_component (char **stringp, const char *from,
-				       const char *to);
 
 std::string ldirname (const char *filename);
 
@@ -278,9 +255,6 @@ extern void fputs_styled (const char *linebuffer,
 extern void fputs_highlighted (const char *str, const compiled_regex &highlight,
 			       struct ui_file *stream);
 
-/* Return the address only having significant bits.  */
-extern CORE_ADDR address_significant (gdbarch *gdbarch, CORE_ADDR addr);
-
 /* Convert CORE_ADDR to string in platform-specific manner.
    This is usually formatted similar to 0x%lx.  */
 extern const char *paddress (struct gdbarch *gdbarch, CORE_ADDR addr);
@@ -308,8 +282,6 @@ extern void (*deprecated_error_begin_hook) (void);
 
 extern const char *warning_pre_print;
 
-extern void error_stream (const string_file &) ATTRIBUTE_NORETURN;
-
 extern void demangler_vwarning (const char *file, int line,
 			       const char *, va_list ap)
      ATTRIBUTE_PRINTF (3, 0);
@@ -325,13 +297,6 @@ extern pid_t wait_to_die_with_timeout (pid_t pid, int *status, int timeout);
 #endif
 
 extern int myread (int, char *, int);
-
-/* Integer exponentiation: Return V1**V2, where both arguments
-   are integers.
-
-   Requires V1 != 0 if V2 < 0.
-   Returns 1 for 0 ** 0.  */
-extern ULONGEST uinteger_pow (ULONGEST v1, LONGEST v2);
 
 /* Resource limits used by getrlimit and setrlimit.  */
 
@@ -365,19 +330,11 @@ extern void copy_bitwise (gdb_byte *dest, ULONGEST dest_offset,
 			  const gdb_byte *source, ULONGEST source_offset,
 			  ULONGEST nbits, int bits_big_endian);
 
-/* A fast hashing function.  This can be used to hash data in a fast way
-   when the length is known.  If no fast hashing library is available, falls
-   back to iterative_hash from libiberty.  START_VALUE can be set to
-   continue hashing from a previous value.  */
+/* When readline decides that the terminal cannot auto-wrap lines, it reduces
+   the width of the reported screen width by 1.  This variable indicates
+   whether that's the case or not, allowing us to add it back where
+   necessary.  See _rl_term_autowrap in readline/terminal.c.  */
 
-static inline unsigned int
-fast_hash (const void *ptr, size_t len, unsigned int start_value = 0)
-{
-#ifdef HAVE_LIBXXHASH
-  return XXH64 (ptr, len, start_value);
-#else
-  return iterative_hash (ptr, len, start_value);
-#endif
-}
+extern int readline_hidden_cols;
 
 #endif /* UTILS_H */

@@ -1,6 +1,6 @@
 /* Definitions for expressions stored in reversed prefix form, for GDB.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -214,10 +214,21 @@ struct expression
     op->dump (stream, 0);
   }
 
+  /* Return true if this expression uses OBJFILE (and will become
+     dangling when OBJFILE is unloaded), otherwise return false.
+     OBJFILE must not be a separate debug info file.  */
+  bool uses_objfile (struct objfile *objfile) const;
+
   /* Evaluate the expression.  EXPECT_TYPE is the context type of the
      expression; normally this should be nullptr.  NOSIDE controls how
      evaluation is performed.  */
-  struct value *evaluate (struct type *expect_type, enum noside noside);
+  struct value *evaluate (struct type *expect_type = nullptr,
+			  enum noside noside = EVAL_NORMAL);
+
+  /* Evaluate an expression, avoiding all memory references
+     and getting a value whose type alone is correct.  */
+  struct value *evaluate_type ()
+  { return evaluate (nullptr, EVAL_AVOID_SIDE_EFFECTS); }
 
   /* Language it was entered in.  */
   const struct language_defn *language_defn;
@@ -278,10 +289,6 @@ extern struct value *evaluate_subexp_do_call (expression *exp,
 					      gdb::array_view<value *> argvec,
 					      const char *function_name,
 					      type *default_return_type);
-
-/* From expprint.c */
-
-extern const char *op_name (enum exp_opcode opcode);
 
 /* In an OP_RANGE expression, either bound could be empty, indicating
    that its value is by default that of the corresponding bound of the

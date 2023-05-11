@@ -1,6 +1,6 @@
 /* CLI Definitions for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,6 +24,7 @@
 #include "ui-out.h"
 #include "cli-out.h"
 #include "top.h"		/* for "execute_command" */
+#include "ui.h"
 #include "infrun.h"
 #include "observable.h"
 #include "gdbthread.h"
@@ -48,7 +49,7 @@ class cli_interp final : public cli_interp_base
   void init (bool top_level) override;
   void resume () override;
   void suspend () override;
-  gdb_exception exec (const char *command_str) override;
+  void exec (const char *command_str) override;
   ui_out *interp_ui_out () override;
 
 private:
@@ -74,11 +75,6 @@ as_cli_interp_base (interp *interp)
 {
   return dynamic_cast<cli_interp_base *> (interp);
 }
-
-/* Longjmp-safe wrapper for "execute_command".  */
-static struct gdb_exception safe_execute_command (struct ui_out *uiout,
-						  const char *command, 
-						  int from_tty);
 
 /* See cli-interp.h.
 
@@ -153,21 +149,6 @@ cli_base_on_signal_received (enum gdb_signal siggnal)
 	continue;
 
       print_signal_received_reason (cli->interp_ui_out (), siggnal);
-    }
-}
-
-/* Observer for the end_stepping_range notification.  */
-
-static void
-cli_base_on_end_stepping_range ()
-{
-  SWITCH_THRU_ALL_UIS ()
-    {
-      cli_interp_base *cli = as_cli_interp_base (top_level_interpreter ());
-      if (cli == nullptr)
-	continue;
-
-      print_end_stepping_range_reason (cli->interp_ui_out ());
     }
 }
 
@@ -314,12 +295,9 @@ cli_interp::suspend ()
   gdb_disable_readline ();
 }
 
-gdb_exception
+void
 cli_interp::exec (const char *command_str)
 {
-  struct ui_file *old_stream;
-  struct gdb_exception result;
-
   /* gdb_stdout could change between the time m_cli_uiout was
      initialized and now.  Since we're probably using a different
      interpreter which has a new ui_file for gdb_stdout, use that one
@@ -327,10 +305,22 @@ cli_interp::exec (const char *command_str)
 
      It is important that it gets reset everytime, since the user
      could set gdb to use a different interpreter.  */
-  old_stream = m_cli_uiout->set_stream (gdb_stdout);
-  result = safe_execute_command (m_cli_uiout.get (), command_str, 1);
-  m_cli_uiout->set_stream (old_stream);
-  return result;
+  ui_file *old_stream = m_cli_uiout->set_stream (gdb_stdout);
+  SCOPE_EXIT { m_cli_uiout->set_stream (old_stream); };
+
+  /* Save and override the global ``struct ui_out'' builder.  */
+  scoped_restore saved_uiout = make_scoped_restore (&current_uiout,
+						    m_cli_uiout.get ());
+
+  try
+    {
+      execute_command (command_str, 1);
+    }
+  catch (const gdb_exception_error &ex)
+    {
+      exception_print (gdb_stderr, ex);
+      throw;
+    }
 }
 
 bool
@@ -339,50 +329,11 @@ cli_interp_base::supports_command_editing ()
   return true;
 }
 
-static struct gdb_exception
-safe_execute_command (struct ui_out *command_uiout, const char *command,
-		      int from_tty)
-{
-  struct gdb_exception e;
-
-  /* Save and override the global ``struct ui_out'' builder.  */
-  scoped_restore saved_uiout = make_scoped_restore (&current_uiout,
-						    command_uiout);
-
-  try
-    {
-      execute_command (command, from_tty);
-    }
-  catch (gdb_exception &exception)
-    {
-      e = std::move (exception);
-    }
-
-  /* FIXME: cagney/2005-01-13: This shouldn't be needed.  Instead the
-     caller should print the exception.  */
-  exception_print (gdb_stderr, e);
-  return e;
-}
-
 ui_out *
 cli_interp::interp_ui_out ()
 {
   return m_cli_uiout.get ();
 }
-
-/* These hold the pushed copies of the gdb output files.
-   If NULL then nothing has yet been pushed.  */
-struct saved_output_files
-{
-  ui_file *out;
-  ui_file *err;
-  ui_file *log;
-  ui_file *targ;
-  ui_file *targerr;
-  ui_file_up file_to_delete;
-  ui_file_up log_to_delete;
-};
-static std::unique_ptr<saved_output_files> saved_output;
 
 /* See cli-interp.h.  */
 
@@ -392,43 +343,49 @@ cli_interp_base::set_logging (ui_file_up logfile, bool logging_redirect,
 {
   if (logfile != nullptr)
     {
-      saved_output.reset (new saved_output_files);
-      saved_output->out = gdb_stdout;
-      saved_output->err = gdb_stderr;
-      saved_output->log = gdb_stdlog;
-      saved_output->targ = gdb_stdtarg;
-      saved_output->targerr = gdb_stdtargerr;
+      gdb_assert (m_saved_output == nullptr);
+      m_saved_output.reset (new saved_output_files);
+      m_saved_output->out = gdb_stdout;
+      m_saved_output->err = gdb_stderr;
+      m_saved_output->log = gdb_stdlog;
+      m_saved_output->targ = gdb_stdtarg;
+      m_saved_output->targerr = gdb_stdtargerr;
 
-      /* If something is not being redirected, then a tee containing both the
-	 logfile and stdout.  */
       ui_file *logfile_p = logfile.get ();
-      ui_file *tee = nullptr;
-      if (!logging_redirect || !debug_redirect)
+      m_saved_output->logfile_holder = std::move (logfile);
+
+      /* The new stdout and stderr only depend on whether logging
+	 redirection is being done.  */
+      ui_file *new_stdout = logfile_p;
+      ui_file *new_stderr = logfile_p;
+      if (!logging_redirect)
 	{
-	  tee = new tee_file (gdb_stdout, std::move (logfile));
-	  saved_output->file_to_delete.reset (tee);
+	  m_saved_output->stdout_holder.reset
+	    (new tee_file (gdb_stdout, logfile_p));
+	  new_stdout = m_saved_output->stdout_holder.get ();
+	  m_saved_output->stderr_holder.reset
+	    (new tee_file (gdb_stderr, logfile_p));
+	  new_stderr = m_saved_output->stderr_holder.get ();
 	}
-      else
-	saved_output->file_to_delete = std::move (logfile);
 
-      saved_output->log_to_delete.reset
-	(new timestamped_file (debug_redirect ? logfile_p : tee));
+      m_saved_output->stdlog_holder.reset
+	(new timestamped_file (debug_redirect ? logfile_p : new_stderr));
 
-      gdb_stdout = logging_redirect ? logfile_p : tee;
-      gdb_stdlog = saved_output->log_to_delete.get ();
-      gdb_stderr = logging_redirect ? logfile_p : tee;
-      gdb_stdtarg = logging_redirect ? logfile_p : tee;
-      gdb_stdtargerr = logging_redirect ? logfile_p : tee;
+      gdb_stdout = new_stdout;
+      gdb_stdlog = m_saved_output->stdlog_holder.get ();
+      gdb_stderr = new_stderr;
+      gdb_stdtarg = new_stderr;
+      gdb_stdtargerr = new_stderr;
     }
   else
     {
-      gdb_stdout = saved_output->out;
-      gdb_stderr = saved_output->err;
-      gdb_stdlog = saved_output->log;
-      gdb_stdtarg = saved_output->targ;
-      gdb_stdtargerr = saved_output->targerr;
+      gdb_stdout = m_saved_output->out;
+      gdb_stderr = m_saved_output->err;
+      gdb_stdlog = m_saved_output->log;
+      gdb_stdtarg = m_saved_output->targ;
+      gdb_stdtargerr = m_saved_output->targerr;
 
-      saved_output.reset (nullptr);
+      m_saved_output.reset (nullptr);
     }
 }
 
@@ -451,8 +408,6 @@ _initialize_cli_interp ()
   /* Note these all work for both the CLI and TUI interpreters.  */
   gdb::observers::normal_stop.attach (cli_base_on_normal_stop,
 				      "cli-interp-base");
-  gdb::observers::end_stepping_range.attach (cli_base_on_end_stepping_range,
-					     "cli-interp-base");
   gdb::observers::signal_received.attach (cli_base_on_signal_received,
 					  "cli-interp-base");
   gdb::observers::signal_exited.attach (cli_base_on_signal_exited,

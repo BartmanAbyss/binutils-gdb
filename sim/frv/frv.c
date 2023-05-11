@@ -1,5 +1,5 @@
 /* frv simulator support code
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
    Contributed by Red Hat.
 
 This file is part of the GNU simulators.
@@ -29,7 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "cgen-engine.h"
 #include "cgen-par.h"
 #include "bfd.h"
-#include "gdb/sim-frv.h"
+#include "sim/sim-frv.h"
 #include <math.h>
 #include <stdlib.h>
 

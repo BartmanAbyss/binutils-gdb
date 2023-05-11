@@ -10,7 +10,7 @@
 
 @copying
 @c man begin COPYRIGHT
-Copyright @copyright{} 1991-2022 Free Software Foundation, Inc.
+Copyright @copyright{} 1991-2023 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU Free Documentation License, Version 1.3
@@ -915,7 +915,7 @@ The symbol is an indirect reference to another symbol.
 The symbol is a debugging symbol.
 
 @item n
-The symbol is in the read-only data section.
+The symbol is in a non-data, non-code, non-debug read-only section.
 
 @item p
 The symbol is in a stack unwind section.
@@ -2274,6 +2274,7 @@ objdump [@option{-a}|@option{--archive-headers}]
         [@option{--prefix-addresses}]
         [@option{--[no-]show-raw-insn}]
         [@option{--adjust-vma=}@var{offset}]
+        [@option{--show-all-symbols}]
         [@option{--dwarf-depth=@var{n}}]
         [@option{--dwarf-start=@var{n}}]
         [@option{--ctf-parent=}@var{section}]
@@ -2406,8 +2407,9 @@ used when disassembling.
 
 @item -D
 @itemx --disassemble-all
-Like @option{-d}, but disassemble the contents of all sections, not just
-those expected to contain instructions.
+Like @option{-d}, but disassemble the contents of all non-empty
+non-bss sections, not just those expected to contain instructions.
+@option{-j} may be used to select specific sections.
 
 This option also has a subtle effect on the disassembly of
 instructions in code sections.  When option @option{-d} is in effect
@@ -2501,7 +2503,8 @@ for specification with @option{-b} or @option{-m}.
 @item -j @var{name}
 @itemx --section=@var{name}
 @cindex section information
-Display information only for section @var{name}.
+Display information for section @var{name}.  This option may be
+specified multiple times.
 
 @item -L
 @itemx --process-links
@@ -2774,8 +2777,9 @@ disassembly.
 @itemx --full-contents
 @cindex sections, full contents
 @cindex object file sections
-Display the full contents of any sections requested.  By default all
-non-empty sections are displayed.
+Display the full contents of sections, often used in combination with
+@option{-j} to request specific sections.  By default all non-empty
+non-bss sections are displayed.
 
 @item -S
 @itemx --source
@@ -2783,6 +2787,10 @@ non-empty sections are displayed.
 @cindex disassembly, with source
 Display source code intermixed with disassembly, if possible.  Implies
 @option{-d}.
+
+@item --show-all-symbols
+When disassembling, show all the symbols that match a given address,
+not just the first one.
 
 @item --source-comment[=@var{txt}]
 @cindex source disassembly
@@ -3381,7 +3389,7 @@ octal, @samp{x} for hexadecimal, or @samp{d} for decimal.
 @itemx --encoding=@var{encoding}
 Select the character encoding of the strings that are to be found.
 Possible values for @var{encoding} are: @samp{s} = single-7-bit-byte
-characters (ASCII, ISO 8859, etc., default), @samp{S} =
+characters (default), @samp{S} =
 single-8-bit-byte characters, @samp{b} = 16-bit bigendian, @samp{l} =
 16-bit littleendian, @samp{B} = 32-bit bigendian, @samp{L} = 32-bit
 littleendian.  Useful for finding wide character strings. (@samp{l}

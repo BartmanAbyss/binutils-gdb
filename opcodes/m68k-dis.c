@@ -1,5 +1,5 @@
 /* Print Motorola 68k instructions.
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU opcodes library.
 
@@ -257,7 +257,8 @@ fetch_data (struct disassemble_info *info, bfd_byte *addr)
 
 /* This function is used to print to the bit-bucket.  */
 static int
-dummy_printer (FILE *file ATTRIBUTE_UNUSED,
+dummy_printer (void *file ATTRIBUTE_UNUSED,
+	       enum disassembler_style style ATTRIBUTE_UNUSED,
 	       const char *format ATTRIBUTE_UNUSED,
 	       ...)
 {
@@ -556,9 +557,11 @@ print_base (int regno, bfd_vma disp, disassemble_info *info)
     {
 #ifdef MOTOROLA
       (*info->print_address_func) (disp, info);
-      (*info->fprintf_func) (info->stream, ",pc");
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "pc");
 #else
-      (*info->fprintf_func) (info->stream, "%%pc@(");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%pc");
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
       (*info->print_address_func) (disp, info);
 #endif
     }
@@ -588,28 +591,55 @@ print_base (int regno, bfd_vma disp, disassemble_info *info)
 	}
       else
 	{
-      (*info->fprintf_func) (info->stream, "%" PRId64, (uint64_t) disp);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "%" PRId64, (uint64_t) disp);
 	}
 #endif
 #ifdef MOTOROLA
       if (regno == -2)
 	;
-      else if (regno == -3)
-	(*info->fprintf_func) (info->stream, ",zpc");
+      else {
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      if (regno == -3)
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "zpc");
       else
-	(*info->fprintf_func) (info->stream, ",%s", reg_names[regno]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%s", reg_names[regno]);
+	}
 #else
-      if (regno == -2)
-	(*info->fprintf_func) (info->stream, "@(");
-      else if (regno == -3)
-	(*info->fprintf_func) (info->stream, "%%zpc@(");
-      else
-	(*info->fprintf_func) (info->stream, "%s@(", reg_names[regno]);
+      if (regno == -3)
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%%zpc");
+      else if (regno != -2)
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%s", reg_names[regno]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "%" PRIx64, (uint64_t) disp);
 #endif
 
 #ifndef TARGET_AMIGA
       (*info->fprintf_func) (info->stream, "%" PRIx64, (uint64_t) disp);
 #endif
+    }
+}
+
+/* Print the index register of an indexed argument, as encoded in the
+   extension word.  */
+
+static void
+print_index_register (int ext, disassemble_info *info)
+{
+  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				"%s", reg_names[(ext >> 12) & 0xf]);
+  (*info->fprintf_styled_func) (info->stream, dis_style_text,
+				":%c", ext & 0x800 ? 'l' : 'w');
+  if ((ext >> 9) & 3)
+    {
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ":");
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "%d", 1 << ((ext >> 9) & 3));
     }
 }
 
@@ -632,7 +662,7 @@ print_indexed (int basereg,
 #endif
   bfd_vma base_disp;
   bfd_vma outer_disp;
-  char buf[40];
+  bool print_index = true;
 
   NEXTWORD (p, word, NULL);
 
@@ -660,7 +690,9 @@ print_indexed (int basereg,
       (*info->fprintf_func) (info->stream, "(");
 #endif
       print_base (basereg, base_disp, info);
-      (*info->fprintf_func) (info->stream, ",%s)", buf);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      print_index_register (word, info);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
       return p;
     }
 
@@ -674,7 +706,7 @@ print_indexed (int basereg,
 	basereg = -2;
     }
   if (word & 0100)
-    buf[0] = '\0';
+    print_index = false;
   base_disp = 0;
   switch ((word >> 4) & 3)
     {
@@ -694,9 +726,12 @@ print_indexed (int basereg,
       (*info->fprintf_func) (info->stream, "(");
 #endif
       print_base (basereg, base_disp, info);
-      if (buf[0] != '\0')
-	(*info->fprintf_func) (info->stream, ",%s", buf);
-      (*info->fprintf_func) (info->stream, ")");
+      if (print_index)
+	{
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+	  print_index_register (word, info);
+	}
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
       return p;
     }
 
@@ -715,22 +750,32 @@ print_indexed (int basereg,
   (*info->fprintf_func) (info->stream, "([");
 #endif
   print_base (basereg, base_disp, info);
-  if ((word & 4) == 0 && buf[0] != '\0')
+  if ((word & 4) == 0 && print_index)
     {
-      (*info->fprintf_func) (info->stream, ",%s", buf);
-      buf[0] = '\0';
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      print_index_register (word, info);
+      print_index = false;
     }
 #ifdef MOTOROLA
-  (*info->fprintf_func) (info->stream, "]");
-  if (buf[0] != '\0')
-    (*info->fprintf_func) (info->stream, ",%s", buf);
+  (*info->fprintf_styled_func) (info->stream, dis_style_text, "]");
+  if (print_index)
+    {
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      print_index_register (word, info);
+    }
   (*info->fprintf_func) (info->stream, ",%" PRId64, (uint64_t) outer_disp);
   (*info->fprintf_func) (info->stream, ")");
 #else
-  (*info->fprintf_func) (info->stream, ")@(%" PRIx64, (uint64_t) outer_disp);
-  if (buf[0] != '\0')
-    (*info->fprintf_func) (info->stream, ",%s", buf);
-  (*info->fprintf_func) (info->stream, ")");
+  (*info->fprintf_styled_func) (info->stream, dis_style_text,
+				")@(");
+  (*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
+				"%" PRIx64, (uint64_t) outer_disp);
+  if (print_index)
+    {
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ",");
+      print_index_register (word, info);
+    }
+  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #endif
 
   return p;
@@ -773,7 +818,8 @@ print_insn_arg (const char *d,
       {
         static char *const cacheFieldName[] = { "nc", "dc", "ic", "bc" };
         FETCH_ARG (2, val);
-	(*info->fprintf_func) (info->stream, "%s", cacheFieldName[val]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_sub_mnemonic,
+				      "%s", cacheFieldName[val]);
         break;
       }
 
@@ -781,9 +827,14 @@ print_insn_arg (const char *d,
       {
 	FETCH_ARG (3, val);
 #ifdef MOTOROLA
-	(*info->fprintf_func) (info->stream, "(%s)", reg_names[val + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
+	(*info->fprintf_styled_func) (info->stream, dis_style_register, "%s",
+				      reg_names[val + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #else
-	(*info->fprintf_func) (info->stream, "%s@", reg_names[val + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_register, "%s",
+				      reg_names[val + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, "@");
 #endif
         break;
       }
@@ -798,49 +849,49 @@ print_insn_arg (const char *d,
 
     case 'C':
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "ccr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "ccr");
 #else
-      (*info->fprintf_func) (info->stream, "%%ccr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%ccr");
 #endif
       break;
 
     case 'S':
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "sr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "sr");
 #else
-      (*info->fprintf_func) (info->stream, "%%sr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%sr");
 #endif
       break;
 
     case 'U':
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "usp");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "usp");
 #else
-      (*info->fprintf_func) (info->stream, "%%usp");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%usp");
 #endif
       break;
 
     case 'E':
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "acc");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "acc");
 #else
-      (*info->fprintf_func) (info->stream, "%%acc");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%acc");
 #endif
       break;
 
     case 'G':
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "macsr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "macsr");
 #else
-      (*info->fprintf_func) (info->stream, "%%macsr");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%macsr");
 #endif
       break;
 
     case 'H':
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "mask");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "mask");
 #else
-      (*info->fprintf_func) (info->stream, "%%mask");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%mask");
 #endif
       break;
 
@@ -926,7 +977,8 @@ print_insn_arg (const char *d,
 	    for (regno = ARRAY_SIZE (names_v4e); --regno >= 0;)
 	      if (names_v4e[regno].value == val)
 		{
-		  (*info->fprintf_func) (info->stream, "%s", names_v4e[regno].name);
+		  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+						     "%s", names_v4e[regno].name);
 		  break;
 		}
 	    if (regno >= 0)
@@ -935,11 +987,12 @@ print_insn_arg (const char *d,
 	for (regno = ARRAY_SIZE (names) - 1; regno >= 0; regno--)
 	  if (names[regno].value == val)
 	    {
-	      (*info->fprintf_func) (info->stream, "%s", names[regno].name);
+	      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					    "%s", names[regno].name);
 	      break;
 	    }
 	if (regno < 0)
-	  (*info->fprintf_func) (info->stream, "0x%x", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "0x%x", val);
       }
       break;
 
@@ -948,7 +1001,8 @@ print_insn_arg (const char *d,
       /* 0 means 8, except for the bkpt instruction... */
       if (val == 0 && d[1] != 's')
 	val = 8;
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'x':
@@ -956,17 +1010,20 @@ print_insn_arg (const char *d,
       /* 0 means -1.  */
       if (val == 0)
 	val = -1;
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'j':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "#%d", val+1);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val+1);
       break;
 
     case 'K':
       FETCH_ARG (9, val);
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'M':
@@ -975,35 +1032,41 @@ print_insn_arg (const char *d,
 	  static char *const scalefactor_name[] = { "<<", ">>" };
 
 	  FETCH_ARG (1, val);
-	  (*info->fprintf_func) (info->stream, "%s", scalefactor_name[val]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_sub_mnemonic,
+					"%s", scalefactor_name[val]);
 	}
       else
 	{
 	  FETCH_ARG (8, val);
 	  if (val & 0x80)
 	    val = val - 0x100;
-	  (*info->fprintf_func) (info->stream, "#%d", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					"#%d", val);
 	}
       break;
 
     case 'T':
       FETCH_ARG (4, val);
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'D':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%s", reg_names[val]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val]);
       break;
 
     case 'A':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%s", reg_names[val + 010]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val + 010]);
       break;
 
     case 'R':
       FETCH_ARG (4, val);
-      (*info->fprintf_func) (info->stream, "%s", reg_names[val]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val]);
       break;
 
     case 'r':
@@ -1012,44 +1075,67 @@ print_insn_arg (const char *d,
       (*info->fprintf_func) (info->stream, "(%s)", reg_names[regno]);
 #else
       if (regno > 7)
-	(*info->fprintf_func) (info->stream, "%s@", reg_names[regno]);
+	{
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", reg_names[regno]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@");
+	}
       else
-	(*info->fprintf_func) (info->stream, "@(%s)", reg_names[regno]);
+	{
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", reg_names[regno]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
+	}
 #endif
       break;
 
     case 'F':
       FETCH_ARG (3, val);
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "fp%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "fp%d", val);
 #else
-      (*info->fprintf_func) (info->stream, "%%fp%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%%fp%d", val);
 #endif
       break;
 
     case 'O':
       FETCH_ARG (6, val);
       if (val & 0x20)
-	(*info->fprintf_func) (info->stream, "%s", reg_names[val & 7]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%s", reg_names[val & 7]);
       else
-	(*info->fprintf_func) (info->stream, "%d", val);
+	(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				      "%d", val);
       break;
 
     case '+':
       FETCH_ARG (3, val);
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "(%s)+", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")+");
 #else
-      (*info->fprintf_func) (info->stream, "%s@+", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@+");
 #endif
       break;
 
     case '-':
       FETCH_ARG (3, val);
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "-(%s)", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "-(");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #else
-      (*info->fprintf_func) (info->stream, "%s@-", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", reg_names[val + 8]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@-");
 #endif
       break;
 
@@ -1057,14 +1143,20 @@ print_insn_arg (const char *d,
       if (place == 'k')
 	{
 	  FETCH_ARG (3, val);
-	  (*info->fprintf_func) (info->stream, "{%s}", reg_names[val]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "{");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", reg_names[val]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "}");
 	}
       else if (place == 'C')
 	{
 	  FETCH_ARG (7, val);
 	  if (val > 63)		/* This is a signed constant.  */
 	    val -= 128;
-	  (*info->fprintf_func) (info->stream, "{#%d}", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "{");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					"#%d", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "}");
 	}
       else
 	return PRINT_INSN_ARG_INVALID_OPERAND;
@@ -1090,7 +1182,8 @@ print_insn_arg (const char *d,
       else
 	return PRINT_INSN_ARG_INVALID_OP_TABLE;
 
-      (*info->fprintf_func) (info->stream, "#%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				    "#%d", val);
       break;
 
     case 'B':
@@ -1131,34 +1224,48 @@ print_insn_arg (const char *d,
 	NEXTWORD (p, val, PRINT_INSN_ARG_MEMORY_ERROR);
 	FETCH_ARG (3, val1);
 #ifdef MOTOROLA
-	(*info->fprintf_func) (info->stream, "%d(%s)", val, reg_names[val1 + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
+				      "%d", val);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%s", reg_names[val1 + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #else
-	(*info->fprintf_func) (info->stream, "%s@(%d)", reg_names[val1 + 8], val);
-#endif
+	(*info->fprintf_styled_func) (info->stream, dis_style_register,
+				      "%s", reg_names[val1 + 8]);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
+	(*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
+				      "%d", val);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text, ")");#endif
 	break;
       }
 
     case 's':
       FETCH_ARG (3, val);
-      (*info->fprintf_func) (info->stream, "%s", fpcr_names[val]);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%s", fpcr_names[val]);
       break;
 
     case 'e':
       FETCH_ARG (2, val);
-      (*info->fprintf_func) (info->stream, "%%acc%d", val);
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%%acc%d", val);
       break;
 
     case 'g':
       FETCH_ARG (1, val);
-      (*info->fprintf_func) (info->stream, "%%accext%s", val == 0 ? "01" : "23");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+				    "%%accext%s", val == 0 ? "01" : "23");
       break;
 
     case 'i':
       FETCH_ARG (2, val);
       if (val == 1)
-	(*info->fprintf_func) (info->stream, "<<");
+	(*info->fprintf_styled_func) (info->stream, dis_style_sub_mnemonic,
+				      "<<");
       else if (val == 3)
-	(*info->fprintf_func) (info->stream, ">>");
+	(*info->fprintf_styled_func) (info->stream, dis_style_sub_mnemonic,
+				      ">>");
       else
 	return PRINT_INSN_ARG_INVALID_OPERAND;
       break;
@@ -1169,7 +1276,8 @@ print_insn_arg (const char *d,
       if (val < 0)
 	return PRINT_INSN_ARG_MEMORY_ERROR;
       if (val != 1)				/* Unusual coprocessor ID?  */
-	(*info->fprintf_func) (info->stream, "(cpid=%d) ", val);
+	(*info->fprintf_styled_func) (info->stream, dis_style_text,
+				      "(cpid=%d) ", val);
       break;
 
     case '4':
@@ -1220,34 +1328,52 @@ print_insn_arg (const char *d,
       switch (val >> 3)
 	{
 	case 0:
-	  (*info->fprintf_func) (info->stream, "%s", reg_names[val]);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", reg_names[val]);
 	  break;
 
 	case 1:
-	  (*info->fprintf_func) (info->stream, "%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
 	  break;
 
 	case 2:
 #ifdef MOTOROLA
-	  (*info->fprintf_func) (info->stream, "(%s)", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #else
-	  (*info->fprintf_func) (info->stream, "%s@", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@");
 #endif
 	  break;
 
 	case 3:
 #ifdef MOTOROLA
-	  (*info->fprintf_func) (info->stream, "(%s)+", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")+");
 #else
-	  (*info->fprintf_func) (info->stream, "%s@+", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@+");
+
 #endif
 	  break;
 
 	case 4:
 #ifdef MOTOROLA
-	  (*info->fprintf_func) (info->stream, "-(%s)", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "-(");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #else
-	  (*info->fprintf_func) (info->stream, "%s@-", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@-");
 #endif
 	  break;
 
@@ -1256,14 +1382,25 @@ print_insn_arg (const char *d,
 #ifdef MOTOROLA
 	  if (dump_baserel)
 	    {
-	      (*info->fprintf_func) (info->stream, "(");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
 	      print_base(regno, val, info);
-	      (*info->fprintf_func) (info->stream, ")");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 	    }
-	  else
-	    (*info->fprintf_func) (info->stream, "%d(%s)", val, regname);
+	  else {
+	  (*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
+					"%d", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
+      }
 #else
-	  (*info->fprintf_func) (info->stream, "%s@(%d)", regname, val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", regname);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_address_offset,
+					"%d", val);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #endif
 	  break;
 
@@ -1293,11 +1430,15 @@ print_insn_arg (const char *d,
         info->target = addr + val;
 #ifdef MOTOROLA
 	      (*info->print_address_func) (addr + val, info);
-	      (*info->fprintf_func) (info->stream, "(pc)");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_text, "(");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_register, "pc");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #else
-	      (*info->fprintf_func) (info->stream, "%%pc@(");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					    "%%pc");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_text, "@(");
 	      (*info->print_address_func) (addr + val, info);
-	      (*info->fprintf_func) (info->stream, ")");
+	      (*info->fprintf_styled_func) (info->stream, dis_style_text, ")");
 #endif
 	      break;
 
@@ -1346,9 +1487,11 @@ print_insn_arg (const char *d,
 		  return PRINT_INSN_ARG_INVALID_OPERAND;
 	      }
 	      if (flt_p)	/* Print a float? */
-		(*info->fprintf_func) (info->stream, "#0e%g", flval);
+		(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					      "#0e%g", flval);
 	      else
-		(*info->fprintf_func) (info->stream, "#%d", val);
+		(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					      "#%d", val);
 	      break;
 
 	    default:
@@ -1363,7 +1506,7 @@ print_insn_arg (const char *d,
 	{
 	  FETCH_ARG (1, val);
 	  if (val)
-	    info->fprintf_func (info->stream, "&");
+	    info->fprintf_styled_func (info->stream, dis_style_text, "&");
 	}
       break;
 
@@ -1379,7 +1522,8 @@ print_insn_arg (const char *d,
 	    p = p1 > p ? p1 : p;
 	    if (val == 0)
 	      {
-		(*info->fprintf_func) (info->stream, "#0");
+		(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					      "#0");
 		break;
 	      }
 	    if (*d == 'l')
@@ -1399,15 +1543,22 @@ print_insn_arg (const char *d,
 		  int first_regno;
 
 		  if (doneany)
-		    (*info->fprintf_func) (info->stream, "/");
+		    (*info->fprintf_styled_func) (info->stream, dis_style_text,
+						  "/");
 		  doneany = 1;
-		  (*info->fprintf_func) (info->stream, "%s", reg_names[regno]);
+		  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+						"%s", reg_names[regno]);
 		  first_regno = regno;
 		  while (val & (1 << (regno + 1)))
 		    ++regno;
 		  if (regno > first_regno)
-		    (*info->fprintf_func) (info->stream, "-%s",
-					   reg_names[regno]);
+		    {
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_text, "-");
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_register, "%s",
+						    reg_names[regno]);
+		    }
 		}
 	  }
 	else if (place == '3')
@@ -1418,7 +1569,8 @@ print_insn_arg (const char *d,
 	    FETCH_ARG (8, val);
 	    if (val == 0)
 	      {
-		(*info->fprintf_func) (info->stream, "#0");
+		(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+					      "#0");
 		break;
 	      }
 	    if (*d == 'l')
@@ -1437,21 +1589,32 @@ print_insn_arg (const char *d,
 		{
 		  int first_regno;
 		  if (doneany)
-		    (*info->fprintf_func) (info->stream, "/");
+		    (*info->fprintf_styled_func) (info->stream, dis_style_text,
+						  "/");
 		  doneany = 1;
 #ifdef MOTOROLA
-		  (*info->fprintf_func) (info->stream, "fp%d", regno);
+		  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+						"fp%d", regno);
 #else
-		  (*info->fprintf_func) (info->stream, "%%fp%d", regno);
+		  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+						"%%fp%d", regno);
 #endif
 		  first_regno = regno;
 		  while (val & (1 << (regno + 1)))
 		    ++regno;
 		  if (regno > first_regno)
 #ifdef MOTOROLA
-		    (*info->fprintf_func) (info->stream, "-fp%d", regno);
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_text, "-");
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_register,
+						    "fp%d", regno);
 #else
-		    (*info->fprintf_func) (info->stream, "-%%fp%d", regno);
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_text, "-");
+		      (*info->fprintf_styled_func) (info->stream,
+						    dis_style_register,
+						    "%%fp%d", regno);
 #endif
 		}
 	  }
@@ -1459,7 +1622,8 @@ print_insn_arg (const char *d,
 	  {
 	    FETCH_ARG (3, val);
 	    /* fmoveml for FP status registers.  */
-	    (*info->fprintf_func) (info->stream, "%s", fpcr_names[val]);
+	    (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					  "%s", fpcr_names[val]);
 	  }
 	else
 	  return PRINT_INSN_ARG_INVALID_OP_TABLE;
@@ -1521,17 +1685,19 @@ print_insn_arg (const char *d,
 	    {
 	      int break_reg = ((buffer[3] >> 2) & 7);
 
-	      (*info->fprintf_func)
-		(info->stream, val == 0x1c ? "%%bad%d" : "%%bac%d",
-		 break_reg);
+	      (*info->fprintf_styled_func)
+		(info->stream, dis_style_register,
+		 val == 0x1c ? "%%bad%d" : "%%bac%d", break_reg);
 	    }
 #endif
 	    break;
 	  default:
-	    (*info->fprintf_func) (info->stream, "<mmu register %d>", val);
+	    (*info->fprintf_styled_func) (info->stream, dis_style_text,
+					  "<mmu register %d>", val);
 	  }
 	if (name)
-	  (*info->fprintf_func) (info->stream, "%s", name);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%s", name);
       }
       break;
 
@@ -1542,25 +1708,30 @@ print_insn_arg (const char *d,
 	FETCH_ARG (5, fc);
 	if (fc == 1)
 #ifdef MOTOROLA
-	  (*info->fprintf_func) (info->stream, "dfc");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"dfc");
 	else if (fc == 0)
-	  (*info->fprintf_func) (info->stream, "sfc");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"sfc");
 #else
-	  (*info->fprintf_func) (info->stream, "%%dfc");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%%dfc");
 	else if (fc == 0)
-	  (*info->fprintf_func) (info->stream, "%%sfc");
+	  (*info->fprintf_styled_func) (info->stream, dis_style_register,
+					"%%sfc");
 #endif
 	else
 	  /* xgettext:c-format */
-	  (*info->fprintf_func) (info->stream, _("<function code %d>"), fc);
+	  (*info->fprintf_styled_func) (info->stream, dis_style_text,
+					_("<function code %d>"), fc);
       }
       break;
 
     case 'V':
 #ifdef MOTOROLA
-      (*info->fprintf_func) (info->stream, "val");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "val");
 #else
-      (*info->fprintf_func) (info->stream, "%%val");
+      (*info->fprintf_styled_func) (info->stream, dis_style_register, "%%val");
 #endif
       break;
 
@@ -1569,7 +1740,8 @@ print_insn_arg (const char *d,
 	int level;
 
 	FETCH_ARG (3, level);
-	(*info->fprintf_func) (info->stream, "%d", level);
+	(*info->fprintf_styled_func) (info->stream, dis_style_immediate,
+				      "%d", level);
       }
       break;
 
@@ -1584,9 +1756,9 @@ print_insn_arg (const char *d,
 	    is_upper = 1;
 	    reg &= 0xf;
 	  }
-	(*info->fprintf_func) (info->stream, "%s%s",
-			       reg_half_names[reg],
-			       is_upper ? "u" : "l");
+	(*info->fprintf_styled_func) (info->stream, dis_style_register, "%s%s",
+				      reg_half_names[reg],
+				      is_upper ? "u" : "l");
       }
       break;
 
@@ -1613,7 +1785,7 @@ match_insn_m68k (bfd_vma memaddr,
 
   struct private *priv = (struct private *) info->private_data;
   bfd_byte *buffer = priv->the_buffer;
-  fprintf_ftype save_printer = info->fprintf_func;
+  fprintf_styled_ftype save_printer = info->fprintf_styled_func;
   void (* save_print_address) (bfd_vma, struct disassemble_info *)
     = info->print_address_func;
 
@@ -1694,7 +1866,7 @@ match_insn_m68k (bfd_vma memaddr,
 
   save_p = p;
   info->print_address_func = dummy_print_address;
-  info->fprintf_func = (fprintf_ftype) dummy_printer;
+  info->fprintf_styled_func = dummy_printer;
 
   /* We scan the operands twice.  The first time we don't print anything,
      but look for errors.  */
@@ -1707,7 +1879,7 @@ match_insn_m68k (bfd_vma memaddr,
       else if (eaten == PRINT_INSN_ARG_INVALID_OPERAND
 	       || eaten == PRINT_INSN_ARG_MEMORY_ERROR)
 	{
-	  info->fprintf_func = save_printer;
+	  info->fprintf_styled_func = save_printer;
 	  info->print_address_func = save_print_address;
 	  return eaten == PRINT_INSN_ARG_MEMORY_ERROR ? -1 : 0;
 	}
@@ -1715,18 +1887,18 @@ match_insn_m68k (bfd_vma memaddr,
 	{
 	  /* We must restore the print functions before trying to print the
 	     error message.  */
-	  info->fprintf_func = save_printer;
+	  info->fprintf_styled_func = save_printer;
 	  info->print_address_func = save_print_address;
-	  info->fprintf_func (info->stream,
-			      /* xgettext:c-format */
-			      _("<internal error in opcode table: %s %s>\n"),
-			      best->name, best->args);
+	  info->fprintf_styled_func (info->stream, dis_style_text,
+				     /* xgettext:c-format */
+				     _("<internal error in opcode table: %s %s>\n"),
+				     best->name, best->args);
 	  return 2;
 	}
     }
 
   p = save_p;
-  info->fprintf_func = save_printer;
+  info->fprintf_styled_func = save_printer;
   info->print_address_func = save_print_address;
 
   d = args;
@@ -1746,13 +1918,13 @@ match_insn_m68k (bfd_vma memaddr,
       b[bnl - 1] = '.';
       b[bnl] = c;
       b[bnl + 1] = 0;
-      info->fprintf_func (info->stream, "%s", b);
+      info->fprintf_styled_func (info->stream, dis_style_mnemonic, "%s", b);
     } else
 #endif
-  info->fprintf_func (info->stream, "%s", best->name);
+  info->fprintf_styled_func (info->stream, dis_style_mnemonic, "%s", best->name);
 
   if (*d)
-    info->fprintf_func (info->stream, " ");
+    info->fprintf_styled_func (info->stream, dis_style_text, " ");
 
   while (*d)
     {
@@ -1760,7 +1932,7 @@ match_insn_m68k (bfd_vma memaddr,
       d += 2;
 
       if (*d && *(d - 2) != 'I' && *d != 'k')
-	info->fprintf_func (info->stream, ",");
+	info->fprintf_styled_func (info->stream, dis_style_text, ",");
     }
 
   info->insn_type = best->type;
@@ -1943,8 +2115,14 @@ print_insn_m68k (bfd_vma memaddr, disassemble_info *info)
     }
 
   if (val == 0)
-    /* Handle undefined instructions.  */
-    info->fprintf_func (info->stream, ".short 0x%04x", (buffer[0] << 8) + buffer[1]);
+    {
+      /* Handle undefined instructions.  */
+      info->fprintf_styled_func (info->stream, dis_style_assembler_directive,
+				 ".short");
+      info->fprintf_styled_func (info->stream, dis_style_text, " ");
+      info->fprintf_styled_func (info->stream, dis_style_immediate,
+				 "0x%04x", (buffer[0] << 8) + buffer[1]);
+    }
 
   return val ? val : 2;
 }

@@ -1,5 +1,5 @@
 /* Async events for the GDB event loop.
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,6 +21,7 @@
 
 #include "ser-event.h"
 #include "top.h"
+#include "ui.h"
 
 /* PROC is a function to be invoked when the READY flag is set.  This
    happens when there has been a signal and the corresponding signal

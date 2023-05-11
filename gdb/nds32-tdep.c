@@ -1,6 +1,6 @@
 /* Target-dependent code for the NDS32 architecture, for GDB.
 
-   Copyright (C) 2013-2022 Free Software Foundation, Inc.
+   Copyright (C) 2013-2023 Free Software Foundation, Inc.
    Contributed by Andes Technology Corporation.
 
    This file is part of GDB.
@@ -403,8 +403,11 @@ nds32_pseudo_register_type (struct gdbarch *gdbarch, int regnum)
 
   /* Currently, only FSRs could be defined as pseudo registers.  */
   if (regnum < gdbarch_num_pseudo_regs (gdbarch))
-    return arch_float_type (gdbarch, -1, "builtin_type_ieee_single",
-			    floatformats_ieee_single);
+    {
+      type_allocator alloc (gdbarch);
+      return init_float_type (alloc, -1, "builtin_type_ieee_single",
+			      floatformats_ieee_single);
+    }
 
   warning (_("Unknown nds32 pseudo register %d."), regnum);
   return NULL;
@@ -1422,7 +1425,7 @@ nds32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   ULONGEST regval;
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   nds32_gdbarch_tdep *tdep = gdbarch_tdep<nds32_gdbarch_tdep> (gdbarch);
-  struct type *func_type = value_type (function);
+  struct type *func_type = function->type ();
   int abi_use_fpr = nds32_abi_use_fpr (tdep->elf_abi);
   int abi_split = nds32_abi_split (tdep->elf_abi);
 
@@ -1442,7 +1445,7 @@ nds32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   /* Now make sure there's space on the stack */
   for (i = 0; i < nargs; i++)
     {
-      struct type *type = value_type (args[i]);
+      struct type *type = args[i]->type ();
       int align = type_align (type);
 
       /* If align is zero, it may be an empty struct.
@@ -1466,11 +1469,11 @@ nds32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       int calling_use_fpr;
       int use_fpr = 0;
 
-      type = value_type (args[i]);
+      type = args[i]->type ();
       calling_use_fpr = nds32_check_calling_use_fpr (type);
       len = type->length ();
       align = type_align (type);
-      val = value_contents (args[i]).data ();
+      val = args[i]->contents ().data ();
 
       /* The size of a composite type larger than 4 bytes will be rounded
 	 up to the nearest multiple of 4.  */
@@ -1940,7 +1943,6 @@ nds32_validate_tdesc_p (const struct target_desc *tdesc,
 static struct gdbarch *
 nds32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   struct gdbarch_list *best_arch;
   tdesc_arch_data_up tdesc_data;
   const struct target_desc *tdesc = info.target_desc;
@@ -1981,13 +1983,14 @@ nds32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     return NULL;
 
   /* Allocate space for the new architecture.  */
-  nds32_gdbarch_tdep *tdep = new nds32_gdbarch_tdep;
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new nds32_gdbarch_tdep));
+  nds32_gdbarch_tdep *tdep = gdbarch_tdep<nds32_gdbarch_tdep> (gdbarch);
+
   tdep->fpu_freg = fpu_freg;
   tdep->use_pseudo_fsrs = use_pseudo_fsrs;
   tdep->fs0_regnum = -1;
   tdep->elf_abi = elf_abi;
-
-  gdbarch = gdbarch_alloc (&info, tdep);
 
   set_gdbarch_wchar_bit (gdbarch, 16);
   set_gdbarch_wchar_signed (gdbarch, 0);

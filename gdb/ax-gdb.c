@@ -1,6 +1,6 @@
 /* GDB-specific functions for operating on agent expressions.
 
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -210,7 +210,7 @@ gen_trace_static_fields (struct agent_expr *ax,
 
   for (i = type->num_fields () - 1; i >= nbases; i--)
     {
-      if (field_is_static (&type->field (i)))
+      if (type->field (i).is_static ())
 	{
 	  gen_static_field (ax, &value, type, i);
 	  if (value.optimized_out)
@@ -353,6 +353,16 @@ gen_extend (struct agent_expr *ax, struct type *type)
   ((type->is_unsigned () ? ax_zero_ext : ax_ext) (ax, bits));
 }
 
+/* A helper that returns the target type if TYPE is a range type, or
+   otherwise just returns TYPE.  */
+
+static struct type *
+strip_range_type (struct type *type)
+{
+  if (type->code () == TYPE_CODE_RANGE)
+    return type->target_type ();
+  return type;
+}
 
 /* Assume that the top of the stack contains a value of type "pointer
    to TYPE"; generate code to fetch its value.  Note that TYPE is the
@@ -366,8 +376,7 @@ gen_fetch (struct agent_expr *ax, struct type *type)
       ax_trace_quick (ax, type->length ());
     }
 
-  if (type->code () == TYPE_CODE_RANGE)
-    type = type->target_type ();
+  type = strip_range_type (type);
 
   switch (type->code ())
     {
@@ -832,9 +841,12 @@ static void
 gen_usual_arithmetic (struct agent_expr *ax, struct axs_value *value1,
 		      struct axs_value *value2)
 {
+  struct type *type1 = strip_range_type (value1->type);
+  struct type *type2 = strip_range_type (value2->type);
+
   /* Do the usual binary conversions.  */
-  if (value1->type->code () == TYPE_CODE_INT
-      && value2->type->code () == TYPE_CODE_INT)
+  if (type1->code () == TYPE_CODE_INT
+      && type2->code () == TYPE_CODE_INT)
     {
       /* The ANSI integral promotions seem to work this way: Order the
 	 integer types by size, and then by signedness: an n-bit
@@ -842,18 +854,18 @@ gen_usual_arithmetic (struct agent_expr *ax, struct axs_value *value1,
 	 type.  Promote to the "wider" of the two types, and always
 	 promote at least to int.  */
       struct type *target = max_type (builtin_type (ax->gdbarch)->builtin_int,
-				      max_type (value1->type, value2->type));
+				      max_type (type1, type2));
 
       /* Deal with value2, on the top of the stack.  */
-      gen_conversion (ax, value2->type, target);
+      gen_conversion (ax, type2, target);
 
       /* Deal with value1, not on the top of the stack.  Don't
 	 generate the `swap' instructions if we're not actually going
 	 to do anything.  */
-      if (is_nontrivial_conversion (value1->type, target))
+      if (is_nontrivial_conversion (type1, target))
 	{
 	  ax_simple (ax, aop_swap);
-	  gen_conversion (ax, value1->type, target);
+	  gen_conversion (ax, type1, target);
 	  ax_simple (ax, aop_swap);
 	}
 
@@ -892,6 +904,7 @@ gen_cast (struct agent_expr *ax, struct axs_value *value, struct type *type)
   require_rvalue (ax, value);
   /* Dereference typedefs.  */
   type = check_typedef (type);
+  type = strip_range_type (type);
 
   switch (type->code ())
     {
@@ -960,7 +973,7 @@ gen_ptradd (struct agent_expr *ax, struct axs_value *value,
 	    struct axs_value *value1, struct axs_value *value2)
 {
   gdb_assert (value1->type->is_pointer_or_reference ());
-  gdb_assert (value2->type->code () == TYPE_CODE_INT);
+  gdb_assert (strip_range_type (value2->type)->code () == TYPE_CODE_INT);
 
   gen_scale (ax, aop_mul, value1->type);
   ax_simple (ax, aop_add);
@@ -976,7 +989,7 @@ gen_ptrsub (struct agent_expr *ax, struct axs_value *value,
 	    struct axs_value *value1, struct axs_value *value2)
 {
   gdb_assert (value1->type->is_pointer_or_reference ());
-  gdb_assert (value2->type->code () == TYPE_CODE_INT);
+  gdb_assert (strip_range_type (value2->type)->code () == TYPE_CODE_INT);
 
   gen_scale (ax, aop_mul, value1->type);
   ax_simple (ax, aop_sub);
@@ -1048,14 +1061,15 @@ gen_binop (struct agent_expr *ax, struct axs_value *value,
 	   int may_carry, const char *name)
 {
   /* We only handle INT op INT.  */
-  if ((value1->type->code () != TYPE_CODE_INT)
-      || (value2->type->code () != TYPE_CODE_INT))
+  struct type *type1 = strip_range_type (value1->type);
+  if ((type1->code () != TYPE_CODE_INT)
+      || (strip_range_type (value2->type)->code () != TYPE_CODE_INT))
     error (_("Invalid combination of types in %s."), name);
 
-  ax_simple (ax, value1->type->is_unsigned () ? op_unsigned : op);
+  ax_simple (ax, type1->is_unsigned () ? op_unsigned : op);
   if (may_carry)
-    gen_extend (ax, value1->type);	/* catch overflow */
-  value->type = value1->type;
+    gen_extend (ax, type1);	/* catch overflow */
+  value->type = type1;
   value->kind = axs_rvalue;
 }
 
@@ -1064,8 +1078,9 @@ static void
 gen_logical_not (struct agent_expr *ax, struct axs_value *value,
 		 struct type *result_type)
 {
-  if (value->type->code () != TYPE_CODE_INT
-      && value->type->code () != TYPE_CODE_PTR)
+  struct type *type = strip_range_type (value->type);
+  if (type->code () != TYPE_CODE_INT
+      && type->code () != TYPE_CODE_PTR)
     error (_("Invalid type of operand to `!'."));
 
   ax_simple (ax, aop_log_not);
@@ -1076,11 +1091,12 @@ gen_logical_not (struct agent_expr *ax, struct axs_value *value,
 static void
 gen_complement (struct agent_expr *ax, struct axs_value *value)
 {
-  if (value->type->code () != TYPE_CODE_INT)
+  struct type *type = strip_range_type (value->type);
+  if (type->code () != TYPE_CODE_INT)
     error (_("Invalid type of operand to `~'."));
 
   ax_simple (ax, aop_bit_not);
-  gen_extend (ax, value->type);
+  gen_extend (ax, type);
 }
 
 
@@ -1343,7 +1359,7 @@ gen_struct_ref_recursive (struct agent_expr *ax, struct axs_value *value,
 		 "this") will have been generated already, which will
 		 be unnecessary but not harmful if the static field is
 		 being handled as a global.  */
-	      if (field_is_static (&type->field (i)))
+	      if (type->field (i).is_static ())
 		{
 		  gen_static_field (ax, value, type, i);
 		  if (value->optimized_out)
@@ -1479,7 +1495,7 @@ gen_struct_elt_for_reference (struct agent_expr *ax, struct axs_value *value,
 
       if (t_field_name && strcmp (t_field_name, fieldname) == 0)
 	{
-	  if (field_is_static (&t->field (i)))
+	  if (t->field (i).is_static ())
 	    {
 	      gen_static_field (ax, value, t, i);
 	      if (value->optimized_out)
@@ -1585,7 +1601,7 @@ operation::generate_ax (struct expression *exp,
       struct value *v = evaluate (nullptr, exp, EVAL_AVOID_SIDE_EFFECTS);
       ax_const_l (ax, value_as_long (v));
       value->kind = axs_rvalue;
-      value->type = check_typedef (value_type (v));
+      value->type = check_typedef (v->type ());
     }
   else
     {
@@ -1614,8 +1630,8 @@ long_const_operation::do_generate_ax (struct expression *exp,
 				      struct axs_value *value,
 				      struct type *cast_type)
 {
-  gen_int_literal (ax, value, std::get<1> (m_storage),
-		   std::get<0> (m_storage));
+  LONGEST val = as_longest ();
+  gen_int_literal (ax, value, val, std::get<0> (m_storage));
 }
 
 void
@@ -1745,7 +1761,7 @@ repeat_operation::do_generate_ax (struct expression *exp,
   struct value *v
     = std::get<1> (m_storage)->evaluate (nullptr, exp,
 					 EVAL_AVOID_SIDE_EFFECTS);
-  if (value_type (v)->code () != TYPE_CODE_INT)
+  if (v->type ()->code () != TYPE_CODE_INT)
     error (_("Right operand of `@' must be an integer."));
   int length = value_as_long (v);
   if (length <= 0)
@@ -1862,7 +1878,7 @@ unop_memval_type_operation::do_generate_ax (struct expression *exp,
   struct value *val
     = std::get<0> (m_storage)->evaluate (nullptr, exp,
 					 EVAL_AVOID_SIDE_EFFECTS);
-  struct type *type = value_type (val);
+  struct type *type = val->type ();
 
   std::get<1> (m_storage)->generate_ax (exp, ax, value);
 
@@ -1887,7 +1903,7 @@ op_this_operation::do_generate_ax (struct expression *exp,
   const struct language_defn *lang;
 
   b = block_for_pc (ax->scope);
-  func = block_linkage_function (b);
+  func = b->linkage_function ();
   lang = language_def (func->language ());
 
   sym = lookup_language_this (lang, b).symbol;
@@ -1980,7 +1996,7 @@ unop_cast_type_operation::do_generate_ax (struct expression *exp,
   struct value *val
     = std::get<0> (m_storage)->evaluate (nullptr, exp,
 					 EVAL_AVOID_SIDE_EFFECTS);
-  std::get<1> (m_storage)->generate_ax (exp, ax, value, value_type (val));
+  std::get<1> (m_storage)->generate_ax (exp, ax, value, val->type ());
 }
 
 void
@@ -2078,7 +2094,7 @@ gen_expr_binop_rest (struct expression *exp,
   switch (op)
     {
     case BINOP_ADD:
-      if (value1->type->code () == TYPE_CODE_INT
+      if (strip_range_type (value1->type)->code () == TYPE_CODE_INT
 	  && value2->type->is_pointer_or_reference ())
 	{
 	  /* Swap the values and proceed normally.  */
@@ -2086,7 +2102,7 @@ gen_expr_binop_rest (struct expression *exp,
 	  gen_ptradd (ax, value, value2, value1);
 	}
       else if (value1->type->is_pointer_or_reference ()
-	       && value2->type->code () == TYPE_CODE_INT)
+	       && strip_range_type (value2->type)->code () == TYPE_CODE_INT)
 	gen_ptradd (ax, value, value1, value2);
       else
 	gen_binop (ax, value, value1, value2,
@@ -2094,7 +2110,7 @@ gen_expr_binop_rest (struct expression *exp,
       break;
     case BINOP_SUB:
       if (value1->type->is_pointer_or_reference ()
-	  && value2->type->code () == TYPE_CODE_INT)
+	  && strip_range_type (value2->type)->code () == TYPE_CODE_INT)
 	gen_ptrsub (ax,value, value1, value2);
       else if (value1->type->is_pointer_or_reference ()
 	       && value2->type->is_pointer_or_reference ())

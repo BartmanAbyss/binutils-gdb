@@ -1,5 +1,5 @@
 /* write.c - emit .o file
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -123,10 +123,10 @@ void print_fixup (fixS *);
 /* We generally attach relocs to frag chains.  However, after we have
    chained these all together into a segment, any relocs we add after
    that must be attached to a segment.  This will include relocs added
-   in md_estimate_size_for_relax, for example.  */
-static int frags_chained = 0;
+   in md_estimate_size_before_relax, for example.  */
+static bool frags_chained = false;
 
-static int n_fixups;
+static unsigned int n_fixups;
 
 #define RELOC_ENUM enum bfd_reloc_code_real
 
@@ -380,7 +380,7 @@ chain_frchains_together_1 (segT section, struct frchain *frchp)
   fragS dummy, *prev_frag = &dummy;
   fixS fix_dummy, *prev_fix = &fix_dummy;
 
-  for (; frchp; frchp = frchp->frch_next)
+  do
     {
       prev_frag->fr_next = frchp->frch_root;
       prev_frag = frchp->frch_last;
@@ -393,7 +393,8 @@ chain_frchains_together_1 (segT section, struct frchain *frchp)
 	  seg_info (section)->fix_tail = frchp->fix_tail;
 	  prev_fix = frchp->fix_tail;
 	}
-    }
+      frchp = frchp->frch_next;
+    } while (frchp);
   gas_assert (prev_frag != &dummy
 	      && prev_frag->fr_type != 0);
   prev_frag->fr_next = 0;
@@ -416,7 +417,7 @@ chain_frchains_together (bfd *abfd ATTRIBUTE_UNUSED,
 
   /* Now that we've chained the frags together, we must add new fixups
      to the segment, not to the frag chain.  */
-  frags_chained = 1;
+  frags_chained = true;
 }
 
 static void
@@ -1461,25 +1462,15 @@ static void
 compress_debug (bfd *abfd, asection *sec, void *xxx ATTRIBUTE_UNUSED)
 {
   segment_info_type *seginfo = seg_info (sec);
-  fragS *f;
-  fragS *first_newf;
-  fragS *last_newf;
-  struct obstack *ob = &seginfo->frchainP->frch_obstack;
-  bfd_size_type uncompressed_size = (bfd_size_type) sec->size;
-  bfd_size_type compressed_size;
-  const char *section_name;
-  char *compressed_name;
-  char *header;
-  int x;
+  bfd_size_type uncompressed_size = sec->size;
   flagword flags = bfd_section_flags (sec);
-  unsigned int header_size;
 
   if (seginfo == NULL
-      || sec->size < 32
-      || (flags & (SEC_ALLOC | SEC_HAS_CONTENTS)) == SEC_ALLOC)
+      || uncompressed_size < 32
+      || (flags & SEC_HAS_CONTENTS) == 0)
     return;
 
-  section_name = bfd_section_name (sec);
+  const char *section_name = bfd_section_name (sec);
   if (!startswith (section_name, ".debug_")
       && !startswith (section_name, ".gnu.debuglto_.debug_")
       && !startswith (section_name, ".gnu.linkonce.wi."))
@@ -1490,13 +1481,15 @@ compress_debug (bfd *abfd, asection *sec, void *xxx ATTRIBUTE_UNUSED)
   if (ctx == NULL)
     return;
 
-  if (flag_compress_debug == COMPRESS_DEBUG_GNU_ZLIB)
+  unsigned int header_size;
+  if ((abfd->flags & BFD_COMPRESS_GABI) == 0)
     header_size = 12;
   else
     header_size = bfd_get_compression_header_size (stdoutput, NULL);
 
   /* Create a new frag to contain the compression header.  */
-  first_newf = frag_alloc (ob);
+  struct obstack *ob = &seginfo->frchainP->frch_obstack;
+  fragS *first_newf = frag_alloc (ob);
   if (obstack_room (ob) < header_size)
     first_newf = frag_alloc (ob);
   if (obstack_room (ob) < header_size)
@@ -1504,16 +1497,16 @@ compress_debug (bfd *abfd, asection *sec, void *xxx ATTRIBUTE_UNUSED)
 			"can't extend frag %lu chars",
 			(unsigned long) header_size),
 	      (unsigned long) header_size);
-  last_newf = first_newf;
+  fragS *last_newf = first_newf;
   obstack_blank_fast (ob, header_size);
   last_newf->fr_type = rs_fill;
   last_newf->fr_fix = header_size;
-  header = last_newf->fr_literal;
-  compressed_size = header_size;
+  char *header = last_newf->fr_literal;
+  bfd_size_type compressed_size = header_size;
 
   /* Stream the frags through the compression engine, adding new frags
      as necessary to accommodate the compressed output.  */
-  for (f = seginfo->frchainP->frch_root;
+  for (fragS *f = seginfo->frchainP->frch_root;
        f;
        f = f->fr_next)
     {
@@ -1573,7 +1566,7 @@ compress_debug (bfd *abfd, asection *sec, void *xxx ATTRIBUTE_UNUSED)
 	as_fatal (_("can't extend frag"));
       next_out = obstack_next_free (ob);
       obstack_blank_fast (ob, avail_out);
-      x = compress_finish (use_zstd, ctx, &next_out, &avail_out, &out_size);
+      int x = compress_finish (use_zstd, ctx, &next_out, &avail_out, &out_size);
       if (x < 0)
 	return;
 
@@ -1599,12 +1592,12 @@ compress_debug (bfd *abfd, asection *sec, void *xxx ATTRIBUTE_UNUSED)
 
   /* Update the section size and its name.  */
   bfd_update_compression_header (abfd, (bfd_byte *) header, sec);
-  x = bfd_set_section_size (sec, compressed_size);
+  bool x = bfd_set_section_size (sec, compressed_size);
   gas_assert (x);
-  if (flag_compress_debug == COMPRESS_DEBUG_GNU_ZLIB
+  if ((abfd->flags & BFD_COMPRESS_GABI) == 0
       && section_name[1] == 'd')
     {
-      compressed_name = concat (".z", section_name + 1, (char *) NULL);
+      char *compressed_name = bfd_debug_name_to_zdebug (abfd, section_name);
       bfd_rename_section (sec, compressed_name);
     }
 }
@@ -2336,8 +2329,6 @@ write_object_file (void)
     maybe_generate_build_notes ();
 #endif
 
-  PROGRESS (1);
-
 #ifdef tc_frob_file_before_adjust
   tc_frob_file_before_adjust ();
 #endif
@@ -2480,8 +2471,6 @@ write_object_file (void)
 	}
     }
 
-  PROGRESS (1);
-
   /* Now do any format-specific adjustments to the symbol table, such
      as adding file symbols.  */
 #ifdef tc_adjust_symtab
@@ -2531,15 +2520,16 @@ write_object_file (void)
      contents of the debug sections.  This needs to be done before
      we start writing any sections, because it will affect the file
      layout, which is fixed once we start writing contents.  */
-  if (flag_compress_debug)
+  if (flag_compress_debug != COMPRESS_DEBUG_NONE)
     {
+      flagword flags = BFD_COMPRESS;
       if (flag_compress_debug == COMPRESS_DEBUG_GABI_ZLIB)
-	stdoutput->flags |= BFD_COMPRESS | BFD_COMPRESS_GABI;
+	flags = BFD_COMPRESS | BFD_COMPRESS_GABI;
       else if (flag_compress_debug == COMPRESS_DEBUG_ZSTD)
-	stdoutput->flags |= BFD_COMPRESS | BFD_COMPRESS_GABI | BFD_COMPRESS_ZSTD;
-      else
-	stdoutput->flags |= BFD_COMPRESS;
-      bfd_map_over_sections (stdoutput, compress_debug, (char *) 0);
+	flags = BFD_COMPRESS | BFD_COMPRESS_GABI | BFD_COMPRESS_ZSTD;
+      stdoutput->flags |= flags & bfd_applicable_file_flags (stdoutput);
+      if ((stdoutput->flags & BFD_COMPRESS) != 0)
+	bfd_map_over_sections (stdoutput, compress_debug, (char *) 0);
     }
 
   bfd_map_over_sections (stdoutput, write_contents, (char *) 0);

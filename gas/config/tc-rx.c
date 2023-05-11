@@ -1,5 +1,5 @@
 /* tc-rx.c -- Assembler for the Renesas RX
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -380,9 +380,7 @@ rx_include (int ignore)
 
       if (try == NULL)
 	{
-	  int i;
-
-	  for (i = 0; i < include_dir_count; i++)
+	  for (size_t i = 0; i < include_dir_count; i++)
 	    {
 	      sprintf (path, "%s/%s", include_dirs[i], f);
 	      if ((try = fopen (path, FOPEN_RT)) != NULL)

@@ -1,5 +1,5 @@
 /* dwarf2dbg.c - DWARF2 debug support
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Contributed by David Mosberger-Tang <davidm@hpl.hp.com>
 
    This file is part of GAS, the GNU Assembler.
@@ -25,7 +25,7 @@
 	.file FILENO "file.c"
 	.loc  FILENO LINENO [COLUMN] [basic_block] [prologue_end] \
 	      [epilogue_begin] [is_stmt VALUE] [isa VALUE] \
-	      [discriminator VALUE]
+	      [discriminator VALUE] [view VALUE]
 */
 
 #include "as.h"
@@ -86,9 +86,9 @@
 #define DWARF2_ARANGES_VERSION 2
 #endif
 
-/* This implementation outputs version 3 .debug_line information.  */
+/* The .debug_line version is the same as the .debug_info version.  */
 #ifndef DWARF2_LINE_VERSION
-#define DWARF2_LINE_VERSION (dwarf_level > 3 ? dwarf_level : 3)
+#define DWARF2_LINE_VERSION DWARF2_VERSION
 #endif
 
 /* The .debug_rnglists has only been in DWARF version 5. */
@@ -119,7 +119,7 @@
    Note: If you want to change this, you'll have to update the
    "standard_opcode_lengths" table that is emitted below in
    out_debug_line().  */
-#define DWARF2_LINE_OPCODE_BASE		13
+#define DWARF2_LINE_OPCODE_BASE		(DWARF2_LINE_VERSION == 2 ? 10 : 13)
 
 #ifndef DWARF2_LINE_BASE
   /* Minimum line offset in a special line info. opcode.  This value
@@ -536,6 +536,10 @@ dwarf2_gen_line_info_1 (symbolS *label, struct dwarf2_line_info *loc)
 
 /* Record an entry for LOC occurring at OFS within the current fragment.  */
 
+static unsigned int dw2_line;
+static const char *dw2_filename;
+static int label_num;
+
 void
 dwarf2_gen_line_info (addressT ofs, struct dwarf2_line_info *loc)
 {
@@ -558,27 +562,23 @@ dwarf2_gen_line_info (addressT ofs, struct dwarf2_line_info *loc)
      uses them to determine the end of the prologue.  */
   if (debug_type == DEBUG_DWARF2)
     {
-      static unsigned int line = -1;
-      static const char *filename = NULL;
-
-      if (line == loc->line)
+      if (dw2_line == loc->line)
 	{
-	  if (filename == loc->u.filename)
+	  if (dw2_filename == loc->u.filename)
 	    return;
-	  if (filename_cmp (filename, loc->u.filename) == 0)
+	  if (filename_cmp (dw2_filename, loc->u.filename) == 0)
 	    {
-	      filename = loc->u.filename;
+	      dw2_filename = loc->u.filename;
 	      return;
 	    }
 	}
 
-      line = loc->line;
-      filename = loc->u.filename;
+      dw2_line = loc->line;
+      dw2_filename = loc->u.filename;
     }
 
   if (linkrelax)
     {
-      static int label_num = 0;
       char name[32];
 
       /* Use a non-fake name for the line number location,
@@ -715,10 +715,12 @@ assign_file_to_slot (unsigned int i, const char *file, unsigned int dir)
    Returns the slot number allocated to that filename or -1
    if there was a problem.  */
 
+static int last_used;
+static int last_used_dir_len;
+
 static signed int
 allocate_filenum (const char * pathname)
 {
-  static signed int last_used = -1, last_used_dir_len = 0;
   const char *file;
   size_t dir_len;
   unsigned int i, dir;
@@ -1195,6 +1197,8 @@ dwarf2_directive_filename (void)
 	{
 	  dirname = filename;
 	  filename = demand_copy_C_string (&filename_len);
+	  if (filename == NULL)
+	    return NULL;
 	  SKIP_WHITESPACE ();
 	}
 
@@ -1326,11 +1330,15 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
 	}
       else if (strcmp (p, "prologue_end") == 0)
 	{
+	  if (dwarf_level < 3)
+	    dwarf_level = 3;
 	  current.flags |= DWARF2_FLAG_PROLOGUE_END;
 	  *input_line_pointer = c;
 	}
       else if (strcmp (p, "epilogue_begin") == 0)
 	{
+	  if (dwarf_level < 3)
+	    dwarf_level = 3;
 	  current.flags |= DWARF2_FLAG_EPILOGUE_BEGIN;
 	  *input_line_pointer = c;
 	}
@@ -1350,6 +1358,8 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
 	}
       else if (strcmp (p, "isa") == 0)
 	{
+	  if (dwarf_level < 3)
+	    dwarf_level = 3;
 	  (void) restore_line_pointer (c);
 	  value = get_absolute_expression ();
 	  if (value >= 0)
@@ -1633,7 +1643,7 @@ size_inc_line_addr (int line_delta, addressT addr_delta)
   tmp += DWARF2_LINE_OPCODE_BASE;
 
   /* Avoid overflow when addr_delta is large.  */
-  if (addr_delta < 256 + MAX_SPECIAL_ADDR_DELTA)
+  if (addr_delta < 256U + MAX_SPECIAL_ADDR_DELTA)
     {
       /* Try using a special opcode.  */
       opcode = tmp + addr_delta * DWARF2_LINE_RANGE;
@@ -1715,7 +1725,7 @@ emit_inc_line_addr (int line_delta, addressT addr_delta, char *p, int len)
   tmp += DWARF2_LINE_OPCODE_BASE;
 
   /* Avoid overflow when addr_delta is large.  */
-  if (addr_delta < 256 + MAX_SPECIAL_ADDR_DELTA)
+  if (addr_delta < 256U + MAX_SPECIAL_ADDR_DELTA)
     {
       /* Try using a special opcode.  */
       opcode = tmp + addr_delta * DWARF2_LINE_RANGE;
@@ -2477,12 +2487,17 @@ out_debug_line (segT line_seg)
   out_byte (0);			/* DW_LNS_set_basic_block */
   out_byte (0);			/* DW_LNS_const_add_pc */
   out_byte (1);			/* DW_LNS_fixed_advance_pc */
-  out_byte (0);			/* DW_LNS_set_prologue_end */
-  out_byte (0);			/* DW_LNS_set_epilogue_begin */
-  out_byte (1);			/* DW_LNS_set_isa */
-  /* We have emitted 12 opcode lengths, so make that this
-     matches up to the opcode base value we have been using.  */
-  gas_assert (DWARF2_LINE_OPCODE_BASE == 13);
+  if (DWARF2_LINE_VERSION >= 3)
+    {
+      out_byte (0);			/* DW_LNS_set_prologue_end */
+      out_byte (0);			/* DW_LNS_set_epilogue_begin */
+      out_byte (1);			/* DW_LNS_set_isa */
+      /* We have emitted 12 opcode lengths, so make that this
+	 matches up to the opcode base value we have been using.  */
+      gas_assert (DWARF2_LINE_OPCODE_BASE == 13);
+    }
+  else
+    gas_assert (DWARF2_LINE_OPCODE_BASE == 10);
 
   out_dir_and_file_list (line_seg, sizeof_offset);
 
@@ -3076,6 +3091,10 @@ dwarf2_init (void)
   current.u.view = NULL;
   force_reset_view = NULL;
   view_assert_failed = NULL;
+  dw2_line = -1;
+  dw2_filename = NULL;
+  label_num = 0;
+  last_used = -1;
 
   /* Select the default CIE version to produce here.  The global
      starts with a value of -1 and will be modified to a valid value
@@ -3094,6 +3113,8 @@ dwarf2_cleanup (void)
 {
   purge_generated_debug (true);
   free (files);
+  for (unsigned int i = 0; i < dirs_in_use; i++)
+    free (dirs[i]);
   free (dirs);
 }
 

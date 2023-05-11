@@ -1,6 +1,6 @@
 /* Target-dependent code for the Fujitsu FR-V, for GDB, the GNU Debugger.
 
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -28,7 +28,7 @@
 #include "trad-frame.h"
 #include "dis-asm.h"
 #include "sim-regno.h"
-#include "gdb/sim-frv.h"
+#include "sim/sim-frv.h"
 #include "opcodes/frv-desc.h"	/* for the H_SPR_... enums */
 #include "symtab.h"
 #include "elf-bfd.h"
@@ -89,6 +89,8 @@ struct frv_gdbarch_tdep : gdbarch_tdep_base
   const char **register_names = nullptr;
 };
 
+using frv_gdbarch_tdep_up = std::unique_ptr<frv_gdbarch_tdep>;
+
 /* Return the FR-V ABI associated with GDBARCH.  */
 enum frv_abi
 frv_abi (struct gdbarch *gdbarch)
@@ -130,12 +132,12 @@ frv_fdpic_loadmap_addresses (struct gdbarch *gdbarch, CORE_ADDR *interp_addr,
 
 /* Allocate a new variant structure, and set up default values for all
    the fields.  */
-static frv_gdbarch_tdep *
-new_variant (void)
+static frv_gdbarch_tdep_up
+new_variant ()
 {
   int r;
 
-  frv_gdbarch_tdep *var = new frv_gdbarch_tdep;
+  frv_gdbarch_tdep_up var (new frv_gdbarch_tdep);
 
   var->frv_abi = FRV_ABI_EABI;
   var->num_gprs = 64;
@@ -1209,7 +1211,7 @@ frv_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
   stack_space = 0;
   for (argnum = 0; argnum < nargs; ++argnum)
-    stack_space += align_up (value_type (args[argnum])->length (), 4);
+    stack_space += align_up (args[argnum]->type ()->length (), 4);
 
   stack_space -= (6 * 4);
   if (stack_space > 0)
@@ -1229,14 +1231,14 @@ frv_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   for (argnum = 0; argnum < nargs; ++argnum)
     {
       arg = args[argnum];
-      arg_type = check_typedef (value_type (arg));
+      arg_type = check_typedef (arg->type ());
       len = arg_type->length ();
       typecode = arg_type->code ();
 
       if (typecode == TYPE_CODE_STRUCT || typecode == TYPE_CODE_UNION)
 	{
 	  store_unsigned_integer (valbuf, 4, byte_order,
-				  value_address (arg));
+				  arg->address ());
 	  typecode = TYPE_CODE_PTR;
 	  len = 4;
 	  val = valbuf;
@@ -1249,7 +1251,7 @@ frv_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	  /* The FDPIC ABI requires function descriptors to be passed instead
 	     of entry points.  */
 	  CORE_ADDR addr = extract_unsigned_integer
-			     (value_contents (arg).data (), 4, byte_order);
+	    (arg->contents ().data (), 4, byte_order);
 	  addr = find_func_descr (gdbarch, addr);
 	  store_unsigned_integer (valbuf, 4, byte_order, addr);
 	  typecode = TYPE_CODE_PTR;
@@ -1258,7 +1260,7 @@ frv_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	}
       else
 	{
-	  val = value_contents (arg).data ();
+	  val = arg->contents ().data ();
 	}
 
       while (len > 0)
@@ -1427,7 +1429,6 @@ static const struct frame_base frv_frame_base = {
 static struct gdbarch *
 frv_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   int elf_flags = 0;
 
   /* Check to see if we've already built an appropriate architecture
@@ -1437,7 +1438,9 @@ frv_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     return arches->gdbarch;
 
   /* Select the right tdep structure for this variant.  */
-  frv_gdbarch_tdep *var = new_variant ();
+  gdbarch *gdbarch = gdbarch_alloc (&info, new_variant ());
+  frv_gdbarch_tdep *var = gdbarch_tdep<frv_gdbarch_tdep> (gdbarch);
+
   switch (info.bfd_arch_info->mach)
     {
     case bfd_mach_frv:
@@ -1470,8 +1473,6 @@ frv_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   if (elf_flags & EF_FRV_CPU_FR450)
     set_variant_scratch_registers (var);
-
-  gdbarch = gdbarch_alloc (&info, var);
 
   set_gdbarch_short_bit (gdbarch, 16);
   set_gdbarch_int_bit (gdbarch, 32);

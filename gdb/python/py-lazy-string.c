@@ -1,6 +1,6 @@
 /* Python interface to lazy strings.
 
-   Copyright (C) 2010-2022 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -104,7 +104,6 @@ static PyObject *
 stpy_convert_to_value (PyObject *self, PyObject *args)
 {
   lazy_string_object *self_string = (lazy_string_object *) self;
-  struct value *val = NULL;
 
   if (self_string->address == 0)
     {
@@ -113,10 +112,14 @@ stpy_convert_to_value (PyObject *self, PyObject *args)
       return NULL;
     }
 
+  PyObject *result = nullptr;
   try
     {
+      scoped_value_mark free_values;
+
       struct type *type = type_object_to_type (self_string->type);
       struct type *realtype;
+      struct value *val;
 
       gdb_assert (type != NULL);
       realtype = check_typedef (type);
@@ -141,13 +144,15 @@ stpy_convert_to_value (PyObject *self, PyObject *args)
 	  val = value_at_lazy (type, self_string->address);
 	  break;
 	}
+
+      result = value_to_value_object (val);
     }
   catch (const gdb_exception &except)
     {
       GDB_PY_HANDLE_EXCEPTION (except);
     }
 
-  return value_to_value_object (val);
+  return result;
 }
 
 static void
@@ -229,7 +234,7 @@ gdbpy_create_lazy_string_object (CORE_ADDR address, long length,
   return (PyObject *) str_obj;
 }
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_lazy_string (void)
 {
   if (PyType_Ready (&lazy_string_object_type) < 0)
@@ -290,6 +295,8 @@ gdbpy_extract_lazy_string (PyObject *string, CORE_ADDR *addr,
   *length = lazy->length;
   encoding->reset (lazy->encoding ? xstrdup (lazy->encoding) : NULL);
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_lazy_string);
 
 
 

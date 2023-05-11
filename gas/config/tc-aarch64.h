@@ -1,5 +1,5 @@
 /* tc-aarch64.h -- Header file for tc-aarch64.c.
-   Copyright (C) 2009-2022 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GAS.
@@ -263,19 +263,19 @@ extern void aarch64_after_parse_args (void);
 
 #ifdef OBJ_ELF
 
-/* Whether SFrame unwind info is supported.  */
+/* Whether SFrame stack trace info is supported.  */
 extern bool aarch64_support_sframe_p (void);
 #define support_sframe_p aarch64_support_sframe_p
 
-/* The stack-pointer register number for SFrame unwind info.  */
+/* The stack-pointer register number for SFrame stack trace info.  */
 extern unsigned int aarch64_sframe_cfa_sp_reg;
 #define SFRAME_CFA_SP_REG aarch64_sframe_cfa_sp_reg
 
-/* The base-pointer register number for CFA unwind info.  */
+/* The base-pointer register number for CFA stack trace info.  */
 extern unsigned int aarch64_sframe_cfa_fp_reg;
 #define SFRAME_CFA_FP_REG aarch64_sframe_cfa_fp_reg
 
-/* The return address register number for CFA unwind info.  */
+/* The return address register number for CFA stack trace info.  */
 extern unsigned int aarch64_sframe_cfa_ra_reg;
 #define SFRAME_CFA_RA_REG aarch64_sframe_cfa_ra_reg
 
@@ -313,5 +313,14 @@ extern void aarch64_init_frag (struct frag *, int);
 extern void aarch64_handle_align (struct frag *);
 extern int tc_aarch64_regname_to_dw2regnum (char *regname);
 extern void tc_aarch64_frame_initial_instructions (void);
+
+#ifdef TE_PE
+
+#define O_secrel O_md1
+
+#define TC_DWARF2_EMIT_OFFSET  tc_pe_dwarf2_emit_offset
+void tc_pe_dwarf2_emit_offset (symbolS *, unsigned int);
+
+#endif /* TE_PE */
 
 #endif /* TC_AARCH64 */

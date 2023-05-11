@@ -1,6 +1,6 @@
 /* Target-dependent code for the Z80.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -98,11 +98,11 @@ struct z80_unwind_cache
 
   struct
   {
-    int called:1;	/* there is return address on stack */
-    int load_args:1;	/* prologues loads args using POPs */
-    int fp_sdcc:1;	/* prologue saves and adjusts frame pointer IX */
-    int interrupt:1;	/* __interrupt handler */
-    int critical:1;	/* __critical function */
+    unsigned int called : 1;    /* there is return address on stack */
+    unsigned int load_args : 1; /* prologues loads args using POPs */
+    unsigned int fp_sdcc : 1;   /* prologue saves and adjusts frame pointer IX */
+    unsigned int interrupt : 1; /* __interrupt handler */
+    unsigned int critical : 1;  /* __critical function */
   } prologue_type;
 
   /* Table indicating the location of each and every register.  */
@@ -928,7 +928,7 @@ z80_read_overlay_region_table ()
   byte_order = gdbarch_byte_order (gdbarch);
 
   cache_novly_regions = read_memory_integer (novly_regions_msym.value_address (),
-                                             4, byte_order);
+					     4, byte_order);
   cache_ovly_region_table
     = (unsigned int (*)[3]) xmalloc (cache_novly_regions *
 					sizeof (*cache_ovly_region_table));
@@ -962,11 +962,11 @@ z80_overlay_update_1 (struct obj_section *osect)
 
   /* we have interest for sections with same VMA */
   for (objfile *objfile : current_program_space->objfiles ())
-    ALL_OBJFILE_OSECTIONS (objfile, osect)
-      if (section_is_overlay (osect))
+    for (obj_section *sect : objfile->sections ())
+      if (section_is_overlay (sect))
 	{
-	  osect->ovly_mapped = (lma == bfd_section_lma (osect->the_bfd_section));
-	  i |= osect->ovly_mapped; /* true, if at least one section is mapped */
+	  sect->ovly_mapped = (lma == bfd_section_lma (sect->the_bfd_section));
+	  i |= sect->ovly_mapped; /* true, if at least one section is mapped */
 	}
   return i;
 }
@@ -985,18 +985,18 @@ z80_overlay_update (struct obj_section *osect)
 
   /* Update all sections, even if only one was requested.  */
   for (objfile *objfile : current_program_space->objfiles ())
-    ALL_OBJFILE_OSECTIONS (objfile, osect)
+    for (obj_section *sect : objfile->sections ())
       {
-	if (!section_is_overlay (osect))
+	if (!section_is_overlay (sect))
 	  continue;
 
-	asection *bsect = osect->the_bfd_section;
+	asection *bsect = sect->the_bfd_section;
 	bfd_vma lma = bfd_section_lma (bsect);
 	bfd_vma vma = bfd_section_vma (bsect);
 
 	for (int i = 0; i < cache_novly_regions; ++i)
 	  if (cache_ovly_region_table[i][Z80_VMA] == vma)
-	    osect->ovly_mapped =
+	    sect->ovly_mapped =
 	      (cache_ovly_region_table[i][Z80_MAPPED_TO_LMA] == lma);
       }
 }
@@ -1081,7 +1081,6 @@ z80_frame_unwind =
 static struct gdbarch *
 z80_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   struct gdbarch_list *best_arch;
   tdesc_arch_data_up tdesc_data;
   unsigned long mach = info.bfd_arch_info->mach;
@@ -1123,8 +1122,9 @@ z80_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     }
 
   /* None found, create a new architecture from the information provided.  */
-  z80_gdbarch_tdep *tdep = new z80_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new z80_gdbarch_tdep));
+  z80_gdbarch_tdep *tdep = gdbarch_tdep<z80_gdbarch_tdep> (gdbarch);
 
   if (mach == bfd_mach_ez80_adl)
     {
@@ -1139,10 +1139,11 @@ z80_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   /* Create a type for PC.  We can't use builtin types here, as they may not
      be defined.  */
-  tdep->void_type = arch_type (gdbarch, TYPE_CODE_VOID, TARGET_CHAR_BIT,
-			       "void");
+  type_allocator alloc (gdbarch);
+  tdep->void_type = alloc.new_type (TYPE_CODE_VOID, TARGET_CHAR_BIT,
+				    "void");
   tdep->func_void_type = make_function_type (tdep->void_type, NULL);
-  tdep->pc_type = arch_pointer_type (gdbarch,
+  tdep->pc_type = init_pointer_type (alloc,
 				     tdep->addr_length * TARGET_CHAR_BIT,
 				     NULL, tdep->func_void_type);
 

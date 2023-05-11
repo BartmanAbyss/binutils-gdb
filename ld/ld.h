@@ -1,5 +1,5 @@
 /* ld.h -- general linker header file
-   Copyright (C) 1991-2022 Free Software Foundation, Inc.
+   Copyright (C) 1991-2023 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -98,8 +98,9 @@ struct wildcard_spec
 {
   const char *name;
   struct name_list *exclude_name_list;
-  sort_type sorted;
   struct flag_info *section_flag_list;
+  size_t namelen, prefixlen, suffixlen;
+  sort_type sorted;
 };
 
 struct wildcard_list
@@ -296,6 +297,9 @@ typedef struct
   /* If set, print discarded sections in map file output.  */
   bool print_map_discarded;
 
+  /* If set, print local symbols in map file output.  */
+  bool print_map_locals;
+
   /* If set, emit the names and types of statically-linked variables
      into the CTF.  */
   bool ctf_variables;
@@ -303,6 +307,9 @@ typedef struct
   /* If set, share only duplicated types in CTF, rather than sharing
      all types that are not in conflict.  */
   bool ctf_share_duplicated;
+
+  /* Compress DWARF debug sections.  */
+  enum compressed_debug_section_type compress_debug;
 } ld_config_type;
 
 extern ld_config_type config;

@@ -45,7 +45,7 @@ DEVO_SUPPORT="ar-lib ChangeLog compile config config-ml.in config.guess \
 	ltmain.sh ltoptions.m4 ltsugar.m4 ltversion.m4 lt~obsolete.m4 \
 	MAINTAINERS Makefile.def Makefile.in Makefile.tpl missing mkdep \
 	mkinstalldirs move-if-change README README-maintainer-mode \
-	src-release.sh symlink-tree test-driver ylwrap"
+	SECURITY.txt src-release.sh symlink-tree test-driver ylwrap"
 
 # Files in devo/etc used in any net release.
 ETC_SUPPORT="Makefile.in configure configure.in standards.texi \
@@ -322,7 +322,7 @@ gas_release()
     tar_compress $package $tool "$GAS_SUPPORT_DIRS" "$compressors"
 }
 
-GDB_SUPPORT_DIRS="bfd include libiberty libctf opcodes readline sim intl libdecnumber cpu zlib contrib gnulib gdbsupport gdbserver libbacktrace"
+GDB_SUPPORT_DIRS="libsframe bfd include libiberty libctf opcodes readline sim intl libdecnumber cpu zlib contrib gnulib gdbsupport gdbserver libbacktrace"
 gdb_release()
 {
     compressors=$1

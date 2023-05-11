@@ -1,6 +1,6 @@
 /* Target-dependent code for AMD64.
 
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    Contributed by Jiri Smid, SuSE Labs.
 
@@ -20,10 +20,10 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 #include "defs.h"
+#include "language.h"
 #include "opcode/i386.h"
 #include "dis-asm.h"
 #include "arch-utils.h"
-#include "block.h"
 #include "dummy-frame.h"
 #include "frame.h"
 #include "frame-base.h"
@@ -355,10 +355,10 @@ amd64_pseudo_register_read_value (struct gdbarch *gdbarch,
 {
   i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 
-  value *result_value = allocate_value (register_type (gdbarch, regnum));
-  VALUE_LVAL (result_value) = lval_register;
+  value *result_value = value::allocate (register_type (gdbarch, regnum));
+  result_value->set_lval (lval_register);
   VALUE_REGNUM (result_value) = regnum;
-  gdb_byte *buf = value_contents_raw (result_value).data ();
+  gdb_byte *buf = result_value->contents_raw ().data ();
 
   if (i386_byte_regnum_p (gdbarch, regnum))
     {
@@ -375,8 +375,8 @@ amd64_pseudo_register_read_value (struct gdbarch *gdbarch,
 	  if (status == REG_VALID)
 	    memcpy (buf, raw_buf + 1, 1);
 	  else
-	    mark_value_bytes_unavailable (result_value, 0,
-					  value_type (result_value)->length ());
+	    result_value->mark_bytes_unavailable (0,
+						  result_value->type ()->length ());
 	}
       else
 	{
@@ -385,8 +385,8 @@ amd64_pseudo_register_read_value (struct gdbarch *gdbarch,
 	  if (status == REG_VALID)
 	    memcpy (buf, raw_buf, 1);
 	  else
-	    mark_value_bytes_unavailable (result_value, 0,
-					  value_type (result_value)->length ());
+	    result_value->mark_bytes_unavailable (0,
+						  result_value->type ()->length ());
 	}
     }
   else if (i386_dword_regnum_p (gdbarch, regnum))
@@ -398,8 +398,8 @@ amd64_pseudo_register_read_value (struct gdbarch *gdbarch,
       if (status == REG_VALID)
 	memcpy (buf, raw_buf, 4);
       else
-	mark_value_bytes_unavailable (result_value, 0,
-				      value_type (result_value)->length ());
+	result_value->mark_bytes_unavailable (0,
+					      result_value->type ()->length ());
     }
   else
     i386_pseudo_register_read_into_value (gdbarch, regcache, regnum,
@@ -557,7 +557,7 @@ amd64_has_unaligned_fields (struct type *type)
 	  /* Ignore static fields, empty fields (for example nested
 	     empty structures), and bitfields (these are handled by
 	     the caller).  */
-	  if (field_is_static (&type->field (i))
+	  if (type->field (i).is_static ()
 	      || (TYPE_FIELD_BITSIZE (type, i) == 0
 		  && subtype->length () == 0)
 	      || TYPE_FIELD_PACKED (type, i))
@@ -601,7 +601,7 @@ amd64_classify_aggregate_field (struct type *type, int i,
 
   /* Ignore static fields, or empty fields, for example nested
      empty structures.*/
-  if (field_is_static (&type->field (i)) || bitsize == 0)
+  if (type->field (i).is_static () || bitsize == 0)
     return;
 
   int bitpos = bitoffset + type->field (i).loc_bitpos ();
@@ -666,7 +666,8 @@ amd64_classify_aggregate (struct type *type, enum amd64_reg_class theclass[2])
 	loc_bitpos attributes, which will cause an assert to trigger within
 	the unaligned field check.  As classes with virtual bases are not
 	trivially copyable, checking that first avoids this problem.  */
-  if (type->length () > 16
+  if (TYPE_HAS_DYNAMIC_LENGTH (type)
+      || type->length () > 16
       || !language_pass_by_reference (type).trivially_copyable
       || amd64_has_unaligned_fields (type))
     {
@@ -788,7 +789,7 @@ amd64_classify (struct type *type, enum amd64_reg_class theclass[2])
 static enum return_value_convention
 amd64_return_value (struct gdbarch *gdbarch, struct value *function,
 		    struct type *type, struct regcache *regcache,
-		    gdb_byte *readbuf, const gdb_byte *writebuf)
+		    struct value **read_value, const gdb_byte *writebuf)
 {
   enum amd64_reg_class theclass[2];
   int len = type->length ();
@@ -798,7 +799,7 @@ amd64_return_value (struct gdbarch *gdbarch, struct value *function,
   int sse_reg = 0;
   int i;
 
-  gdb_assert (!(readbuf && writebuf));
+  gdb_assert (!(read_value && writebuf));
 
   /* 1. Classify the return type with the classification algorithm.  */
   amd64_classify (type, theclass);
@@ -816,15 +817,22 @@ amd64_return_value (struct gdbarch *gdbarch, struct value *function,
 	 can always find the return value just after the function has
 	 returned.  */
 
-      if (readbuf)
+      if (read_value != nullptr)
 	{
 	  ULONGEST addr;
 
 	  regcache_raw_read_unsigned (regcache, AMD64_RAX_REGNUM, &addr);
-	  read_memory (addr, readbuf, type->length ());
+	  *read_value = value_at_non_lval (type, addr);
 	}
 
       return RETURN_VALUE_ABI_RETURNS_ADDRESS;
+    }
+
+  gdb_byte *readbuf = nullptr;
+  if (read_value != nullptr)
+    {
+      *read_value = value::allocate (type);
+      readbuf = (*read_value)->contents_raw ().data ();
     }
 
   /* 8. If the class is COMPLEX_X87, the real part of the value is
@@ -954,7 +962,7 @@ if (return_method == return_method_struct)
 
   for (i = 0; i < nargs; i++)
     {
-      struct type *type = value_type (args[i]);
+      struct type *type = args[i]->type ();
       int len = type->length ();
       enum amd64_reg_class theclass[2];
       int needed_integer_regs = 0;
@@ -987,7 +995,7 @@ if (return_method == return_method_struct)
       else
 	{
 	  /* The argument will be passed in registers.  */
-	  const gdb_byte *valbuf = value_contents (args[i]).data ();
+	  const gdb_byte *valbuf = args[i]->contents ().data ();
 	  gdb_byte buf[8];
 
 	  gdb_assert (len <= 16);
@@ -1038,8 +1046,8 @@ if (return_method == return_method_struct)
   /* Write out the arguments to the stack.  */
   for (i = 0; i < num_stack_args; i++)
     {
-      struct type *type = value_type (stack_args[i]);
-      const gdb_byte *valbuf = value_contents (stack_args[i]).data ();
+      struct type *type = stack_args[i]->type ();
+      const gdb_byte *valbuf = stack_args[i]->contents ().data ();
       int len = type->length ();
 
       write_memory (sp + element * 8, valbuf, len);
@@ -1518,7 +1526,7 @@ amd64_displaced_step_copy_insn (struct gdbarch *gdbarch,
 
   displaced_debug_printf ("copy %s->%s: %s",
 			  paddress (gdbarch, from), paddress (gdbarch, to),
-			  displaced_step_dump_bytes (buf, len).c_str ());
+			  bytes_to_string (buf, len).c_str ());
 
   /* This is a work around for a problem with g++ 4.8.  */
   return displaced_step_copy_insn_closure_up (dsc.release ());
@@ -1640,16 +1648,13 @@ amd64_classify_insn_at (struct gdbarch *gdbarch, CORE_ADDR addr,
 			int (*pred) (const struct amd64_insn *))
 {
   struct amd64_insn details;
-  gdb_byte *buf;
-  int len, classification;
 
-  len = gdbarch_max_insn_length (gdbarch);
-  buf = (gdb_byte *) alloca (len);
+  gdb::byte_vector buf (gdbarch_max_insn_length (gdbarch));
 
-  read_code (addr, buf, len);
-  amd64_get_insn_details (buf, &details);
+  read_code (addr, buf.data (), buf.size ());
+  amd64_get_insn_details (buf.data (), &details);
 
-  classification = pred (&details);
+  int classification = pred (&details);
 
   return classification;
 }
@@ -1685,7 +1690,7 @@ void
 amd64_displaced_step_fixup (struct gdbarch *gdbarch,
 			    struct displaced_step_copy_insn_closure *dsc_,
 			    CORE_ADDR from, CORE_ADDR to,
-			    struct regcache *regs)
+			    struct regcache *regs, bool completed_p)
 {
   amd64_displaced_step_copy_insn_closure *dsc
     = (amd64_displaced_step_copy_insn_closure *) dsc_;
@@ -1720,14 +1725,14 @@ amd64_displaced_step_fixup (struct gdbarch *gdbarch,
      the displaced instruction; make it relative to the original insn.
      Well, signal handler returns don't need relocation either, but we use the
      value of %rip to recognize those; see below.  */
-  if (! amd64_absolute_jmp_p (insn_details)
-      && ! amd64_absolute_call_p (insn_details)
-      && ! amd64_ret_p (insn_details))
+  if (!completed_p
+      || (!amd64_absolute_jmp_p (insn_details)
+	  && !amd64_absolute_call_p (insn_details)
+	  && !amd64_ret_p (insn_details)))
     {
-      ULONGEST orig_rip;
       int insn_len;
 
-      regcache_cooked_read_unsigned (regs, AMD64_RIP_REGNUM, &orig_rip);
+      CORE_ADDR pc = regcache_read_pc (regs);
 
       /* A signal trampoline system call changes the %rip, resuming
 	 execution of the main program after the signal handler has
@@ -1744,24 +1749,23 @@ amd64_displaced_step_fixup (struct gdbarch *gdbarch,
 	 it unrelocated.  Goodness help us if there are PC-relative
 	 system calls.	*/
       if (amd64_syscall_p (insn_details, &insn_len)
-	  && orig_rip != to + insn_len
 	  /* GDB can get control back after the insn after the syscall.
-	     Presumably this is a kernel bug.
-	     Fixup ensures its a nop, we add one to the length for it.  */
-	  && orig_rip != to + insn_len + 1)
+	     Presumably this is a kernel bug.  Fixup ensures its a nop, we
+	     add one to the length for it.  */
+	  && (pc < to || pc > (to + insn_len + 1)))
 	displaced_debug_printf ("syscall changed %%rip; not relocating");
       else
 	{
-	  ULONGEST rip = orig_rip - insn_offset;
+	  CORE_ADDR rip = pc - insn_offset;
 
 	  /* If we just stepped over a breakpoint insn, we don't backup
 	     the pc on purpose; this is to match behaviour without
 	     stepping.  */
 
-	  regcache_cooked_write_unsigned (regs, AMD64_RIP_REGNUM, rip);
+	  regcache_write_pc (regs, rip);
 
 	  displaced_debug_printf ("relocated %%rip from %s to %s",
-				  paddress (gdbarch, orig_rip),
+				  paddress (gdbarch, pc),
 				  paddress (gdbarch, rip));
 	}
     }
@@ -1774,7 +1778,7 @@ amd64_displaced_step_fixup (struct gdbarch *gdbarch,
   /* If the instruction was a call, the return address now atop the
      stack is the address following the copied instruction.  We need
      to make it the address following the original instruction.	 */
-  if (amd64_call_p (insn_details))
+  if (completed_p && amd64_call_p (insn_details))
     {
       ULONGEST rsp;
       ULONGEST retaddr;
@@ -1828,21 +1832,21 @@ amd64_relocate_instruction (struct gdbarch *gdbarch,
   int len = gdbarch_max_insn_length (gdbarch);
   /* Extra space for sentinels.  */
   int fixup_sentinel_space = len;
-  gdb_byte *buf = (gdb_byte *) xmalloc (len + fixup_sentinel_space);
+  gdb::byte_vector buf (len + fixup_sentinel_space);
   struct amd64_insn insn_details;
   int offset = 0;
   LONGEST rel32, newrel;
   gdb_byte *insn;
   int insn_length;
 
-  read_memory (oldloc, buf, len);
+  read_memory (oldloc, buf.data (), len);
 
   /* Set up the sentinel space so we don't have to worry about running
      off the end of the buffer.  An excessive number of leading prefixes
      could otherwise cause this.  */
-  memset (buf + len, 0, fixup_sentinel_space);
+  memset (buf.data () + len, 0, fixup_sentinel_space);
 
-  insn = buf;
+  insn = buf.data ();
   amd64_get_insn_details (insn, &insn_details);
 
   insn_length = gdb_buffered_insn_length (gdbarch, insn, len, oldloc);
@@ -1937,7 +1941,7 @@ amd64_relocate_instruction (struct gdbarch *gdbarch,
     }
 
   /* Write the adjusted instruction into its displaced location.  */
-  append_insns (to, insn_length, buf);
+  append_insns (to, insn_length, buf.data ());
 }
 
 
@@ -2544,7 +2548,7 @@ amd64_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR start_pc)
 	      && cust->producer () != nullptr
 	      && (producer_is_llvm (cust->producer ())
 	      || producer_is_icc_ge_19 (cust->producer ()))))
-        return std::max (start_pc, post_prologue_pc);
+	return std::max (start_pc, post_prologue_pc);
     }
 
   amd64_init_frame_cache (&cache);
@@ -2894,11 +2898,6 @@ static int
 amd64_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   gdb_byte insn;
-  struct compunit_symtab *cust;
-
-  cust = find_pc_compunit_symtab (pc);
-  if (cust != NULL && cust->epilogue_unwind_valid ())
-    return 0;
 
   if (target_read_memory (pc, &insn, 1))
     return 0;   /* Can't read memory at pc.  */
@@ -2910,15 +2909,54 @@ amd64_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 }
 
 static int
+amd64_epilogue_frame_sniffer_1 (const struct frame_unwind *self,
+				frame_info_ptr this_frame,
+				void **this_prologue_cache, bool override_p)
+{
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  CORE_ADDR pc = get_frame_pc (this_frame);
+
+  if (frame_relative_level (this_frame) != 0)
+    /* We're not in the inner frame, so assume we're not in an epilogue.  */
+    return 0;
+
+  bool unwind_valid_p
+    = compunit_epilogue_unwind_valid (find_pc_compunit_symtab (pc));
+  if (override_p)
+    {
+      if (unwind_valid_p)
+	/* Don't override the symtab unwinders, skip
+	   "amd64 epilogue override".  */
+	return 0;
+    }
+  else
+    {
+      if (!unwind_valid_p)
+	/* "amd64 epilogue override" unwinder already ran, skip
+	   "amd64 epilogue".  */
+	return 0;
+    }
+
+  /* Check whether we're in an epilogue.  */
+  return amd64_stack_frame_destroyed_p (gdbarch, pc);
+}
+
+static int
+amd64_epilogue_override_frame_sniffer (const struct frame_unwind *self,
+				       frame_info_ptr this_frame,
+				       void **this_prologue_cache)
+{
+  return amd64_epilogue_frame_sniffer_1 (self, this_frame, this_prologue_cache,
+					 true);
+}
+
+static int
 amd64_epilogue_frame_sniffer (const struct frame_unwind *self,
 			      frame_info_ptr this_frame,
 			      void **this_prologue_cache)
 {
-  if (frame_relative_level (this_frame) == 0)
-    return amd64_stack_frame_destroyed_p (get_frame_arch (this_frame),
-					  get_frame_pc (this_frame));
-  else
-    return 0;
+  return amd64_epilogue_frame_sniffer_1 (self, this_frame, this_prologue_cache,
+					 false);
 }
 
 static struct amd64_frame_cache *
@@ -2988,6 +3026,17 @@ amd64_epilogue_frame_this_id (frame_info_ptr this_frame,
   else
     (*this_id) = frame_id_build (cache->base + 16, cache->pc);
 }
+
+static const struct frame_unwind amd64_epilogue_override_frame_unwind =
+{
+  "amd64 epilogue override",
+  NORMAL_FRAME,
+  amd64_epilogue_frame_unwind_stop_reason,
+  amd64_epilogue_frame_this_id,
+  amd64_frame_prev_register,
+  NULL,
+  amd64_epilogue_override_frame_sniffer
+};
 
 static const struct frame_unwind amd64_epilogue_frame_unwind =
 {
@@ -3235,7 +3284,7 @@ amd64_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch,
   set_gdbarch_register_to_value (gdbarch, i387_register_to_value);
   set_gdbarch_value_to_register (gdbarch, i387_value_to_register);
 
-  set_gdbarch_return_value (gdbarch, amd64_return_value);
+  set_gdbarch_return_value_as_value (gdbarch, amd64_return_value);
 
   set_gdbarch_skip_prologue (gdbarch, amd64_skip_prologue);
 
@@ -3246,7 +3295,9 @@ amd64_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch,
   /* Hook the function epilogue frame unwinder.  This unwinder is
      appended to the list first, so that it supercedes the other
      unwinders in function epilogues.  */
-  frame_unwind_prepend_unwinder (gdbarch, &amd64_epilogue_frame_unwind);
+  frame_unwind_prepend_unwinder (gdbarch, &amd64_epilogue_override_frame_unwind);
+
+  frame_unwind_append_unwinder (gdbarch, &amd64_epilogue_frame_unwind);
 
   /* Hook the prologue-based frame unwinders.  */
   frame_unwind_append_unwinder (gdbarch, &amd64_sigtramp_frame_unwind);

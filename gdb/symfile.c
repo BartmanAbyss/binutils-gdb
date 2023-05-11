@@ -1,6 +1,6 @@
 /* Generic symbol file reading for the GNU debugger, GDB.
 
-   Copyright (C) 1990-2022 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support, using pieces from other GDB modules.
 
@@ -39,7 +39,6 @@
 #include "inferior.h"
 #include "regcache.h"
 #include "filenames.h"		/* for DOSish file names */
-#include "gdb-stabs.h"
 #include "gdbsupport/gdb_obstack.h"
 #include "completer.h"
 #include "bcache.h"
@@ -833,7 +832,6 @@ init_entry_point_info (struct objfile *objfile)
 
   if (ei->entry_point_p)
     {
-      struct obj_section *osect;
       CORE_ADDR entry_point =  ei->entry_point;
       int found;
 
@@ -848,7 +846,7 @@ init_entry_point_info (struct objfile *objfile)
 	= gdbarch_addr_bits_remove (objfile->arch (), entry_point);
 
       found = 0;
-      ALL_OBJFILE_OSECTIONS (objfile, osect)
+      for (obj_section *osect : objfile->sections ())
 	{
 	  struct bfd_section *sect = osect->the_bfd_section;
 
@@ -1150,7 +1148,7 @@ symbol_file_add_separate (const gdb_bfd_ref_ptr &bfd, const char *name,
 
   symbol_file_add_with_addrs
     (bfd, name, symfile_flags, &sap,
-     objfile->flags & (OBJF_REORDERED | OBJF_SHARED | OBJF_READNOW
+     objfile->flags & (OBJF_SHARED | OBJF_READNOW
 		       | OBJF_USERLOADED | OBJF_MAINLINE),
      objfile);
 }
@@ -1244,7 +1242,8 @@ bool separate_debug_file_debug = false;
 
 static int
 separate_debug_file_exists (const std::string &name, unsigned long crc,
-			    struct objfile *parent_objfile)
+			    struct objfile *parent_objfile,
+			    std::vector<std::string> *warnings_vector)
 {
   unsigned long file_crc;
   int file_crc_p;
@@ -1336,12 +1335,15 @@ separate_debug_file_exists (const std::string &name, unsigned long crc,
 	}
 
       if (verified_as_different || parent_crc != file_crc)
-	warning (_("the debug information found in \"%s\""
-		   " does not match \"%s\" (CRC mismatch).\n"),
-		 name.c_str (), objfile_name (parent_objfile));
-
-      if (separate_debug_file_debug)
-	gdb_printf (gdb_stdlog, _(" no, CRC doesn't match.\n"));
+	{
+	  std::string msg
+	    = string_printf (_("the debug information found in \"%s\""
+			       " does not match \"%s\" (CRC mismatch).\n"),
+			     name.c_str (), objfile_name (parent_objfile));
+	  if (separate_debug_file_debug)
+	    gdb_printf (gdb_stdlog, "%s", msg.c_str ());
+	  warnings_vector->emplace_back (std::move (msg));
+	}
 
       return 0;
     }
@@ -1373,13 +1375,17 @@ show_debug_file_directory (struct ui_file *file, int from_tty,
    looking for.  CANON_DIR is the "realpath" form of DIR.
    DIR must contain a trailing '/'.
    Returns the path of the file with separate debug info, or an empty
-   string.  */
+   string.
+
+   Any warnings generated as part of the lookup process are added to
+   WARNINGS_VECTOR, one std::string per warning.  */
 
 static std::string
 find_separate_debug_file (const char *dir,
 			  const char *canon_dir,
 			  const char *debuglink,
-			  unsigned long crc32, struct objfile *objfile)
+			  unsigned long crc32, struct objfile *objfile,
+			  std::vector<std::string> *warnings_vector)
 {
   if (separate_debug_file_debug)
     gdb_printf (gdb_stdlog,
@@ -1390,7 +1396,7 @@ find_separate_debug_file (const char *dir,
   std::string debugfile = dir;
   debugfile += debuglink;
 
-  if (separate_debug_file_exists (debugfile, crc32, objfile))
+  if (separate_debug_file_exists (debugfile, crc32, objfile, warnings_vector))
     return debugfile;
 
   /* Then try in the subdirectory named DEBUG_SUBDIRECTORY.  */
@@ -1399,7 +1405,7 @@ find_separate_debug_file (const char *dir,
   debugfile += "/";
   debugfile += debuglink;
 
-  if (separate_debug_file_exists (debugfile, crc32, objfile))
+  if (separate_debug_file_exists (debugfile, crc32, objfile, warnings_vector))
     return debugfile;
 
   /* Then try in the global debugfile directories.
@@ -1444,7 +1450,8 @@ find_separate_debug_file (const char *dir,
       debugfile += dir_notarget;
       debugfile += debuglink;
 
-      if (separate_debug_file_exists (debugfile, crc32, objfile))
+      if (separate_debug_file_exists (debugfile, crc32, objfile,
+				      warnings_vector))
 	return debugfile;
 
       const char *base_path = NULL;
@@ -1466,23 +1473,38 @@ find_separate_debug_file (const char *dir,
 	  debugfile += "/";
 	  debugfile += debuglink;
 
-	  if (separate_debug_file_exists (debugfile, crc32, objfile))
+	  if (separate_debug_file_exists (debugfile, crc32, objfile,
+					  warnings_vector))
 	    return debugfile;
 
 	  /* If the file is in the sysroot, try using its base path in
-	     the sysroot's global debugfile directory.  */
-	  debugfile = target_prefix ? "target:" : "";
-	  debugfile += gdb_sysroot;
-	  debugfile += debugdir;
-	  debugfile += "/";
-	  debugfile += base_path;
-	  debugfile += "/";
-	  debugfile += debuglink;
+	     the sysroot's global debugfile directory.  GDB_SYSROOT
+	     might refer to a target: path; we strip the "target:"
+	     prefix -- but if that would yield the empty string, we
+	     don't bother at all, because that would just give the
+	     same result as above.  */
+	  if (gdb_sysroot != "target:")
+	    {
+	      debugfile = target_prefix ? "target:" : "";
+	      if (startswith (gdb_sysroot, "target:"))
+		{
+		  std::string root = gdb_sysroot.substr (strlen ("target:"));
+		  gdb_assert (!root.empty ());
+		  debugfile += root;
+		}
+	      else
+		debugfile += gdb_sysroot;
+	      debugfile += debugdir;
+	      debugfile += "/";
+	      debugfile += base_path;
+	      debugfile += "/";
+	      debugfile += debuglink;
 
-	  if (separate_debug_file_exists (debugfile, crc32, objfile))
-	    return debugfile;
+	      if (separate_debug_file_exists (debugfile, crc32, objfile,
+					      warnings_vector))
+		return debugfile;
+	    }
 	}
-
     }
 
   return std::string ();
@@ -1507,13 +1529,13 @@ terminate_after_last_dir_separator (char *path)
   path[i + 1] = '\0';
 }
 
-/* Find separate debuginfo for OBJFILE (using .gnu_debuglink section).
-   Returns pathname, or an empty string.  */
+/* See symtab.h.  */
 
 std::string
-find_separate_debug_file_by_debuglink (struct objfile *objfile)
+find_separate_debug_file_by_debuglink
+  (struct objfile *objfile, std::vector<std::string> *warnings_vector)
 {
-  unsigned long crc32;
+  uint32_t crc32;
 
   gdb::unique_xmalloc_ptr<char> debuglink
     (bfd_get_debug_link_info (objfile->obfd.get (), &crc32));
@@ -1531,7 +1553,8 @@ find_separate_debug_file_by_debuglink (struct objfile *objfile)
 
   std::string debugfile
     = find_separate_debug_file (dir.c_str (), canon_dir.get (),
-				debuglink.get (), crc32, objfile);
+				debuglink.get (), crc32, objfile,
+				warnings_vector);
 
   if (debugfile.empty ())
     {
@@ -1555,7 +1578,8 @@ find_separate_debug_file_by_debuglink (struct objfile *objfile)
 							symlink_dir.get (),
 							debuglink.get (),
 							crc32,
-							objfile);
+							objfile,
+							warnings_vector);
 		}
 	    }
 	}
@@ -1742,6 +1766,23 @@ symfile_bfd_open (const char *name)
 	   bfd_errmsg (bfd_get_error ()));
 
   return sym_bfd;
+}
+
+/* See symfile.h.  */
+
+gdb_bfd_ref_ptr
+symfile_bfd_open_no_error (const char *name) noexcept
+{
+  try
+    {
+      return symfile_bfd_open (name);
+    }
+  catch (const gdb_exception_error &err)
+    {
+      warning ("%s", err.what ());
+    }
+
+  return nullptr;
 }
 
 /* Return the section index for SECTION_NAME on OBJFILE.  Return -1 if
@@ -2529,7 +2570,7 @@ reread_symbols (int from_tty)
 	  /* NB: after this call to obstack_free, objfiles_changed
 	     will need to be called (see discussion below).  */
 	  obstack_free (&objfile->objfile_obstack, 0);
-	  objfile->sections = NULL;
+	  objfile->sections_start = NULL;
 	  objfile->section_offsets.clear ();
 	  objfile->sect_index_bss = -1;
 	  objfile->sect_index_data = -1;
@@ -2957,10 +2998,8 @@ section_is_overlay (struct obj_section *section)
 static void
 overlay_invalidate_all (void)
 {
-  struct obj_section *sect;
-
   for (objfile *objfile : current_program_space->objfiles ())
-    ALL_OBJFILE_OSECTIONS (objfile, sect)
+    for (obj_section *sect : objfile->sections ())
       if (section_is_overlay (sect))
 	sect->ovly_mapped = -1;
 }
@@ -3010,7 +3049,7 @@ section_is_mapped (struct obj_section *osect)
 /* Function: pc_in_unmapped_range
    If PC falls into the lma range of SECTION, return true, else false.  */
 
-CORE_ADDR
+bool
 pc_in_unmapped_range (CORE_ADDR pc, struct obj_section *section)
 {
   if (section_is_overlay (section))
@@ -3023,26 +3062,26 @@ pc_in_unmapped_range (CORE_ADDR pc, struct obj_section *section)
 
       if (bfd_section_lma (bfd_section) + offset <= pc
 	  && pc < bfd_section_lma (bfd_section) + offset + size)
-	return 1;
+	return true;
     }
 
-  return 0;
+  return false;
 }
 
 /* Function: pc_in_mapped_range
    If PC falls into the vma range of SECTION, return true, else false.  */
 
-CORE_ADDR
+bool
 pc_in_mapped_range (CORE_ADDR pc, struct obj_section *section)
 {
   if (section_is_overlay (section))
     {
       if (section->addr () <= pc
 	  && pc < section->endaddr ())
-	return 1;
+	return true;
     }
 
-  return 0;
+  return false;
 }
 
 /* Return true if the mapped ranges of sections A and B overlap, false
@@ -3132,12 +3171,12 @@ symbol_overlayed_address (CORE_ADDR address, struct obj_section *section)
 struct obj_section *
 find_pc_overlay (CORE_ADDR pc)
 {
-  struct obj_section *osect, *best_match = NULL;
+  struct obj_section *best_match = NULL;
 
   if (overlay_debugging)
     {
       for (objfile *objfile : current_program_space->objfiles ())
-	ALL_OBJFILE_OSECTIONS (objfile, osect)
+	for (obj_section *osect : objfile->sections ())
 	  if (section_is_overlay (osect))
 	    {
 	      if (pc_in_mapped_range (pc, osect))
@@ -3161,12 +3200,10 @@ find_pc_overlay (CORE_ADDR pc)
 struct obj_section *
 find_pc_mapped_section (CORE_ADDR pc)
 {
-  struct obj_section *osect;
-
   if (overlay_debugging)
     {
       for (objfile *objfile : current_program_space->objfiles ())
-	ALL_OBJFILE_OSECTIONS (objfile, osect)
+	for (obj_section *osect : objfile->sections ())
 	  if (pc_in_mapped_range (pc, osect) && section_is_mapped (osect))
 	    return osect;
     }
@@ -3181,12 +3218,11 @@ static void
 list_overlays_command (const char *args, int from_tty)
 {
   int nmapped = 0;
-  struct obj_section *osect;
 
   if (overlay_debugging)
     {
       for (objfile *objfile : current_program_space->objfiles ())
-	ALL_OBJFILE_OSECTIONS (objfile, osect)
+	for (obj_section *osect : objfile->sections ())
 	  if (section_is_mapped (osect))
 	    {
 	      struct gdbarch *gdbarch = objfile->arch ();
@@ -3222,8 +3258,6 @@ list_overlays_command (const char *args, int from_tty)
 static void
 map_overlay_command (const char *args, int from_tty)
 {
-  struct obj_section *sec, *sec2;
-
   if (!overlay_debugging)
     error (_("Overlay debugging not enabled.  Use "
 	     "either the 'overlay auto' or\n"
@@ -3234,7 +3268,7 @@ map_overlay_command (const char *args, int from_tty)
 
   /* First, find a section matching the user supplied argument.  */
   for (objfile *obj_file : current_program_space->objfiles ())
-    ALL_OBJFILE_OSECTIONS (obj_file, sec)
+    for (obj_section *sec : obj_file->sections ())
       if (!strcmp (bfd_section_name (sec->the_bfd_section), args))
 	{
 	  /* Now, check to see if the section is an overlay.  */
@@ -3247,7 +3281,7 @@ map_overlay_command (const char *args, int from_tty)
 	  /* Next, make a pass and unmap any sections that are
 	     overlapped by this new section: */
 	  for (objfile *objfile2 : current_program_space->objfiles ())
-	    ALL_OBJFILE_OSECTIONS (objfile2, sec2)
+	    for (obj_section *sec2 : objfile2->sections ())
 	      if (sec2->ovly_mapped && sec != sec2 && sections_overlap (sec,
 									sec2))
 		{
@@ -3268,8 +3302,6 @@ map_overlay_command (const char *args, int from_tty)
 static void
 unmap_overlay_command (const char *args, int from_tty)
 {
-  struct obj_section *sec = NULL;
-
   if (!overlay_debugging)
     error (_("Overlay debugging not enabled.  "
 	     "Use either the 'overlay auto' or\n"
@@ -3280,7 +3312,7 @@ unmap_overlay_command (const char *args, int from_tty)
 
   /* First, find a section matching the user supplied argument.  */
   for (objfile *objfile : current_program_space->objfiles ())
-    ALL_OBJFILE_OSECTIONS (objfile, sec)
+    for (obj_section *sec : objfile->sections ())
       if (!strcmp (bfd_section_name (sec->the_bfd_section), args))
 	{
 	  if (!sec->ovly_mapped)
@@ -3539,17 +3571,17 @@ simple_overlay_update (struct obj_section *osect)
 
   /* Now may as well update all sections, even if only one was requested.  */
   for (objfile *objfile : current_program_space->objfiles ())
-    ALL_OBJFILE_OSECTIONS (objfile, osect)
-      if (section_is_overlay (osect))
+    for (obj_section *sect : objfile->sections ())
+      if (section_is_overlay (sect))
 	{
 	  int i;
-	  asection *bsect = osect->the_bfd_section;
+	  asection *bsect = sect->the_bfd_section;
 
 	  for (i = 0; i < cache_novlys; i++)
 	    if (cache_ovly_table[i][VMA] == bfd_section_vma (bsect)
 		&& cache_ovly_table[i][LMA] == bfd_section_lma (bsect))
 	      { /* obj_section matches i'th entry in ovly_table.  */
-		osect->ovly_mapped = cache_ovly_table[i][MAPPED];
+		sect->ovly_mapped = cache_ovly_table[i][MAPPED];
 		break;		/* finished with inner for loop: break out.  */
 	      }
 	}

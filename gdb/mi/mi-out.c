@@ -1,6 +1,6 @@
 /* MI Command Set - output generating routines.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -348,9 +348,6 @@ mi_out_new (const char *mi_version)
   if (streq (mi_version, INTERP_MI2))
     return new mi_ui_out (2);
 
-  if (streq (mi_version, INTERP_MI1))
-    return new mi_ui_out (1);
-
   return nullptr;
 }
 
@@ -361,12 +358,6 @@ static mi_ui_out *
 as_mi_ui_out (ui_out *uiout)
 {
   return gdb::checked_static_cast<mi_ui_out *> (uiout);
-}
-
-int
-mi_version (ui_out *uiout)
-{
-  return as_mi_ui_out (uiout)->version ();
 }
 
 void

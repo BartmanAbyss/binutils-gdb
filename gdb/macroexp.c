@@ -1,5 +1,5 @@
 /* C preprocessor macro expansion for GDB.
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
    Contributed by Red Hat, Inc.
 
    This file is part of GDB.
@@ -571,7 +571,7 @@ get_token (shared_macro_buffer *tok, shared_macro_buffer *src)
    yield "< <", not "<<", etc.  */
 static void
 append_tokens_without_splicing (growable_macro_buffer *dest,
-                                shared_macro_buffer *src)
+				shared_macro_buffer *src)
 {
   int original_dest_len = dest->len;
   shared_macro_buffer dest_tail, new_token;

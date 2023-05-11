@@ -1,5 +1,5 @@
 /* output-file.c -  Deal with the output file
-   Copyright (C) 1987-2022 Free Software Foundation, Inc.
+   Copyright (C) 1987-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -96,9 +96,11 @@ output_file_close (void)
 
   /* Close the bfd.  */
   if (!flag_always_generate_output && had_errors ())
-    res = bfd_cache_close_all ();
+    res = bfd_close_all_done (obfd);
   else
     res = bfd_close (obfd);
+  now_seg = NULL;
+  now_subseg = 0;
 
   filename = out_file_name;
   out_file_name = NULL;
@@ -108,7 +110,11 @@ output_file_close (void)
 #ifdef md_end
   md_end ();
 #endif
+#ifdef obj_end
+  obj_end ();
+#endif
   macro_end ();
+  expr_end ();
   read_end ();
   symbol_end ();
   subsegs_end (obs);

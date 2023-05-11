@@ -1,6 +1,6 @@
 /* Convert types from GDB to GCC
 
-   Copyright (C) 2014-2022 Free Software Foundation, Inc.
+   Copyright (C) 2014-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -594,7 +594,7 @@ compile_cplus_convert_struct_or_union_members
       gcc_type field_type
 	= instance->convert_type (type->field (i).type ());
 
-      if (field_is_static (&type->field (i)))
+      if (type->field (i).is_static ())
 	{
 	  CORE_ADDR physaddr;
 
@@ -802,7 +802,7 @@ compile_cplus_convert_struct_or_union (compile_cplus_instance *instance,
 				       enum gcc_cp_symbol_kind nested_access)
 {
   const char *filename = nullptr;
-  unsigned short line = 0;
+  unsigned int line = 0;
 
   /* Get the decl name of this type.  */
   gdb::unique_xmalloc_ptr<char> name
@@ -969,10 +969,7 @@ compile_cplus_convert_func (compile_cplus_instance *instance,
      GDB's parser used to do.  */
   if (target_type == nullptr)
     {
-      if (type->is_objfile_owned ())
-	target_type = objfile_type (type->objfile_owner ())->builtin_int;
-      else
-	target_type = builtin_type (type->arch_owner ())->builtin_int;
+      target_type = builtin_type (type->arch ())->builtin_int;
       warning (_("function has unknown return type; assuming int"));
     }
 
@@ -981,7 +978,7 @@ compile_cplus_convert_func (compile_cplus_instance *instance,
   gcc_type return_type = instance->convert_type (target_type);
 
   std::vector<gcc_type> elements (type->num_fields ());
-  struct gcc_type_array array = { type->num_fields (), elements.data () };
+  struct gcc_type_array array = { (int) type->num_fields (), elements.data () };
   int artificials = 0;
   for (int i = 0; i < type->num_fields (); ++i)
     {

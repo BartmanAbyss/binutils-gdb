@@ -1,6 +1,6 @@
 /* GDB CLI commands.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -39,11 +39,13 @@
 #include "gdbsupport/filestuff.h"
 #include "location.h"
 #include "block.h"
+#include "valprint.h"
 
 #include "ui-out.h"
 #include "interps.h"
 
 #include "top.h"
+#include "ui.h"
 #include "cli/cli-decode.h"
 #include "cli/cli-script.h"
 #include "cli/cli-setshow.h"
@@ -873,6 +875,9 @@ exit_status_set_internal_vars (int exit_status)
 
   clear_internalvar (var_code);
   clear_internalvar (var_signal);
+
+  /* Keep the logic here in sync with shell_internal_fn.  */
+
   if (WIFEXITED (exit_status))
     set_internalvar_integer (var_code, WEXITSTATUS (exit_status));
 #ifdef __MINGW32__
@@ -893,8 +898,11 @@ exit_status_set_internal_vars (int exit_status)
     warning (_("unexpected shell command exit status %d"), exit_status);
 }
 
-static void
-shell_escape (const char *arg, int from_tty)
+/* Run ARG under the shell, and return the exit status.  If ARG is
+   NULL, run an interactive shell.  */
+
+static int
+run_under_shell (const char *arg, int from_tty)
 {
 #if defined(CANT_FORK) || \
       (!defined(HAVE_WORKING_VFORK) && !defined(HAVE_WORKING_FORK))
@@ -915,7 +923,7 @@ shell_escape (const char *arg, int from_tty)
      the shell command we just ran changed it.  */
   chdir (current_directory);
 #endif
-  exit_status_set_internal_vars (rc);
+  return rc;
 #else /* Can fork.  */
   int status, pid;
 
@@ -942,8 +950,19 @@ shell_escape (const char *arg, int from_tty)
     waitpid (pid, &status, 0);
   else
     error (_("Fork failed"));
-  exit_status_set_internal_vars (status);
+  return status;
 #endif /* Can fork.  */
+}
+
+/* Escape out to the shell to run ARG.  If ARG is NULL, launch and
+   interactive shell.  Sets $_shell_exitcode and $_shell_exitsignal
+   convenience variables based on the exits status.  */
+
+static void
+shell_escape (const char *arg, int from_tty)
+{
+  int status = run_under_shell (arg, from_tty);
+  exit_status_set_internal_vars (status);
 }
 
 /* Implementation of the "shell" command.  */
@@ -1750,7 +1769,7 @@ apropos_command (const char *arg, int from_tty)
   compiled_regex pattern (arg, REG_ICASE,
 			  _("Error in regular expression"));
 
-  apropos_cmd (gdb_stdout, cmdlist, verbose, pattern, "");
+  apropos_cmd (gdb_stdout, cmdlist, verbose, pattern);
 }
 
 /* The options for the "alias" command.  */
@@ -2190,13 +2209,13 @@ setting_cmd (const char *fnname, struct cmd_list_element *showlist,
   if (argc != 1)
     error (_("You can only provide one argument to %s"), fnname);
 
-  struct type *type0 = check_typedef (value_type (argv[0]));
+  struct type *type0 = check_typedef (argv[0]->type ());
 
   if (type0->code () != TYPE_CODE_ARRAY
       && type0->code () != TYPE_CODE_STRING)
     error (_("First argument of %s must be a string."), fnname);
 
-  const char *a0 = (const char *) value_contents (argv[0]).data ();
+  const char *a0 = (const char *) argv[0]->contents ().data ();
   cmd_list_element *cmd = lookup_cmd (&a0, showlist, "", NULL, -1, 0);
 
   if (cmd == nullptr || cmd->type != show_cmd)
@@ -2213,22 +2232,40 @@ value_from_setting (const setting &var, struct gdbarch *gdbarch)
 {
   switch (var.type ())
     {
+    case var_uinteger:
     case var_integer:
-      if (var.get<int> () == INT_MAX)
-	return value_from_longest (builtin_type (gdbarch)->builtin_int,
-				   0);
-      else
-	return value_from_longest (builtin_type (gdbarch)->builtin_int,
-				   var.get<int> ());
-    case var_zinteger:
-      return value_from_longest (builtin_type (gdbarch)->builtin_int,
-				 var.get<int> ());
+    case var_pinteger:
+      {
+	LONGEST value
+	  = (var.type () == var_uinteger
+	     ? static_cast<LONGEST> (var.get<unsigned int> ())
+	     : static_cast<LONGEST> (var.get<int> ()));
+
+	if (var.extra_literals () != nullptr)
+	  for (const literal_def *l = var.extra_literals ();
+	       l->literal != nullptr;
+	       l++)
+	    if (value == l->use)
+	      {
+		if (l->val.has_value ())
+		  value = *l->val;
+		else
+		  return value::allocate (builtin_type (gdbarch)->builtin_void);
+		break;
+	      }
+
+	if (var.type () == var_uinteger)
+	  return
+	    value_from_ulongest (builtin_type (gdbarch)->builtin_unsigned_int,
+				 static_cast<unsigned int> (value));
+	else
+	  return
+	    value_from_longest (builtin_type (gdbarch)->builtin_int,
+				static_cast<int> (value));
+      }
     case var_boolean:
       return value_from_longest (builtin_type (gdbarch)->builtin_int,
 				 var.get<bool> () ? 1 : 0);
-    case var_zuinteger_unlimited:
-      return value_from_longest (builtin_type (gdbarch)->builtin_int,
-				 var.get<int> ());
     case var_auto_boolean:
       {
 	int val;
@@ -2250,17 +2287,6 @@ value_from_setting (const setting &var, struct gdbarch *gdbarch)
 	return value_from_longest (builtin_type (gdbarch)->builtin_int,
 				   val);
       }
-    case var_uinteger:
-      if (var.get<unsigned int> () == UINT_MAX)
-	return value_from_ulongest
-	  (builtin_type (gdbarch)->builtin_unsigned_int, 0);
-      else
-	return value_from_ulongest
-	  (builtin_type (gdbarch)->builtin_unsigned_int,
-	   var.get<unsigned int> ());
-    case var_zuinteger:
-      return value_from_ulongest (builtin_type (gdbarch)->builtin_unsigned_int,
-				  var.get<unsigned int> ());
     case var_string:
     case var_string_noescape:
     case var_optional_filename:
@@ -2330,13 +2356,11 @@ str_value_from_setting (const setting &var, struct gdbarch *gdbarch)
 {
   switch (var.type ())
     {
-    case var_integer:
-    case var_zinteger:
-    case var_boolean:
-    case var_zuinteger_unlimited:
-    case var_auto_boolean:
     case var_uinteger:
-    case var_zuinteger:
+    case var_integer:
+    case var_pinteger:
+    case var_boolean:
+    case var_auto_boolean:
       {
 	std::string cmd_val = get_setshow_command_value_string (var);
 
@@ -2410,6 +2434,63 @@ gdb_maint_setting_str_internal_fn (struct gdbarch *gdbarch,
   gdb_assert (show_cmd->var.has_value ());
 
   return str_value_from_setting (*show_cmd->var, gdbarch);
+}
+
+/* Implementation of the convenience function $_shell.  */
+
+static struct value *
+shell_internal_fn (struct gdbarch *gdbarch,
+		   const struct language_defn *language,
+		   void *cookie, int argc, struct value **argv)
+{
+  if (argc != 1)
+    error (_("You must provide one argument for $_shell."));
+
+  value *val = argv[0];
+  struct type *type = check_typedef (val->type ());
+
+  if (!language->is_string_type_p (type))
+    error (_("Argument must be a string."));
+
+  value_print_options opts;
+  get_no_prettyformat_print_options (&opts);
+
+  string_file stream;
+  value_print (val, &stream, &opts);
+
+  /* We should always have two quote chars, which we'll strip.  */
+  gdb_assert (stream.size () >= 2);
+
+  /* Now strip them.  We don't need the original string, so it's
+     cheaper to do it in place, avoiding a string allocation.  */
+  std::string str = stream.release ();
+  str[str.size () - 1] = 0;
+  const char *command = str.c_str () + 1;
+
+  int exit_status = run_under_shell (command, 0);
+
+  struct type *int_type = builtin_type (gdbarch)->builtin_int;
+
+  /* Keep the logic here in sync with
+     exit_status_set_internal_vars.  */
+
+  if (WIFEXITED (exit_status))
+    return value_from_longest (int_type, WEXITSTATUS (exit_status));
+#ifdef __MINGW32__
+  else if (WIFSIGNALED (exit_status) && WTERMSIG (exit_status) == -1)
+    {
+      /* See exit_status_set_internal_vars.  */
+      return value_from_longest (int_type, exit_status);
+    }
+#endif
+  else if (WIFSIGNALED (exit_status))
+    {
+      /* (0x80 | SIGNO) is what most (all?) POSIX-like shells set as
+	 exit code on fatal signal termination.  */
+      return value_from_longest (int_type, 0x80 | WTERMSIG (exit_status));
+    }
+  else
+    return value::allocate_optimized_out (int_type);
 }
 
 void _initialize_cli_cmds ();
@@ -2600,6 +2681,19 @@ boolean values are \"off\", \"on\".\n\
 Some integer settings accept an unlimited value, returned\n\
 as 0 or -1 depending on the setting."),
 			 gdb_maint_setting_internal_fn, NULL);
+
+  add_internal_function ("_shell", _("\
+$_shell - execute a shell command and return the result.\n\
+\n\
+    Usage: $_shell (COMMAND)\n\
+\n\
+    Arguments:\n\
+\n\
+      COMMAND: The command to execute.  Must be a string.\n\
+\n\
+    Returns:\n\
+      The command's exit code: zero on success, non-zero otherwise."),
+			 shell_internal_fn, NULL);
 
   add_cmd ("commands", no_set_class, show_commands, _("\
 Show the history of commands you typed.\n\

@@ -1,6 +1,6 @@
 /* Python interface to breakpoints
 
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -270,6 +270,13 @@ bppy_set_thread (PyObject *self, PyObject *newvalue, void *closure)
 			   _("Invalid thread ID."));
 	  return -1;
 	}
+
+      if (self_bp->bp->task != -1)
+	{
+	  PyErr_SetString (PyExc_RuntimeError,
+			   _("Cannot set both task and thread attributes."));
+	  return -1;
+	}
     }
   else if (newvalue == Py_None)
     id = -1;
@@ -321,9 +328,16 @@ bppy_set_task (PyObject *self, PyObject *newvalue, void *closure)
 			   _("Invalid task ID."));
 	  return -1;
 	}
+
+      if (self_bp->bp->thread != -1)
+	{
+	  PyErr_SetString (PyExc_RuntimeError,
+			   _("Cannot set both task and thread attributes."));
+	  return -1;
+	}
     }
   else if (newvalue == Py_None)
-    id = 0;
+    id = -1;
   else
     {
       PyErr_SetString (PyExc_TypeError,
@@ -582,7 +596,7 @@ bppy_set_commands (PyObject *self, PyObject *newvalue, void *closure)
       bool first = true;
       char *save_ptr = nullptr;
       auto reader
-	= [&] ()
+	= [&] (std::string &buffer)
 	  {
 	    const char *result = strtok_r (first ? commands.get () : nullptr,
 					   "\n", &save_ptr);
@@ -697,7 +711,7 @@ bppy_get_task (PyObject *self, void *closure)
 
   BPPY_REQUIRE_VALID (self_bp);
 
-  if (self_bp->bp->task == 0)
+  if (self_bp->bp->task == -1)
     Py_RETURN_NONE;
 
   return gdb_py_object_from_longest (self_bp->bp->task).release ();
@@ -938,16 +952,14 @@ bppy_init (PyObject *self, PyObject *args, PyObject *kwargs)
 	  }
 	case bp_watchpoint:
 	  {
-	    gdb::unique_xmalloc_ptr<char>
-	      copy_holder (xstrdup (skip_spaces (spec)));
-	    char *copy = copy_holder.get ();
+	    spec = skip_spaces (spec);
 
 	    if (access_type == hw_write)
-	      watch_command_wrapper (copy, 0, internal_bp);
+	      watch_command_wrapper (spec, 0, internal_bp);
 	    else if (access_type == hw_access)
-	      awatch_command_wrapper (copy, 0, internal_bp);
+	      awatch_command_wrapper (spec, 0, internal_bp);
 	    else if (access_type == hw_read)
-	      rwatch_command_wrapper (copy, 0, internal_bp);
+	      rwatch_command_wrapper (spec, 0, internal_bp);
 	    else
 	      error(_("Cannot understand watchpoint access type."));
 	    break;
@@ -1187,6 +1199,9 @@ gdbpy_breakpoint_deleted (struct breakpoint *b)
       gdbpy_ref<gdbpy_breakpoint_object> bp_obj (bp->py_bp_object);
       if (bp_obj != NULL)
 	{
+	  if (bp_obj->is_finish_bp)
+	    bpfinishpy_pre_delete_hook (bp_obj.get ());
+
 	  if (!evregpy_no_listeners_p (gdb_py_events.breakpoint_deleted))
 	    {
 	      if (evpy_emit_event ((PyObject *) bp_obj.get (),
@@ -1231,7 +1246,7 @@ gdbpy_breakpoint_modified (struct breakpoint *b)
 
 
 /* Initialize the Python breakpoint code.  */
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_breakpoints (void)
 {
   int i;
@@ -1271,7 +1286,7 @@ gdbpy_initialize_breakpoints (void)
 
 /* Initialize the Python BreakpointLocation code.  */
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_breakpoint_locations ()
 {
   if (PyType_Ready (&breakpoint_location_object_type) < 0)
@@ -1434,6 +1449,9 @@ _initialize_py_breakpoint ()
 	show_pybp_debug,
 	&setdebuglist, &showdebuglist);
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_breakpoints);
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_breakpoint_locations);
 
 /* Python function to set the enabled state of a breakpoint location.  */
 

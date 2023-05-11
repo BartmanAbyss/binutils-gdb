@@ -1,6 +1,6 @@
 /* Public API to SFrame.
 
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of libsframe.
 
@@ -21,6 +21,7 @@
 #define	_SFRAME_API_H
 
 #include <sframe.h>
+#include <stdbool.h>
 
 #ifdef	__cplusplus
 extern "C"
@@ -34,13 +35,17 @@ typedef struct sframe_encoder_ctx sframe_encoder_ctx;
 
 /* User interfacing SFrame Row Entry.
    An abstraction provided by libsframe so the consumer is decoupled from
-   the binary format representation of the same.  */
+   the binary format representation of the same.
+
+   The members are best ordered such that they are aligned at their natural
+   boundaries.  This helps avoid usage of undesirable misaligned memory
+   accesses.  See PR libsframe/29856.  */
 
 typedef struct sframe_frame_row_entry
 {
   uint32_t fre_start_addr;
-  unsigned char fre_info;
   unsigned char fre_offsets[MAX_OFFSET_BYTES];
+  unsigned char fre_info;
 } sframe_frame_row_entry;
 
 #define SFRAME_ERR ((int) -1)
@@ -83,15 +88,15 @@ _SFRAME_ERRORS
 extern const char *
 sframe_errmsg (int error);
 
-/* Get FDE function info given a FRE_TYPE.  */
+/* Create an FDE function info bye given an FRE_TYPE and an FDE_TYPE.  */
 
 extern unsigned char
-sframe_fde_func_info (unsigned int fre_type, unsigned int fde_type);
+sframe_fde_create_func_info (unsigned int fre_type, unsigned int fde_type);
 
 /* Gather the FRE type given the function size.  */
 
 extern unsigned int
-sframe_calc_fre_type (unsigned int func_size);
+sframe_calc_fre_type (size_t func_size);
 
 /* The SFrame Decoder.  */
 
@@ -179,6 +184,12 @@ sframe_fre_get_fp_offset (sframe_decoder_ctx *dctx,
 extern int32_t
 sframe_fre_get_ra_offset (sframe_decoder_ctx *dctx,
 			  sframe_frame_row_entry *fre, int *errp);
+
+/* Get whether the RA is mangled.  */
+
+extern bool
+sframe_fre_get_ra_mangled_p (sframe_decoder_ctx *dctx,
+			     sframe_frame_row_entry *fre, int *errp);
 
 /* The SFrame Encoder.  */
 

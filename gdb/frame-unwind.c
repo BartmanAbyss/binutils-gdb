@@ -1,6 +1,6 @@
 /* Definitions for frame unwinder, for GDB, the GNU debugger.
 
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -28,6 +28,7 @@
 #include "target.h"
 #include "gdbarch.h"
 #include "dwarf2/frame-tailcall.h"
+#include "cli/cli-cmds.h"
 
 struct frame_unwind_table_entry
 {
@@ -266,7 +267,7 @@ frame_unwind_got_optimized (frame_info_ptr frame, int regnum)
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
   struct type *type = register_type (gdbarch, regnum);
 
-  return allocate_optimized_out_value (type);
+  return value::allocate_optimized_out (type);
 }
 
 /* Return a value which indicates that FRAME copied REGNUM into
@@ -288,7 +289,7 @@ frame_unwind_got_memory (frame_info_ptr frame, int regnum, CORE_ADDR addr)
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
   struct value *v = value_at_lazy (register_type (gdbarch, regnum), addr);
 
-  set_value_stack (v, 1);
+  v->set_stack (true);
   return v;
 }
 
@@ -303,8 +304,8 @@ frame_unwind_got_constant (frame_info_ptr frame, int regnum,
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   struct value *reg_val;
 
-  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
-  store_unsigned_integer (value_contents_writeable (reg_val).data (),
+  reg_val = value::zero (register_type (gdbarch, regnum), not_lval);
+  store_unsigned_integer (reg_val->contents_writeable ().data (),
 			  register_size (gdbarch, regnum), byte_order, val);
   return reg_val;
 }
@@ -315,8 +316,8 @@ frame_unwind_got_bytes (frame_info_ptr frame, int regnum, const gdb_byte *buf)
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
   struct value *reg_val;
 
-  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
-  memcpy (value_contents_raw (reg_val).data (), buf,
+  reg_val = value::zero (register_type (gdbarch, regnum), not_lval);
+  memcpy (reg_val->contents_raw ().data (), buf,
 	  register_size (gdbarch, regnum));
   return reg_val;
 }
@@ -332,8 +333,48 @@ frame_unwind_got_address (frame_info_ptr frame, int regnum,
   struct gdbarch *gdbarch = frame_unwind_arch (frame);
   struct value *reg_val;
 
-  reg_val = value_zero (register_type (gdbarch, regnum), not_lval);
-  pack_long (value_contents_writeable (reg_val).data (),
+  reg_val = value::zero (register_type (gdbarch, regnum), not_lval);
+  pack_long (reg_val->contents_writeable ().data (),
 	     register_type (gdbarch, regnum), addr);
   return reg_val;
+}
+
+/* Implement "maintenance info frame-unwinders" command.  */
+
+static void
+maintenance_info_frame_unwinders (const char *args, int from_tty)
+{
+  struct gdbarch *gdbarch = target_gdbarch ();
+  struct frame_unwind_table *table = get_frame_unwind_table (gdbarch);
+
+  ui_out *uiout = current_uiout;
+  ui_out_emit_table table_emitter (uiout, 2, -1, "FrameUnwinders");
+  uiout->table_header (27, ui_left, "name", "Name");
+  uiout->table_header (25, ui_left, "type", "Type");
+  uiout->table_body ();
+
+  for (struct frame_unwind_table_entry *entry = table->list; entry != NULL;
+       entry = entry->next)
+    {
+      const char *name = entry->unwinder->name;
+      const char *type = frame_type_str (entry->unwinder->type);
+
+      ui_out_emit_list tuple_emitter (uiout, nullptr);
+      uiout->field_string ("name", name);
+      uiout->field_string ("type", type);
+      uiout->text ("\n");
+    }
+}
+
+void _initialize_frame_unwind ();
+void
+_initialize_frame_unwind ()
+{
+  /* Add "maint info frame-unwinders".  */
+  add_cmd ("frame-unwinders",
+	   class_maintenance,
+	   maintenance_info_frame_unwinders,
+	   _("List the frame unwinders currently in effect, "
+	     "starting with the highest priority."),
+	   &maintenanceinfolist);
 }

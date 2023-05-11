@@ -1,4 +1,4 @@
-/* Copyright (C) 2021-2022 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -19,7 +19,7 @@
 #include "bt-utils.h"
 #include "command.h"
 #include "gdbcmd.h"
-#include "top.h"
+#include "ui.h"
 #include "cli/cli-decode.h"
 
 /* See bt-utils.h.  */

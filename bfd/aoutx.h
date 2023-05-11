@@ -1,5 +1,5 @@
 /* BFD semi-generic back-end for a.out binaries.
-   Copyright (C) 1990-2022 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -2909,6 +2909,7 @@ NAME (aout, bfd_free_cached_info) (bfd *abfd)
     return true;
 
 #define BFCI_FREE(x) do { free (x); x = NULL; } while (0)
+  BFCI_FREE (adata (abfd).line_buf);
   BFCI_FREE (obj_aout_symbols (abfd));
 #ifdef USE_MMAP
   obj_aout_external_syms (abfd) = 0;

@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux AArch64.
 
-   Copyright (C) 2009-2022 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GDB.
@@ -754,22 +754,30 @@ aarch64_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
 	  "MTE registers", cb_data);
     }
 
+  /* Handle the TLS registers.  */
   if (tdep->has_tls ())
     {
+      gdb_assert (tdep->tls_regnum_base != -1);
+      gdb_assert (tdep->tls_register_count > 0);
+
+      int sizeof_tls_regset
+	= AARCH64_TLS_REGISTER_SIZE * tdep->tls_register_count;
+
       const struct regcache_map_entry tls_regmap[] =
 	{
-	  { 1, tdep->tls_regnum, 8 },
+	  { tdep->tls_register_count, tdep->tls_regnum_base,
+	    AARCH64_TLS_REGISTER_SIZE },
 	  { 0 }
 	};
 
       const struct regset aarch64_linux_tls_regset =
 	{
-	  tls_regmap, regcache_supply_regset, regcache_collect_regset
+	  tls_regmap, regcache_supply_regset, regcache_collect_regset,
+	  REGSET_VARIABLE_SIZE
 	};
 
-      cb (".reg-aarch-tls", AARCH64_LINUX_SIZEOF_TLSREGSET,
-	  AARCH64_LINUX_SIZEOF_TLSREGSET, &aarch64_linux_tls_regset,
-	  "TLS register", cb_data);
+      cb (".reg-aarch-tls", sizeof_tls_regset, sizeof_tls_regset,
+	  &aarch64_linux_tls_regset, "TLS register", cb_data);
     }
 }
 
@@ -779,7 +787,6 @@ static const struct target_desc *
 aarch64_linux_core_read_description (struct gdbarch *gdbarch,
 				     struct target_ops *target, bfd *abfd)
 {
-  asection *tls = bfd_get_section_by_name (abfd, ".reg-aarch-tls");
   gdb::optional<gdb::byte_vector> auxv = target_read_auxv_raw (target);
   CORE_ADDR hwcap = linux_get_hwcap (auxv, target, gdbarch);
   CORE_ADDR hwcap2 = linux_get_hwcap2 (auxv, target, gdbarch);
@@ -788,7 +795,16 @@ aarch64_linux_core_read_description (struct gdbarch *gdbarch,
   features.vq = aarch64_linux_core_read_vq (gdbarch, abfd);
   features.pauth = hwcap & AARCH64_HWCAP_PACA;
   features.mte = hwcap2 & HWCAP2_MTE;
-  features.tls = tls != nullptr;
+
+  /* Handle the TLS section.  */
+  asection *tls = bfd_get_section_by_name (abfd, ".reg-aarch-tls");
+  if (tls != nullptr)
+    {
+      size_t size = bfd_section_size (tls);
+      /* Convert the size to the number of actual registers, by
+	 dividing by 8.  */
+      features.tls = size / AARCH64_TLS_REGISTER_SIZE;
+    }
 
   return aarch64_read_description (features);
 }
@@ -1593,7 +1609,7 @@ aarch64_linux_tagged_address_p (struct gdbarch *gdbarch, struct value *address)
   CORE_ADDR addr = value_as_address (address);
 
   /* Remove the top byte for the memory range check.  */
-  addr = address_significant (gdbarch, addr);
+  addr = gdbarch_remove_non_address_bits (gdbarch, addr);
 
   /* Check if the page that contains ADDRESS is mapped with PROT_MTE.  */
   if (!linux_address_in_memtag_page (addr))
@@ -1619,7 +1635,7 @@ aarch64_linux_memtag_matches_p (struct gdbarch *gdbarch,
 
   /* Fetch the allocation tag for ADDRESS.  */
   gdb::optional<CORE_ADDR> atag
-    = aarch64_mte_get_atag (address_significant (gdbarch, addr));
+    = aarch64_mte_get_atag (gdbarch_remove_non_address_bits (gdbarch, addr));
 
   if (!atag.has_value ())
     return true;
@@ -1652,13 +1668,13 @@ aarch64_linux_set_memtags (struct gdbarch *gdbarch, struct value *address,
 
       /* Update the value's content with the tag.  */
       enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-      gdb_byte *srcbuf = value_contents_raw (address).data ();
+      gdb_byte *srcbuf = address->contents_raw ().data ();
       store_unsigned_integer (srcbuf, sizeof (addr), byte_order, addr);
     }
   else
     {
       /* Remove the top byte.  */
-      addr = address_significant (gdbarch, addr);
+      addr = gdbarch_remove_non_address_bits (gdbarch, addr);
 
       /* Make sure we are dealing with a tagged address to begin with.  */
       if (!aarch64_linux_tagged_address_p (gdbarch, address))
@@ -1715,7 +1731,7 @@ aarch64_linux_get_memtag (struct gdbarch *gdbarch, struct value *address,
 	return nullptr;
 
       /* Remove the top byte.  */
-      addr = address_significant (gdbarch, addr);
+      addr = gdbarch_remove_non_address_bits (gdbarch, addr);
       gdb::optional<CORE_ADDR> atag = aarch64_mte_get_atag (addr);
 
       if (!atag.has_value ())
@@ -1789,7 +1805,8 @@ aarch64_linux_report_signal_info (struct gdbarch *gdbarch,
       uiout->text ("\n");
 
       gdb::optional<CORE_ADDR> atag
-	= aarch64_mte_get_atag (address_significant (gdbarch, fault_addr));
+	= aarch64_mte_get_atag (gdbarch_remove_non_address_bits (gdbarch,
+								 fault_addr));
       gdb_byte ltag = aarch64_mte_get_ltag (fault_addr);
 
       if (!atag.has_value ())
@@ -2015,11 +2032,6 @@ aarch64_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   /* Syscall record.  */
   tdep->aarch64_syscall_record = aarch64_linux_syscall_record;
 
-  /* The top byte of a user space address known as the "tag",
-     is ignored by the kernel and can be regarded as additional
-     data associated with the address.  */
-  set_gdbarch_significant_addr_bit (gdbarch, 56);
-
   /* MTE-specific settings and hooks.  */
   if (tdep->has_mte ())
     {
@@ -2228,7 +2240,9 @@ aarch64_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
   set_gdbarch_get_syscall_number (gdbarch, aarch64_linux_get_syscall_number);
 
   /* Displaced stepping.  */
-  set_gdbarch_max_insn_length (gdbarch, 4 * AARCH64_DISPLACED_MODIFIED_INSNS);
+  set_gdbarch_max_insn_length (gdbarch, 4);
+  set_gdbarch_displaced_step_buffer_length
+    (gdbarch, 4 * AARCH64_DISPLACED_MODIFIED_INSNS);
   set_gdbarch_displaced_step_copy_insn (gdbarch,
 					aarch64_displaced_step_copy_insn);
   set_gdbarch_displaced_step_fixup (gdbarch, aarch64_displaced_step_fixup);

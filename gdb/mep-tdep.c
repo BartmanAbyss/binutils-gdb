@@ -1,6 +1,6 @@
 /* Target-dependent code for the Toshiba MeP for GDB, the GNU debugger.
 
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    Contributed by Red Hat, Inc.
 
@@ -2228,14 +2228,14 @@ push_large_arguments (CORE_ADDR sp, int argc, struct value **argv,
 
   for (i = 0; i < argc; i++)
     {
-      unsigned arg_len = value_type (argv[i])->length ();
+      unsigned arg_len = argv[i]->type ()->length ();
 
       if (arg_len > MEP_GPR_SIZE)
 	{
 	  /* Reserve space for the copy, and then round the SP down, to
 	     make sure it's all aligned properly.  */
 	  sp = (sp - arg_len) & -4;
-	  write_memory (sp, value_contents (argv[i]).data (), arg_len);
+	  write_memory (sp, argv[i]->contents ().data (), arg_len);
 	  copy[i] = sp;
 	}
     }
@@ -2288,9 +2288,9 @@ mep_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       ULONGEST value;
 
       /* Arguments that fit in a GPR get expanded to fill the GPR.  */
-      if (value_type (argv[i])->length () <= MEP_GPR_SIZE)
-	value = extract_unsigned_integer (value_contents (argv[i]).data (),
-					  value_type (argv[i])->length (),
+      if (argv[i]->type ()->length () <= MEP_GPR_SIZE)
+	value = extract_unsigned_integer (argv[i]->contents ().data (),
+					  argv[i]->type ()->length (),
 					  byte_order);
 
       /* Arguments too large to fit in a GPR get copied to the stack,
@@ -2331,8 +2331,6 @@ mep_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 static struct gdbarch *
 mep_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
-
   /* Which me_module are we building a gdbarch object for?  */
   CONFIG_ATTR me_module;
 
@@ -2397,8 +2395,9 @@ mep_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 	return arches->gdbarch;
     }
 
-  mep_gdbarch_tdep *tdep = new mep_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new mep_gdbarch_tdep));
+  mep_gdbarch_tdep *tdep = gdbarch_tdep<mep_gdbarch_tdep> (gdbarch);
 
   /* Get a CGEN CPU descriptor for this architecture.  */
   {

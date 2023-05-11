@@ -1,6 +1,6 @@
 /* MI Command Set - MI parser.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -351,8 +351,7 @@ mi_parse (const char *cmd, char **token)
 	  std::string lang_name = extract_arg (&chp);
 
 	  parse->language = language_enum (lang_name.c_str ());
-	  if (parse->language == language_unknown
-	      || parse->language == language_auto)
+	  if (parse->language == language_unknown)
 	    error (_("Invalid --language argument: %s"), lang_name.c_str ());
 	}
       else

@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022 Free Software Foundation, Inc.
+# Copyright (C) 2012-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -114,6 +114,7 @@ run_dump_test "e6500_nop"
 run_dump_test "power4_32"
 run_dump_test "power5"
 run_dump_test "power6"
+run_dump_test "power6-dfp"
 run_dump_test "power7"
 run_dump_test "power8"
 run_dump_test "power9"
@@ -146,7 +147,10 @@ run_dump_test "scalarquad"
 run_dump_test "rop"
 run_dump_test "rop-checks"
 run_dump_test "rfc02653"
+run_dump_test "rfc02655"
+run_dump_test "rfc02656"
 run_dump_test "rfc02658"
+run_dump_test "future-raw"
 
 run_dump_test "dcbt"
 run_dump_test "pr27676"

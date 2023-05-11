@@ -1,6 +1,6 @@
 /* Target-dependent code for the MIPS architecture, for GDB, the GNU Debugger.
 
-   Copyright (C) 1988-2022 Free Software Foundation, Inc.
+   Copyright (C) 1988-2023 Free Software Foundation, Inc.
 
    Contributed by Alessandro Forin(af@cs.cmu.edu) at CMU
    and by Per Bothner(bothner@cs.wisc.edu) at U.Wisconsin.
@@ -436,12 +436,14 @@ mips_elf_make_msymbol_special (asymbol * sym, struct minimal_symbol *msym)
   if (ELF_ST_IS_MICROMIPS (st_other))
     {
       SET_MSYMBOL_TARGET_FLAG_MICROMIPS (msym);
-      msym->set_value_address (msym->value_raw_address () | 1);
+      CORE_ADDR fixed = CORE_ADDR (msym->unrelocated_address ()) | 1;
+      msym->set_unrelocated_address (unrelocated_addr (fixed));
     }
   else if (ELF_ST_IS_MIPS16 (st_other))
     {
       SET_MSYMBOL_TARGET_FLAG_MIPS16 (msym);
-      msym->set_value_address (msym->value_raw_address () | 1);
+      CORE_ADDR fixed = CORE_ADDR (msym->unrelocated_address ()) | 1;
+      msym->set_unrelocated_address (unrelocated_addr (fixed));
     }
 }
 
@@ -4553,7 +4555,7 @@ mips_eabi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
      than necessary for EABI, because the first few arguments are
      passed in registers, but that's OK.  */
   for (argnum = 0; argnum < nargs; argnum++)
-    arg_space += align_up (value_type (args[argnum])->length (),
+    arg_space += align_up (args[argnum]->type ()->length (),
 			   abi_regsize);
   sp -= align_up (arg_space, 16);
 
@@ -4588,7 +4590,7 @@ mips_eabi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	 reference.  */
       gdb_byte ref_valbuf[MAX_MIPS_ABI_REGSIZE];
       struct value *arg = args[argnum];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
       int len = arg_type->length ();
       enum type_code typecode = arg_type->code ();
 
@@ -4604,7 +4606,7 @@ mips_eabi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	{
 	  gdb_assert (abi_regsize <= ARRAY_SIZE (ref_valbuf));
 	  store_unsigned_integer (ref_valbuf, abi_regsize, byte_order,
-				  value_address (arg));
+				  arg->address ());
 	  typecode = TYPE_CODE_PTR;
 	  len = abi_regsize;
 	  val = ref_valbuf;
@@ -4612,7 +4614,7 @@ mips_eabi_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	    gdb_printf (gdb_stdlog, " push");
 	}
       else
-	val = value_contents (arg).data ();
+	val = arg->contents ().data ();
 
       /* 32-bit ABIs always start floating point arguments in an
 	 even-numbered floating point register.  Round the FP register
@@ -4884,7 +4886,7 @@ mips_n32n64_fp_arg_chunk_p (struct gdbarch *gdbarch, struct type *arg_type,
       struct type *field_type;
 
       /* We're only looking at normal fields.  */
-      if (field_is_static (&arg_type->field (i))
+      if (arg_type->field (i).is_static ()
 	  || (arg_type->field (i).loc_bitpos () % 8) != 0)
 	continue;
 
@@ -4947,7 +4949,7 @@ mips_n32n64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
   /* Now make space on the stack for the args.  */
   for (argnum = 0; argnum < nargs; argnum++)
-    arg_space += align_up (value_type (args[argnum])->length (),
+    arg_space += align_up (args[argnum]->type ()->length (),
 			   MIPS64_REGSIZE);
   sp -= align_up (arg_space, 16);
 
@@ -4979,7 +4981,7 @@ mips_n32n64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
     {
       const gdb_byte *val;
       struct value *arg = args[argnum];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
       int len = arg_type->length ();
       enum type_code typecode = arg_type->code ();
 
@@ -4988,7 +4990,7 @@ mips_n32n64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 		    "mips_n32n64_push_dummy_call: %d len=%d type=%d",
 		    argnum + 1, len, (int) typecode);
 
-      val = value_contents (arg).data ();
+      val = arg->contents ().data ();
 
       /* A 128-bit long double value requires an even-odd pair of
 	 floating-point registers.  */
@@ -5219,13 +5221,13 @@ mips_n32n64_return_value (struct gdbarch *gdbarch, struct value *function,
      From MIPSpro Assembly Language Programmer's Guide, Document Number:
      007-2418-004
 
-              Software
+	      Software
      Register Name(from
      Name     fgregdef.h) Use and Linkage
      -----------------------------------------------------------------
      $f0, $f2 fv0, fv1    Hold results of floating-point type function
-                          ($f0) and complex type function ($f0 has the
-                          real part, $f2 has the imaginary part.)  */
+			  ($f0) and complex type function ($f0 has the
+			  real part, $f2 has the imaginary part.)  */
 
   if (type->length () > 2 * MIPS64_REGSIZE)
     return RETURN_VALUE_STRUCT_CONVENTION;
@@ -5420,7 +5422,7 @@ mips_o32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   /* Now make space on the stack for the args.  */
   for (argnum = 0; argnum < nargs; argnum++)
     {
-      struct type *arg_type = check_typedef (value_type (args[argnum]));
+      struct type *arg_type = check_typedef (args[argnum]->type ());
 
       /* Align to double-word if necessary.  */
       if (mips_type_needs_double_align (arg_type))
@@ -5459,7 +5461,7 @@ mips_o32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
     {
       const gdb_byte *val;
       struct value *arg = args[argnum];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
       int len = arg_type->length ();
       enum type_code typecode = arg_type->code ();
 
@@ -5468,7 +5470,7 @@ mips_o32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 		    "mips_o32_push_dummy_call: %d len=%d type=%d",
 		    argnum + 1, len, (int) typecode);
 
-      val = value_contents (arg).data ();
+      val = arg->contents ().data ();
 
       /* 32-bit ABIs always start floating point arguments in an
 	 even-numbered floating point register.  Round the FP register
@@ -5944,7 +5946,7 @@ mips_o64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   /* Now make space on the stack for the args.  */
   for (argnum = 0; argnum < nargs; argnum++)
     {
-      struct type *arg_type = check_typedef (value_type (args[argnum]));
+      struct type *arg_type = check_typedef (args[argnum]->type ());
 
       /* Allocate space on the stack.  */
       arg_space += align_up (arg_type->length (), MIPS64_REGSIZE);
@@ -5980,7 +5982,7 @@ mips_o64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
     {
       const gdb_byte *val;
       struct value *arg = args[argnum];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
       int len = arg_type->length ();
       enum type_code typecode = arg_type->code ();
 
@@ -5989,7 +5991,7 @@ mips_o64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 		    "mips_o64_push_dummy_call: %d len=%d type=%d",
 		    argnum + 1, len, (int) typecode);
 
-      val = value_contents (arg).data ();
+      val = arg->contents ().data ();
 
       /* Floating point arguments passed in registers have to be
 	 treated specially.  On 32-bit architectures, doubles are
@@ -6585,8 +6587,8 @@ print_gp_register_row (struct ui_file *file, frame_info_ptr frame,
 
       /* OK: get the data in raw format.  */
       value = get_frame_register_value (frame, regnum);
-      if (value_optimized_out (value)
-	|| !value_entirely_available (value))
+      if (value->optimized_out ()
+	  || !value->entirely_available ())
 	{
 	  gdb_printf (file, "%*s ",
 		      (int) mips_abi_regsize (gdbarch) * 2,
@@ -6595,7 +6597,7 @@ print_gp_register_row (struct ui_file *file, frame_info_ptr frame,
 	  col++;
 	  continue;
 	}
-      raw_buffer = value_contents_all (value).data ();
+      raw_buffer = value->contents_all ().data ();
       /* pad small registers */
       for (byte = 0;
 	   byte < (mips_abi_regsize (gdbarch)
@@ -8075,7 +8077,6 @@ value_of_mips_user_reg (frame_info_ptr frame, const void *baton)
 static struct gdbarch *
 mips_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   int elf_flags;
   enum mips_abi mips_abi, found_abi, wanted_abi;
   int i, num_regs;
@@ -8475,8 +8476,10 @@ mips_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     }
 
   /* Need a new architecture.  Fill in a target specific vector.  */
-  mips_gdbarch_tdep *tdep = new mips_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new mips_gdbarch_tdep));
+  mips_gdbarch_tdep *tdep = gdbarch_tdep<mips_gdbarch_tdep> (gdbarch);
+
   tdep->elf_flags = elf_flags;
   tdep->mips64_transfers_32bit_regs_p = mips64_transfers_32bit_regs_p;
   tdep->found_abi = found_abi;

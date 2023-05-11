@@ -1,5 +1,11 @@
 -*- text -*-
 
+Changes in 2.40:
+
+* Objdump has a new command line option --show-all-symbols which will make it
+  display all symbols that match a given address when disassembling.  (Normally
+  only the first symbol that matches an address is shown).
+
 * Add --enable-colored-disassembly configure time option to enable colored
   disassembly output by default, if the output device is a terminal.  Note,
   this configure option is disabled by default.
@@ -870,7 +876,7 @@ Changes in binutils 2.1:
   and/or local symbols only.  They now also support long options.
 
 
-Copyright (C) 2012-2022 Free Software Foundation, Inc.
+Copyright (C) 2012-2023 Free Software Foundation, Inc.
 
 Copying and distribution of this file, with or without modification,
 are permitted in any medium without royalty provided the copyright

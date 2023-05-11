@@ -1,6 +1,6 @@
 /* Signal trampoline unwinder.
 
-   Copyright (C) 2004-2022 Free Software Foundation, Inc.
+   Copyright (C) 2004-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,7 +22,6 @@
 
 #include "frame.h"		/* For "enum frame_type".  */
 
-struct trad_frame;
 class frame_info_ptr;
 struct trad_frame_cache;
 

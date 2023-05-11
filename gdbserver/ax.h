@@ -1,5 +1,5 @@
 /* Data structures and functions associated with agent expressions in GDB.
-   Copyright (C) 2009-2022 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -41,7 +41,8 @@ enum eval_result_type
     expr_eval_unhandled_opcode,
     expr_eval_unrecognized_opcode,
     expr_eval_divide_by_zero,
-    expr_eval_invalid_goto
+    expr_eval_invalid_goto,
+    expr_eval_invalid_memory_access
   };
 
 struct agent_expr

@@ -1,6 +1,6 @@
 /* Target dependent code for GDB on TI C6x systems.
 
-   Copyright (C) 2010-2022 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
    Contributed by Andrew Jenner <andrew@codesourcery.com>
    Contributed by Yao Qi <yao@codesourcery.com>
 
@@ -864,7 +864,7 @@ tic6x_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   int stack_offset = 4;
   int references_offset = 4;
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  struct type *func_type = value_type (function);
+  struct type *func_type = function->type ();
   /* The first arg passed on stack.  Mostly the first 10 args are passed by
      registers.  */
   int first_arg_on_stack = 10;
@@ -895,7 +895,7 @@ tic6x_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   /* Now make space on the stack for the args.  */
   for (argnum = 0; argnum < nargs; argnum++)
     {
-      int len = align_up (value_type (args[argnum])->length (), 4);
+      int len = align_up (args[argnum]->type ()->length (), 4);
       if (argnum >= 10 - argreg)
 	references_offset += len;
       stack_offset += len;
@@ -913,11 +913,11 @@ tic6x_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
     {
       const gdb_byte *val;
       struct value *arg = args[argnum];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
       int len = arg_type->length ();
       enum type_code typecode = arg_type->code ();
 
-      val = value_contents (arg).data ();
+      val = arg->contents ().data ();
 
       /* Copy the argument to general registers or the stack in
 	 register-sized pieces.  */
@@ -1136,7 +1136,6 @@ tic6x_return_in_first_hidden_param_p (struct gdbarch *gdbarch,
 static struct gdbarch *
 tic6x_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   tdesc_arch_data_up tdesc_data;
   const struct target_desc *tdesc = info.target_desc;
   int has_gp = 0;
@@ -1221,10 +1220,11 @@ tic6x_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 	return arches->gdbarch;
     }
 
-  tic6x_gdbarch_tdep *tdep = new tic6x_gdbarch_tdep;
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new tic6x_gdbarch_tdep));
+  tic6x_gdbarch_tdep *tdep = gdbarch_tdep<tic6x_gdbarch_tdep> (gdbarch);
 
   tdep->has_gp = has_gp;
-  gdbarch = gdbarch_alloc (&info, tdep);
 
   /* Data type sizes.  */
   set_gdbarch_ptr_bit (gdbarch, 32);

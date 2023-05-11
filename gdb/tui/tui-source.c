@@ -1,6 +1,6 @@
 /* TUI display source window.
 
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -79,8 +79,11 @@ tui_source_window::set_contents (struct gdbarch *arch,
     {
       /* Solaris 11+gcc 5.5 has ambiguous overloads of log10, so we
 	 cast to double to get the right one.  */
-      double l = log10 ((double) offsets->size ());
-      m_digits = 1 + (int) l;
+      int lines_in_file = offsets->size ();
+      int max_line_nr = lines_in_file + nlines - 1;
+      int digits_needed = 1 + (int)log10 ((double) max_line_nr);
+      int trailing_space = 1;
+      m_digits = digits_needed + trailing_space;
     }
 
   m_max_length = -1;
@@ -232,8 +235,9 @@ tui_source_window::show_line_number (int offset) const
 {
   int lineno = m_content[0].line_or_addr.u.line_no + offset;
   char text[20];
-  /* To completely overwrite the previous border when the source window height
-     is increased, both spaces after the line number have to be redrawn.  */
-  xsnprintf (text, sizeof (text), "%*d  ", m_digits - 1, lineno);
+  char space = tui_left_margin_verbose ? '_' : ' ';
+  xsnprintf (text, sizeof (text),
+	     tui_left_margin_verbose ? "%0*d%c" : "%*d%c", m_digits - 1,
+	     lineno, space);
   waddstr (handle.get (), text);
 }

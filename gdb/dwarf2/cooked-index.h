@@ -1,6 +1,6 @@
 /* DIE indexing 
 
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -21,7 +21,7 @@
 #define GDB_DWARF2_COOKED_INDEX_H
 
 #include "dwarf2.h"
-#include "gdbtypes.h"
+#include "dwarf2/types.h"
 #include "symtab.h"
 #include "hashtab.h"
 #include "dwarf2/index-common.h"
@@ -36,6 +36,7 @@
 #include "gdbsupport/range-chain.h"
 
 struct dwarf2_per_cu_data;
+struct dwarf2_per_bfd;
 
 /* Flags that describe an entry in the index.  */
 enum cooked_index_flag_enum : unsigned char
@@ -53,6 +54,17 @@ enum cooked_index_flag_enum : unsigned char
   IS_TYPE_DECLARATION = 16,
 };
 DEF_ENUM_FLAGS_TYPE (enum cooked_index_flag_enum, cooked_index_flag);
+
+/* Return a string representation of FLAGS.  */
+
+std::string to_string (cooked_index_flag flags);
+
+/* Return true if LANG requires canonicalization.  This is used
+   primarily to work around an issue computing the name of "main".
+   This function must be kept in sync with
+   cooked_index_shard::do_finalize.  */
+
+extern bool language_requires_canonicalization (enum language lang);
 
 /* A cooked_index_entry represents a single item in the index.  Note
    that two entries can be created for the same DIE -- one using the
@@ -140,14 +152,60 @@ struct cooked_index_entry : public allocate_on_obstack
 
   /* Construct the fully-qualified name of this entry and return a
      pointer to it.  If allocation is needed, it will be done on
-     STORAGE.  */
-  const char *full_name (struct obstack *storage) const;
+     STORAGE.  FOR_MAIN is true if we are computing the name of the
+     "main" entry -- one marked DW_AT_main_subprogram.  This matters
+     for avoiding name canonicalization and also a related race (if
+     "main" computation is done during finalization).  */
+  const char *full_name (struct obstack *storage, bool for_main = false) const;
 
-  /* Entries must be sorted case-insensitively; this compares two
-     entries.  */
+  /* Comparison modes for the 'compare' function.  See the function
+     for a description.  */
+  enum comparison_mode
+  {
+    MATCH,
+    SORT,
+    COMPLETE,
+  };
+
+  /* Compare two strings, case-insensitively.  Return -1 if STRA is
+     less than STRB, 0 if they are equal, and 1 if STRA is greater.
+
+     When comparing, '<' is considered to be less than all other
+     printable characters.  This ensures that "t<x>" sorts before
+     "t1", which is necessary when looking up "t".  This '<' handling
+     is to ensure that certain C++ lookups work correctly.  It is
+     inexact, and applied regardless of the search language, but this
+     is ok because callers of this code do more precise filtering
+     according to their needs.  This is also why using a
+     case-insensitive comparison works even for languages that are
+     case sensitive.
+
+     MODE controls how the comparison proceeds.
+
+     MODE==SORT is used when sorting and the only special '<' handling
+     that it does is to ensure that '<' sorts before all other
+     printable characters.  This ensures that the resulting ordering
+     will be binary-searchable.
+
+     MODE==MATCH is used when searching for a symbol.  In this case,
+     STRB must always be the search name, and STRA must be the name in
+     the index that is under consideration.  In compare mode, early
+     termination of STRB may match STRA -- for example, "t<int>" and
+     "t" will be considered to be equal.  (However, if A=="t" and
+     B=="t<int>", then this will not consider them as equal.)
+
+     MODE==COMPLETE is used when searching for a symbol for
+     completion.  In this case, STRB must always be the search name,
+     and STRA must be the name in the index that is under
+     consideration.  In completion mode, early termination of STRB
+     always results in a match.  */
+  static int compare (const char *stra, const char *strb,
+		      comparison_mode mode);
+
+  /* Compare two entries by canonical name.  */
   bool operator< (const cooked_index_entry &other) const
   {
-    return strcasecmp (canonical, other.canonical) < 0;
+    return compare (canonical, other.canonical, SORT) < 0;
   }
 
   /* The name as it appears in DWARF.  This always points into one of
@@ -173,10 +231,14 @@ struct cooked_index_entry : public allocate_on_obstack
 
 private:
 
-  void write_scope (struct obstack *storage, const char *sep) const;
+  /* A helper method for full_name.  Emits the full scope of this
+     object, followed by the separator, to STORAGE.  If this entry has
+     a parent, its write_scope method is called first.  */
+  void write_scope (struct obstack *storage, const char *sep,
+		    bool for_name) const;
 };
 
-class cooked_index_vector;
+class cooked_index;
 
 /* An index of interesting DIEs.  This is "cooked", in contrast to a
    mapped .debug_names or .gdb_index, which are "raw".  An entry in
@@ -185,11 +247,11 @@ class cooked_index_vector;
    Operations on the index are described below.  They are chosen to
    make it relatively simple to implement the symtab "quick"
    methods.  */
-class cooked_index
+class cooked_index_shard
 {
 public:
-  cooked_index () = default;
-  DISABLE_COPY_AND_ASSIGN (cooked_index);
+  cooked_index_shard () = default;
+  DISABLE_COPY_AND_ASSIGN (cooked_index_shard);
 
   /* Create a new cooked_index_entry and register it with this object.
      Entries are owned by this object.  The new item is returned.  */
@@ -212,27 +274,25 @@ public:
   void finalize ();
 
   /* Wait for this index's finalization to be complete.  */
-  void wait ()
-  {
-    m_future.wait ();
-  }
+  void wait (bool allow_quit = true) const;
 
-  friend class cooked_index_vector;
+  friend class cooked_index;
 
   /* A simple range over part of m_entries.  */
-  typedef iterator_range<std::vector<cooked_index_entry *>::iterator> range;
+  typedef iterator_range<std::vector<cooked_index_entry *>::const_iterator>
+       range;
 
   /* Return a range of all the entries.  */
-  range all_entries ()
+  range all_entries () const
   {
     wait ();
-    return { m_entries.begin (), m_entries.end () };
+    return { m_entries.cbegin (), m_entries.cend () };
   }
 
   /* Look up an entry by name.  Returns a range of all matching
      results.  If COMPLETING is true, then a larger range, suitable
      for completion, will be returned.  */
-  range find (gdb::string_view name, bool completing);
+  range find (const std::string &name, bool completing) const;
 
 private:
 
@@ -248,7 +308,7 @@ private:
      found.  */
   dwarf2_per_cu_data *lookup (CORE_ADDR addr)
   {
-    return (dwarf2_per_cu_data *) m_addrmap->find (addr);
+    return static_cast<dwarf2_per_cu_data *> (m_addrmap->find (addr));
   }
 
   /* Create a new cooked_index_entry and register it with this object.
@@ -280,8 +340,7 @@ private:
   auto_obstack m_storage;
   /* List of all entries.  */
   std::vector<cooked_index_entry *> m_entries;
-  /* If we found "main" or an entry with 'is_main' set, store it
-     here.  */
+  /* If we found an entry with 'is_main' set, store it here.  */
   cooked_index_entry *m_main = nullptr;
   /* The addrmap.  This maps address ranges to dwarf2_per_cu_data
      objects.  */
@@ -295,52 +354,42 @@ private:
 };
 
 /* The main index of DIEs.  The parallel DIE indexers create
-   cooked_index objects.  Then, these are all handled to a
-   cooked_index_vector for storage and final indexing.  The index is
+   cooked_index_shard objects.  Then, these are all handled to a
+   cooked_index for storage and final indexing.  The index is
    made by iterating over the entries previously created.  */
 
-class cooked_index_vector : public dwarf_scanner_base
+class cooked_index : public dwarf_scanner_base
 {
 public:
 
   /* A convenience typedef for the vector that is contained in this
      object.  */
-  typedef std::vector<std::unique_ptr<cooked_index>> vec_type;
+  using vec_type = std::vector<std::unique_ptr<cooked_index_shard>>;
 
-  explicit cooked_index_vector (vec_type &&vec);
-  DISABLE_COPY_AND_ASSIGN (cooked_index_vector);
+  explicit cooked_index (vec_type &&vec);
+  ~cooked_index () override;
+  DISABLE_COPY_AND_ASSIGN (cooked_index);
 
-  /* Wait until the finalization of the entire cooked_index_vector is
+  /* Wait until the finalization of the entire cooked_index is
      done.  */
-  void wait ()
+  void wait () const
   {
     for (auto &item : m_vector)
       item->wait ();
   }
 
-  ~cooked_index_vector ()
-  {
-    /* The 'finalize' methods may be run in a different thread.  If
-       this object is destroyed before these complete, then one will
-       end up writing to freed memory.  Waiting for finalization to
-       complete avoids this problem; and the cost seems ignorable
-       because creating and immediately destroying the debug info is a
-       relatively rare thing to do.  */
-    wait ();
-  }
-
   /* A range over a vector of subranges.  */
-  typedef range_chain<cooked_index::range> range;
+  using range = range_chain<cooked_index_shard::range>;
 
   /* Look up an entry by name.  Returns a range of all matching
      results.  If COMPLETING is true, then a larger range, suitable
      for completion, will be returned.  */
-  range find (gdb::string_view name, bool completing);
+  range find (const std::string &name, bool completing) const;
 
   /* Return a range of all the entries.  */
-  range all_entries ()
+  range all_entries () const
   {
-    std::vector<cooked_index::range> result_range;
+    std::vector<cooked_index_shard::range> result_range;
     result_range.reserve (m_vector.size ());
     for (auto &entry : m_vector)
       result_range.push_back (entry->all_entries ());
@@ -354,24 +403,46 @@ public:
 
   /* Return a new vector of all the addrmaps used by all the indexes
      held by this object.  */
-  std::vector<addrmap *> get_addrmaps ();
+  std::vector<const addrmap *> get_addrmaps () const;
 
   /* Return the entry that is believed to represent the program's
      "main".  This will return NULL if no such entry is available.  */
   const cooked_index_entry *get_main () const;
 
-  cooked_index_vector *index_for_writing () override
+  cooked_index *index_for_writing () override
   {
     return this;
   }
 
   quick_symbol_functions_up make_quick_functions () const override;
 
+  /* Dump a human-readable form of the contents of the index.  */
+  void dump (gdbarch *arch) const;
+
+  /* Wait for the index to be completely finished.  For ordinary uses,
+     the index code ensures this itself -- e.g., 'all_entries' will
+     wait on the 'finalize' future.  However, on destruction, if an
+     index is being written, it's also necessary to wait for that to
+     complete.  */
+  void wait_completely () override
+  {
+    m_write_future.wait ();
+  }
+
+  /* Start writing to the index cache, if the user asked for this.  */
+  void start_writing_index (dwarf2_per_bfd *per_bfd);
+
 private:
+
+  /* Maybe write the index to the index cache.  */
+  void maybe_write_index (dwarf2_per_bfd *per_bfd);
 
   /* The vector of cooked_index objects.  This is stored because the
      entries are stored on the obstacks in those objects.  */
   vec_type m_vector;
+
+  /* A future that tracks when the 'index_write' method is done.  */
+  gdb::future<void> m_write_future;
 };
 
 #endif /* GDB_DWARF2_COOKED_INDEX_H */

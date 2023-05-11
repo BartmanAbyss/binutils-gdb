@@ -1,6 +1,6 @@
 /* Target dependent code for CRIS, for GDB, the GNU debugger.
 
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    Contributed by Axis Communications AB.
    Written by Hendrik Ruijter, Stefan Andersson, and Orjan Friberg.
@@ -821,8 +821,8 @@ cris_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       int reg_demand;
       int i;
       
-      len = value_type (args[argnum])->length ();
-      val = value_contents (args[argnum]).data ();
+      len = args[argnum]->type ()->length ();
+      val = args[argnum]->contents ().data ();
       
       /* How may registers worth of storage do we need for this argument?  */
       reg_demand = (len / 4) + (len % 4 != 0 ? 1 : 0);
@@ -3912,7 +3912,6 @@ set_cris_dwarf2_cfi (const char *ignore_args, int from_tty,
 static struct gdbarch *
 cris_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   unsigned int cris_version;
 
   if (usr_cmd_cris_version_valid)
@@ -3948,9 +3947,10 @@ cris_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     }
 
   /* No matching architecture was found.  Create a new one.  */
-  cris_gdbarch_tdep *tdep = new cris_gdbarch_tdep;
   info.byte_order = BFD_ENDIAN_LITTLE;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new cris_gdbarch_tdep));
+  cris_gdbarch_tdep *tdep = gdbarch_tdep<cris_gdbarch_tdep> (gdbarch);
 
   tdep->cris_version = usr_cmd_cris_version;
   tdep->cris_mode = usr_cmd_cris_mode;

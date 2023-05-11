@@ -1,6 +1,6 @@
 /* MI Command Set.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -25,6 +25,7 @@
 #include "inferior.h"
 #include "infrun.h"
 #include "top.h"
+#include "ui.h"
 #include "gdbthread.h"
 #include "mi-cmds.h"
 #include "mi-parse.h"
@@ -983,8 +984,8 @@ register_changed_p (int regnum, readonly_detached_regcache *prev_regs,
   gdb_assert (prev_value != NULL);
   gdb_assert (this_value != NULL);
 
-  auto ret = !value_contents_eq (prev_value, 0, this_value, 0,
-				 register_size (gdbarch, regnum));
+  auto ret = !prev_value->contents_eq (0, this_value, 0,
+				       register_size (gdbarch, regnum));
 
   release_value (prev_value);
   release_value (this_value);
@@ -1096,7 +1097,7 @@ output_register (frame_info_ptr frame, int regnum, int format,
   struct value *val = value_of_register (regnum, frame);
   struct value_print_options opts;
 
-  if (skip_unavailable && !value_entirely_available (val))
+  if (skip_unavailable && !val->entirely_available ())
     return;
 
   ui_out_emit_tuple tuple_emitter (uiout, NULL);
@@ -1111,7 +1112,7 @@ output_register (frame_info_ptr frame, int regnum, int format,
   string_file stb;
 
   get_formatted_print_options (&opts, format);
-  opts.deref_ref = 1;
+  opts.deref_ref = true;
   common_val_print (val, &stb, 0, &opts, current_language);
   uiout->field_stream ("value", stb);
 }
@@ -1189,13 +1190,13 @@ mi_cmd_data_evaluate_expression (const char *command, char **argv, int argc)
 
   expression_up expr = parse_expression (argv[0]);
 
-  val = evaluate_expression (expr.get ());
+  val = expr->evaluate ();
 
   string_file stb;
 
   /* Print the result of the expression evaluation.  */
   get_user_print_options (&opts);
-  opts.deref_ref = 0;
+  opts.deref_ref = false;
   common_val_print (val, &stb, 0, &opts, current_language);
 
   uiout->field_stream ("value", stb);
@@ -1656,6 +1657,7 @@ mi_cmd_list_features (const char *command, char **argv, int argc)
       uiout->field_string (NULL, "undefined-command-error-code");
       uiout->field_string (NULL, "exec-run-start-option");
       uiout->field_string (NULL, "data-disassemble-a-option");
+      uiout->field_string (NULL, "simple-values-ref-types");
 
       if (ext_lang_initialized_p (get_ext_lang_defn (EXT_LANG_PYTHON)))
 	uiout->field_string (NULL, "python");
@@ -1856,7 +1858,6 @@ captured_mi_execute_command (struct ui_out *uiout, struct mi_parse *context)
 
 	/* If we changed interpreters, DON'T print out anything.  */
 	if (current_interp_named_p (INTERP_MI)
-	    || current_interp_named_p (INTERP_MI1)
 	    || current_interp_named_p (INTERP_MI2)
 	    || current_interp_named_p (INTERP_MI3)
 	    || current_interp_named_p (INTERP_MI4))
@@ -1953,6 +1954,10 @@ mi_execute_command (const char *cmd, int from_tty)
 	     somewhere.  */
 	  mi_print_exception (command->token, result);
 	  mi_out_rewind (current_uiout);
+
+	  /* Throw to a higher level catch for SIGTERM sent to GDB.  */
+	  if (result.reason == RETURN_FORCED_QUIT)
+	    throw;
 	}
 
       bpstat_do_actions ();
@@ -2455,7 +2460,6 @@ static void
 print_variable_or_computed (const char *expression, enum print_values values)
 {
   struct value *val;
-  struct type *type;
   struct ui_out *uiout = current_uiout;
 
   string_file stb;
@@ -2463,9 +2467,9 @@ print_variable_or_computed (const char *expression, enum print_values values)
   expression_up expr = parse_expression (expression);
 
   if (values == PRINT_SIMPLE_VALUES)
-    val = evaluate_type (expr.get ());
+    val = expr->evaluate_type ();
   else
-    val = evaluate_expression (expr.get ());
+    val = expr->evaluate ();
 
   gdb::optional<ui_out_emit_tuple> tuple_emitter;
   if (values != PRINT_NO_VALUES)
@@ -2475,17 +2479,14 @@ print_variable_or_computed (const char *expression, enum print_values values)
   switch (values)
     {
     case PRINT_SIMPLE_VALUES:
-      type = check_typedef (value_type (val));
-      type_print (value_type (val), "", &stb, -1);
+      type_print (val->type (), "", &stb, -1);
       uiout->field_stream ("type", stb);
-      if (type->code () != TYPE_CODE_ARRAY
-	  && type->code () != TYPE_CODE_STRUCT
-	  && type->code () != TYPE_CODE_UNION)
+      if (mi_simple_type_p (val->type ()))
 	{
 	  struct value_print_options opts;
 
 	  get_no_prettyformat_print_options (&opts);
-	  opts.deref_ref = 1;
+	  opts.deref_ref = true;
 	  common_val_print (val, &stb, 0, &opts, current_language);
 	  uiout->field_stream ("value", stb);
 	}
@@ -2495,7 +2496,7 @@ print_variable_or_computed (const char *expression, enum print_values values)
 	struct value_print_options opts;
 
 	get_no_prettyformat_print_options (&opts);
-	opts.deref_ref = 1;
+	opts.deref_ref = true;
 	common_val_print (val, &stb, 0, &opts, current_language);
 	uiout->field_stream ("value", stb);
       }

@@ -1,6 +1,6 @@
 /* Target-dependent code for Motorola 68HC11 & 68HC12
 
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    Contributed by Stephane Carrez, stcarrez@nerim.fr
 
@@ -1170,14 +1170,14 @@ m68hc11_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
     regcache_cooked_write_unsigned (regcache, HARD_D_REGNUM, struct_addr);
   else if (nargs > 0)
     {
-      type = value_type (args[0]);
+      type = args[0]->type ();
 
       /* First argument is passed in D and X registers.  */
       if (type->length () <= 4)
 	{
 	  ULONGEST v;
 
-	  v = extract_unsigned_integer (value_contents (args[0]).data (),
+	  v = extract_unsigned_integer (args[0]->contents ().data (),
 					type->length (), byte_order);
 	  first_stack_argnum = 1;
 
@@ -1192,7 +1192,7 @@ m68hc11_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
   for (argnum = nargs - 1; argnum >= first_stack_argnum; argnum--)
     {
-      type = value_type (args[argnum]);
+      type = args[argnum]->type ();
 
       if (type->length () & 1)
 	{
@@ -1201,7 +1201,7 @@ m68hc11_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	  sp--;
 	  write_memory (sp, &zero, 1);
 	}
-      val = value_contents (args[argnum]).data ();
+      val = args[argnum]->contents ().data ();
       sp -= type->length ();
       write_memory (sp, val, type->length ());
     }
@@ -1396,7 +1396,6 @@ static struct gdbarch *
 m68hc11_gdbarch_init (struct gdbarch_info info,
 		      struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   int elf_flags;
 
   soft_reg_initialized = 0;
@@ -1423,8 +1422,10 @@ m68hc11_gdbarch_init (struct gdbarch_info info,
     }
 
   /* Need a new architecture.  Fill in a target specific vector.  */
-  m68gc11_gdbarch_tdep *tdep = new m68gc11_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new m68gc11_gdbarch_tdep));
+  m68gc11_gdbarch_tdep *tdep = gdbarch_tdep<m68gc11_gdbarch_tdep> (gdbarch);
+
   tdep->elf_flags = elf_flags;
 
   switch (info.bfd_arch_info->arch)

@@ -1,6 +1,6 @@
 /* MI Interpreter Definitions and Commands for GDB, the GNU debugger.
 
-   Copyright (C) 2017-2022 Free Software Foundation, Inc.
+   Copyright (C) 2017-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -36,7 +36,7 @@ public:
   void init (bool top_level) override;
   void resume () override;
   void suspend () override;
-  gdb_exception exec (const char *command_str) override;
+  void exec (const char *command_str) override;
   ui_out *interp_ui_out () override;
   void set_logging (ui_file_up logfile, bool logging_redirect,
 		    bool debug_redirect) override;
@@ -56,8 +56,8 @@ public:
      file which we need to delete, so we can restore correctly when
      done.  */
   struct ui_file *saved_raw_stdout;
-  struct ui_file *saved_raw_file_to_delete;
-
+  ui_file_up logfile_holder;
+  ui_file_up stdout_holder;
 
   /* MI's builder.  */
   struct ui_out *mi_uiout;

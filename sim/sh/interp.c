@@ -25,9 +25,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <signal.h>
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
 #ifdef HAVE_MMAP
 #include <sys/mman.h>
 # ifndef MAP_FAILED
@@ -40,9 +38,7 @@
 
 #include <string.h>
 #include <stdlib.h>
-#ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
-#endif
 #include <time.h>
 #include <sys/time.h>
 #ifdef HAVE_UTIME_H
@@ -55,13 +51,15 @@
 #include "bfd.h"
 #include "sim/callback.h"
 #include "sim/sim.h"
-#include "gdb/sim-sh.h"
+#include "sim/sim-sh.h"
 
 #include "sim-main.h"
 #include "sim-base.h"
 #include "sim-options.h"
 
 #include "target-newlib-syscall.h"
+
+#include "sh-sim.h"
 
 #include <math.h>
 
@@ -1873,8 +1871,8 @@ sim_resume (SIM_DESC sd, int step, int siggnal)
   signal (SIGFPE, prev_fpe);
 }
 
-int
-sim_write (SIM_DESC sd, SIM_ADDR addr, const void *buffer, int size)
+uint64_t
+sim_write (SIM_DESC sd, uint64_t addr, const void *buffer, uint64_t size)
 {
   int i;
   const unsigned char *data = buffer;
@@ -1888,8 +1886,8 @@ sim_write (SIM_DESC sd, SIM_ADDR addr, const void *buffer, int size)
   return size;
 }
 
-int
-sim_read (SIM_DESC sd, SIM_ADDR addr, void *buffer, int size)
+uint64_t
+sim_read (SIM_DESC sd, uint64_t addr, void *buffer, uint64_t size)
 {
   int i;
   unsigned char *data = buffer;
@@ -2274,7 +2272,7 @@ sim_stop_reason (SIM_DESC sd, enum sim_stop *reason, int *sigrc)
 }
 
 void
-sim_info (SIM_DESC sd, int verbose)
+sim_info (SIM_DESC sd, bool verbose)
 {
   double timetaken = 
     (double) saved_state.asregs.ticks / (double) now_persec ();
@@ -2348,7 +2346,7 @@ sim_open (SIM_OPEN_KIND kind, host_callback *cb,
   cb->syscall_map = cb_sh_syscall_map;
 
   /* The cpu data is kept in a separately allocated chunk of memory.  */
-  if (sim_cpu_alloc_all (sd, 1) != SIM_RC_OK)
+  if (sim_cpu_alloc_all (sd, 0) != SIM_RC_OK)
     {
       free_state (sd);
       return 0;

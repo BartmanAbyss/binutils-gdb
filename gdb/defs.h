@@ -1,7 +1,5 @@
-/* *INDENT-OFF* */ /* ATTRIBUTE_PRINTF confuses indent, avoid running it
-		      for now.  */
 /* Basic, host-specific, and target-specific definitions for GDB.
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -37,7 +35,7 @@
 #include "bfd.h"
 
 #include <sys/types.h>
-#include <limits.h>
+#include <climits>
 
 /* The libdecnumber library, on which GDB depends, includes a header file
    called gstdint.h instead of relying directly on stdint.h.  GDB, on the
@@ -173,7 +171,10 @@ extern quit_handler_ftype *quit_handler;
 extern void default_quit_handler (void);
 
 /* Flag that function quit should call quit_force.  */
-extern volatile int sync_quit_force_run;
+extern volatile bool sync_quit_force_run;
+
+/* Set sync_quit_force_run and also call set_quit_flag().  */
+extern void set_force_quit_flag ();
 
 extern void quit (void);
 
@@ -203,16 +204,15 @@ extern void quit_serial_event_clear (void);
    these languages, so some symbols could be successfully demangled by
    several languages.  For that reason, the constants here are sorted
    in the order we'll attempt demangling them.  For example: Rust uses
-   C++ mangling, so must come after C++; Ada must come last (see
-   ada_sniff_from_mangled_name).  (Keep this order in sync with the
-   'languages' array in language.c.)  */
+   a C++-compatible mangling, so must come before C++; Ada must come
+   last (see ada_sniff_from_mangled_name).  */
 
 enum language
   {
     language_unknown,		/* Language not known */
-    language_auto,		/* Placeholder for automatic setting */
     language_c,			/* C */
     language_objc,		/* Objective-C */
+    language_rust,		/* Rust */
     language_cplus,		/* C++ */
     language_d,			/* D */
     language_go,		/* Go */
@@ -221,7 +221,6 @@ enum language
     language_asm,		/* Assembly language */
     language_pascal,		/* Pascal */
     language_opencl,		/* OpenCL */
-    language_rust,		/* Rust */
     language_minimal,		/* All other languages, minimal support only */
     language_ada,		/* Ada */
     nr_languages
@@ -316,7 +315,8 @@ typedef void initialize_file_ftype (void);
 
 extern char *gdb_readline_wrapper (const char *);
 
-extern const char *command_line_input (const char *, const char *);
+extern const char *command_line_input (std::string &cmd_line_buffer,
+				       const char *, const char *);
 
 extern void print_prompt (void);
 
@@ -443,37 +443,6 @@ enum val_prettyformat
    supported.  */
 #ifndef FOPEN_RB
 # include "fopen-bin.h"
-#endif
-
-/* Defaults for system-wide constants (if not defined by xm.h, we fake it).
-   FIXME: Assumes 2's complement arithmetic.  */
-
-#if !defined (UINT_MAX)
-#define	UINT_MAX ((unsigned int)(~0))	    /* 0xFFFFFFFF for 32-bits */
-#endif
-
-#if !defined (INT_MAX)
-#define	INT_MAX ((int)(UINT_MAX >> 1))	    /* 0x7FFFFFFF for 32-bits */
-#endif
-
-#if !defined (INT_MIN)
-#define INT_MIN ((int)((int) ~0 ^ INT_MAX)) /* 0x80000000 for 32-bits */
-#endif
-
-#if !defined (ULONG_MAX)
-#define	ULONG_MAX ((unsigned long)(~0L))    /* 0xFFFFFFFF for 32-bits */
-#endif
-
-#if !defined (LONG_MAX)
-#define	LONG_MAX ((long)(ULONG_MAX >> 1))   /* 0x7FFFFFFF for 32-bits */
-#endif
-
-#if !defined (ULONGEST_MAX)
-#define	ULONGEST_MAX (~(ULONGEST)0)        /* 0xFFFFFFFFFFFFFFFF for 64-bits */
-#endif
-
-#if !defined (LONGEST_MAX)                 /* 0x7FFFFFFFFFFFFFFF for 64-bits */
-#define	LONGEST_MAX ((LONGEST)(ULONGEST_MAX >> 1))
 #endif
 
 /* * Convert a LONGEST to an int.  This is used in contexts (e.g. number of

@@ -1,5 +1,5 @@
 /* Alpha specific support for 64-bit ELF
-   Copyright (C) 1996-2022 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Contributed by Richard Henderson <rth@tamu.edu>.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -3726,8 +3726,8 @@ elf64_alpha_relax_section (bfd *abfd, asection *sec,
   *again = false;
 
   if (bfd_link_relocatable (link_info)
-      || ((sec->flags & (SEC_CODE | SEC_RELOC | SEC_ALLOC))
-	  != (SEC_CODE | SEC_RELOC | SEC_ALLOC))
+      || ((sec->flags & (SEC_CODE | SEC_RELOC | SEC_ALLOC | SEC_HAS_CONTENTS))
+	  != (SEC_CODE | SEC_RELOC | SEC_ALLOC | SEC_HAS_CONTENTS))
       || sec->reloc_count == 0)
     return true;
 

@@ -1,6 +1,6 @@
 /* Target-dependent code for the Motorola 68000 series.
 
-   Copyright (C) 1990-2022 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -106,9 +106,12 @@ m68881_ext_type (struct gdbarch *gdbarch)
   m68k_gdbarch_tdep *tdep = gdbarch_tdep<m68k_gdbarch_tdep> (gdbarch);
 
   if (!tdep->m68881_ext_type)
-    tdep->m68881_ext_type
-      = arch_float_type (gdbarch, -1, "builtin_type_m68881_ext",
-			 floatformats_m68881_ext);
+    {
+      type_allocator alloc (gdbarch);
+      tdep->m68881_ext_type
+	= init_float_type (alloc, -1, "builtin_type_m68881_ext",
+			   floatformats_m68881_ext);
+    }
 
   return tdep->m68881_ext_type;
 }
@@ -548,7 +551,7 @@ m68k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   /* Push arguments in reverse order.  */
   for (i = nargs - 1; i >= 0; i--)
     {
-      struct type *value_type = value_enclosing_type (args[i]);
+      struct type *value_type = args[i]->enclosing_type ();
       int len = value_type->length ();
       int container_len = (len + 3) & ~3;
       int offset;
@@ -563,7 +566,7 @@ m68k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       else
 	offset = container_len - len;
       sp -= container_len;
-      write_memory (sp + offset, value_contents_all (args[i]).data (), len);
+      write_memory (sp + offset, args[i]->contents_all ().data (), len);
     }
 
   /* Store struct value address.  */
@@ -1135,7 +1138,6 @@ m68k_embedded_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 static struct gdbarch *
 m68k_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   struct gdbarch_list *best_arch;
   tdesc_arch_data_up tdesc_data;
   int i;
@@ -1252,8 +1254,10 @@ m68k_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   if (best_arch != NULL)
     return best_arch->gdbarch;
 
-  m68k_gdbarch_tdep *tdep = new m68k_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new m68k_gdbarch_tdep));
+  m68k_gdbarch_tdep *tdep = gdbarch_tdep<m68k_gdbarch_tdep> (gdbarch);
+
   tdep->fpregs_present = has_fp;
   tdep->float_return = float_return;
   tdep->flavour = flavour;

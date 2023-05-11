@@ -1,6 +1,6 @@
 /* Python interface to inferiors.
 
-   Copyright (C) 2009-2022 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -285,7 +285,7 @@ connpy_get_connection_details (PyObject *self, void *closure)
 
 /* Python specific initialization for this file.  */
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_connection (void)
 {
   if (PyType_Ready (&connection_object_type) < 0)
@@ -446,6 +446,8 @@ _initialize_py_connection ()
   gdb::observers::connection_removed.attach (connpy_connection_removed,
 					     "py-connection");
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_connection);
 
 /* Methods for the gdb.TargetConnection object type.  */
 

@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2022 Free Software Foundation, Inc.
+# Copyright (C) 2015-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,10 +17,7 @@
 # thread, then switching to a thread that has a status pending and
 # continuing.
 
-if [target_info exists gdb,nointerrupts] {
-    verbose "Skipping continue-pending-status.exp because of nointerrupts."
-    return
-}
+require {!target_info exists gdb,nointerrupts}
 
 standard_testfile
 

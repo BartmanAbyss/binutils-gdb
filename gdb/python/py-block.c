@@ -1,6 +1,6 @@
 /* Python interface to blocks.
 
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -188,7 +188,7 @@ blpy_get_global_block (PyObject *self, void *closure)
 
   BLPY_REQUIRE_VALID (self, block);
 
-  global_block = block_global_block (block);
+  global_block = block->global_block ();
 
   return block_to_block_object (global_block,
 				self_obj->objfile);
@@ -210,7 +210,7 @@ blpy_get_static_block (PyObject *self, void *closure)
   if (block->superblock () == NULL)
     Py_RETURN_NONE;
 
-  static_block = block_static_block (block);
+  static_block = block->static_block ();
 
   return block_to_block_object (static_block, self_obj->objfile);
 }
@@ -265,24 +265,18 @@ blpy_getitem (PyObject *self, PyObject *key)
 
   lookup_name_info lookup_name (name.get(), symbol_name_match_type::FULL);
 
-  /* We use ALL_BLOCK_SYMBOLS_WITH_NAME instead of block_lookup_symbol so
-     that we can look up symbols irrespective of the domain, matching the
-     iterator. It would be confusing if the iterator returns symbols you
-     can't find via getitem.  */
-  struct block_iterator iter;
-  struct symbol *sym = nullptr;
-  ALL_BLOCK_SYMBOLS_WITH_NAME (block, lookup_name, iter, sym)
+  /* We use an iterator instead of block_lookup_symbol so that we can
+     look up symbols irrespective of the domain, matching the
+     iterator. It would be confusing if the iterator returns symbols
+     you can't find via getitem.  */
+  for (struct symbol *sym : block_iterator_range (block, &lookup_name))
     {
       /* Just stop at the first match */
-      break;
+      return symbol_to_symbol_object (sym);
     }
 
-  if (sym == nullptr)
-    {
-      PyErr_SetObject (PyExc_KeyError, key);
-      return nullptr;
-    }
-  return symbol_to_symbol_object (sym);
+  PyErr_SetObject (PyExc_KeyError, key);
+  return nullptr;
 }
 
 static void
@@ -424,7 +418,7 @@ blpy_iter_is_valid (PyObject *self, PyObject *args)
   Py_RETURN_TRUE;
 }
 
-int
+static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_blocks (void)
 {
   block_object_type.tp_new = PyType_GenericNew;
@@ -442,6 +436,8 @@ gdbpy_initialize_blocks (void)
   return gdb_pymodule_addobject (gdb_module, "BlockIterator",
 				 (PyObject *) &block_syms_iterator_object_type);
 }
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_blocks);
 
 
 

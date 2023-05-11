@@ -1,5 +1,5 @@
 /* Target operations for the remote server for GDB.
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    Contributed by MontaVista Software.
 
@@ -33,7 +33,6 @@
 #include "gdbsupport/byte-vector.h"
 
 struct emit_ops;
-struct buffer;
 struct process_info;
 
 /* This structure describes how to resume a particular thread (or all
@@ -172,10 +171,10 @@ public:
   /* Return true if the read_auxv target op is supported.  */
   virtual bool supports_read_auxv ();
 
-  /* Read auxiliary vector data from the inferior process.
+  /* Read auxiliary vector data from the process with pid PID.
 
      Read LEN bytes at OFFSET into a buffer at MYADDR.  */
-  virtual int read_auxv (CORE_ADDR offset, unsigned char *myaddr,
+  virtual int read_auxv (int pid, CORE_ADDR offset, unsigned char *myaddr,
 			 unsigned int len);
 
   /* Returns true if GDB Z breakpoint type TYPE is supported, false
@@ -403,14 +402,14 @@ public:
   /* Read branch trace data into buffer.
      Return 0 on success; print an error message into BUFFER and return -1,
      otherwise.  */
-  virtual int read_btrace (btrace_target_info *tinfo, buffer *buf,
+  virtual int read_btrace (btrace_target_info *tinfo, std::string *buf,
 			   enum btrace_read_type type);
 
   /* Read the branch trace configuration into BUFFER.
      Return 0 on success; print an error message into BUFFER and return -1
      otherwise.  */
   virtual int read_btrace_conf (const btrace_target_info *tinfo,
-				buffer *buf);
+				std::string *buf);
 
   /* Return true if target supports range stepping.  */
   virtual bool supports_range_stepping ();
@@ -636,7 +635,7 @@ target_disable_btrace (struct btrace_target_info *tinfo)
 
 static inline int
 target_read_btrace (struct btrace_target_info *tinfo,
-		    struct buffer *buffer,
+		    std::string *buffer,
 		    enum btrace_read_type type)
 {
   return the_target->read_btrace (tinfo, buffer, type);
@@ -644,7 +643,7 @@ target_read_btrace (struct btrace_target_info *tinfo,
 
 static inline int
 target_read_btrace_conf (struct btrace_target_info *tinfo,
-			 struct buffer *buffer)
+			 std::string *buffer)
 {
   return the_target->read_btrace_conf (tinfo, buffer);
 }
@@ -699,6 +698,9 @@ target_thread_pending_child (thread_info *thread)
 {
   return the_target->thread_pending_child (thread);
 }
+
+/* Read LEN bytes from MEMADDR in the buffer MYADDR.  Return 0 if the read
+   is successful, otherwise, return a non-zero error code.  */
 
 int read_inferior_memory (CORE_ADDR memaddr, unsigned char *myaddr, int len);
 

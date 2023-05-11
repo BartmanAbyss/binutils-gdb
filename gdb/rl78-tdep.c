@@ -1,6 +1,6 @@
 /* Target-dependent code for the Renesas RL78 for GDB, the GNU debugger.
 
-   Copyright (C) 2011-2022 Free Software Foundation, Inc.
+   Copyright (C) 2011-2023 Free Software Foundation, Inc.
 
    Contributed by Red Hat, Inc.
 
@@ -1340,13 +1340,13 @@ rl78_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   /* Push arguments in reverse order.  */
   for (i = nargs - 1; i >= 0; i--)
     {
-      struct type *value_type = value_enclosing_type (args[i]);
+      struct type *value_type = args[i]->enclosing_type ();
       int len = value_type->length ();
       int container_len = (len + 1) & ~1;
 
       sp -= container_len;
       write_memory (rl78_make_data_address (sp),
-		    value_contents_all (args[i]).data (), len);
+		    args[i]->contents_all ().data (), len);
     }
 
   /* Store struct value address.  */
@@ -1375,7 +1375,6 @@ rl78_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 static struct gdbarch *
 rl78_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   int elf_flags;
 
   /* Extract the elf_flags if available.  */
@@ -1403,24 +1402,26 @@ rl78_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   /* None found, create a new architecture from the information
      provided.  */
-  rl78_gdbarch_tdep * tdep = new rl78_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new rl78_gdbarch_tdep));
+  rl78_gdbarch_tdep *tdep = gdbarch_tdep<rl78_gdbarch_tdep> (gdbarch);
+
   tdep->elf_flags = elf_flags;
 
   /* Initialize types.  */
-  tdep->rl78_void = arch_type (gdbarch, TYPE_CODE_VOID, TARGET_CHAR_BIT,
-			       "void");
-  tdep->rl78_uint8 = arch_integer_type (gdbarch, 8, 1, "uint8_t");
-  tdep->rl78_int8 = arch_integer_type (gdbarch, 8, 0, "int8_t");
-  tdep->rl78_uint16 = arch_integer_type (gdbarch, 16, 1, "uint16_t");
-  tdep->rl78_int16 = arch_integer_type (gdbarch, 16, 0, "int16_t");
-  tdep->rl78_uint32 = arch_integer_type (gdbarch, 32, 1, "uint32_t");
-  tdep->rl78_int32 = arch_integer_type (gdbarch, 32, 0, "int32_t");
+  type_allocator alloc (gdbarch);
+  tdep->rl78_void = alloc.new_type (TYPE_CODE_VOID, TARGET_CHAR_BIT, "void");
+  tdep->rl78_uint8 = init_integer_type (alloc, 8, 1, "uint8_t");
+  tdep->rl78_int8 = init_integer_type (alloc, 8, 0, "int8_t");
+  tdep->rl78_uint16 = init_integer_type (alloc, 16, 1, "uint16_t");
+  tdep->rl78_int16 = init_integer_type (alloc, 16, 0, "int16_t");
+  tdep->rl78_uint32 = init_integer_type (alloc, 32, 1, "uint32_t");
+  tdep->rl78_int32 = init_integer_type (alloc, 32, 0, "int32_t");
 
   tdep->rl78_data_pointer
-    = arch_pointer_type (gdbarch, 16, "rl78_data_addr_t", tdep->rl78_void);
+    = init_pointer_type (alloc, 16, "rl78_data_addr_t", tdep->rl78_void);
   tdep->rl78_code_pointer
-    = arch_pointer_type (gdbarch, 32, "rl78_code_addr_t", tdep->rl78_void);
+    = init_pointer_type (alloc, 32, "rl78_code_addr_t", tdep->rl78_void);
 
   /* Registers.  */
   set_gdbarch_num_regs (gdbarch, RL78_NUM_REGS);

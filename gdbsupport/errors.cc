@@ -1,6 +1,6 @@
 /* Error reporting facilities.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -69,6 +69,30 @@ internal_warning_loc (const char *file, int line, const char *fmt, ...)
   va_start (ap, fmt);
   internal_vwarning (file, line, fmt, ap);
   va_end (ap);
+}
+
+/* See errors.h.  */
+
+std::string
+perror_string (const char *prefix, int errnum)
+{
+  const char *err;
+
+  if (errnum != 0)
+    err = safe_strerror (errnum);
+  else
+    err = safe_strerror (errno);
+  return std::string (prefix) + ": " + err;
+}
+
+/* See errors.h.  */
+
+void
+perror_with_name (const char *string, int errnum)
+{
+  std::string combined = perror_string (string, errnum);
+
+  error (_("%s."), combined.c_str ());
 }
 
 #if defined (USE_WIN32API) || defined(__CYGWIN__)

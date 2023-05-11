@@ -1,6 +1,6 @@
 /* General GDB/Guile code.
 
-   Copyright (C) 2014-2022 Free Software Foundation, Inc.
+   Copyright (C) 2014-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -28,6 +28,7 @@
 #include "command.h"
 #include "gdbcmd.h"
 #include "top.h"
+#include "ui.h"
 #include "extension-priv.h"
 #include "utils.h"
 #include "gdbsupport/version.h"

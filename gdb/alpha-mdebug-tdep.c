@@ -1,5 +1,5 @@
 /* Target-dependent mdebug code for the ALPHA architecture.
-   Copyright (C) 1993-2022 Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -31,7 +31,6 @@
 
 /* FIXME: Some of this code should perhaps be merged with mips.  */
 
-/* *INDENT-OFF* */
 /* Layout of a stack frame on the alpha:
 
 		|				|
@@ -74,7 +73,6 @@
    -------------|-------------------------------|<-- sp
 		|				|
 */
-/* *INDENT-ON* */
 
 #define PROC_LOW_ADDR(proc) ((proc)->pdr.adr)
 #define PROC_FRAME_OFFSET(proc) ((proc)->pdr.frameoffset)

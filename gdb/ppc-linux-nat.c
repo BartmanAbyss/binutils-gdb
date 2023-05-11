@@ -1,6 +1,6 @@
 /* PPC GNU/Linux native support.
 
-   Copyright (C) 1988-2022 Free Software Foundation, Inc.
+   Copyright (C) 1988-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -178,7 +178,6 @@ struct ppc_hw_breakpoint
 
    The layout is like this (where x is the actual value of the vscr reg): */
 
-/* *INDENT-OFF* */
 /*
 Big-Endian:
    |.|.|.|.|.....|.|.|.|.||.|.|.|x||.|
@@ -189,7 +188,6 @@ Little-Endian:
    <------->     <-------><-------><->
      VR0           VR31     VSCR    VRSAVE
 */
-/* *INDENT-ON* */
 
 typedef char gdb_vrregset_t[PPC_LINUX_SIZEOF_VRREGSET];
 
@@ -628,7 +626,6 @@ private:
 
 static ppc_linux_nat_target the_ppc_linux_nat_target;
 
-/* *INDENT-OFF* */
 /* registers layout, as presented by the ptrace interface:
 PT_R0, PT_R1, PT_R2, PT_R3, PT_R4, PT_R5, PT_R6, PT_R7,
 PT_R8, PT_R9, PT_R10, PT_R11, PT_R12, PT_R13, PT_R14, PT_R15,
@@ -643,7 +640,6 @@ PT_FPR0 + 40, PT_FPR0 + 42, PT_FPR0 + 44, PT_FPR0 + 46,
 PT_FPR0 + 48, PT_FPR0 + 50, PT_FPR0 + 52, PT_FPR0 + 54,
 PT_FPR0 + 56, PT_FPR0 + 58, PT_FPR0 + 60, PT_FPR0 + 62,
 PT_NIP, PT_MSR, PT_CCR, PT_LNK, PT_CTR, PT_XER, PT_MQ */
-/* *INDENT_ON * */
 
 static int
 ppc_register_u_addr (struct gdbarch *gdbarch, int regno)
@@ -2455,14 +2451,14 @@ ppc_linux_nat_target::num_memory_accesses (const std::vector<value_ref_ptr>
       struct value *v = iter.get ();
 
       /* Constants and values from the history are fine.  */
-      if (VALUE_LVAL (v) == not_lval || deprecated_value_modifiable (v) == 0)
+      if (v->lval () == not_lval || !v->deprecated_modifiable ())
 	continue;
-      else if (VALUE_LVAL (v) == lval_memory)
+      else if (v->lval () == lval_memory)
 	{
 	  /* A lazy memory lvalue is one that GDB never needed to fetch;
 	     we either just used its address (e.g., `a' in `a.b') or
 	     we never needed it at all (e.g., `a' in `a,b').  */
-	  if (!value_lazy (v))
+	  if (!v->lazy ())
 	    found_memory_cnt++;
 	}
       /* Other kinds of values are not fine.  */
@@ -2509,24 +2505,24 @@ ppc_linux_nat_target::check_condition (CORE_ADDR watch_addr,
     return 0;
 
   if (num_accesses_left == 1 && num_accesses_right == 0
-      && VALUE_LVAL (left_val) == lval_memory
-      && value_address (left_val) == watch_addr)
+      && left_val->lval () == lval_memory
+      && left_val->address () == watch_addr)
     {
       *data_value = value_as_long (right_val);
 
       /* DATA_VALUE is the constant in RIGHT_VAL, but actually has
 	 the same type as the memory region referenced by LEFT_VAL.  */
-      *len = check_typedef (value_type (left_val))->length ();
+      *len = check_typedef (left_val->type ())->length ();
     }
   else if (num_accesses_left == 0 && num_accesses_right == 1
-	   && VALUE_LVAL (right_val) == lval_memory
-	   && value_address (right_val) == watch_addr)
+	   && right_val->lval () == lval_memory
+	   && right_val->address () == watch_addr)
     {
       *data_value = value_as_long (left_val);
 
       /* DATA_VALUE is the constant in LEFT_VAL, but actually has
 	 the same type as the memory region referenced by RIGHT_VAL.  */
-      *len = check_typedef (value_type (right_val))->length ();
+      *len = check_typedef (right_val->type ())->length ();
     }
   else
     return 0;

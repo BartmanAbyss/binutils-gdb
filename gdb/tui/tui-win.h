@@ -1,6 +1,6 @@
 /* TUI window generic functions.
 
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -54,5 +54,8 @@ extern bool compact_source;
 /* Whether to style the source and assembly code highlighted by the TUI's
    current position indicator.  */
 extern bool style_tui_current_position;
+
+/* Whether to replace the spaces in the left margin with '_' and '0'.  */
+extern bool tui_left_margin_verbose;
 
 #endif /* TUI_TUI_WIN_H */

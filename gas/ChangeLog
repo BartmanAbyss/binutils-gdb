@@ -1,3 +1,171 @@
+2023-04-27  Jose E. Marchesi  <jose.marchesi@oracle.com>
+
+	* testsuite/gas/bpf/mem.dump: New file.
+	* testsuite/gas/bpf/mem-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/mem.d: #dump mem.dump.	
+	* testsuite/gas/bpf/lddw.dump: New file.
+	* testsuite/gas/bpf/lddw-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/lddw.d: #dump lddw.dump.
+	* testsuite/gas/bpf/jump.dump: New file.
+	* testsuite/gas/bpf/jump-pseudoc.d: Likewise
+	* testsuite/gas/bpf/jump.d: #dump jump.dump.
+	* testsuite/gas/bpf/jump32.dump: New file.
+	* testsuite/gas/bpf/jump32-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/jump32.d: #dump jump32.dump.
+	* testsuite/gas/bpf/lddw-be.dump: New file.
+	* testsuite/gas/bpf/lddw-be-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/lddw-be.d: #dump lddw-be.dump.
+	* testsuite/gas/bpf/indcall-1.dump: New file.
+	* testsuite/gas/bpf/indcall-1-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/indcall-1.d: #dump indcall-1.dump.
+	* testsuite/gas/bpf/indcall-1-pseudoc.s (main): Fix lddw
+	instruction.
+	* testsuite/gas/bpf/atomic.dump: New file.
+	* testsuite/gas/bpf/atomic-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/atomic.d: #dump atomic.dump.
+	* testsuite/gas/bpf/alu32.dump: New file.
+	* testsuite/gas/bpf/alu32-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/alu32.d: #dump alu32.dump.
+	* testsuite/gas/bpf/alu.dump: New file.
+	* testsuite/gas/bpf/alu-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/alu.d: #dump alu.dump.
+
+	* testsuite/gas/bpf/alu-be.dump: New file.
+	* testsuite/gas/bpf/alu-be-pseudoc.d: Likewise.
+	* testsuite/gas/bpf/alu-be.d: #dump alu-be.dump.
+	* testsuite/gas/bpf/alu32-be-pseudoc.d: New file.
+	* testsuite/gas/bpf/alu32-be-dump: Likewise.
+	* testsuite/gas/bpf/alu32-be.d: #dump alu32-be-dump.
+	* testsuite/gas/bpf/bpf.exp: Run *-pseudoc tests.
+
+2023-04-19  Jose E. Marchesi  <jose.marchesi@oracle.com>
+
+	PR gas/29757
+	* doc/c-bpf.texi (BPF Pseudo-C Syntax): New section.
+
+2023-04-20  Guillermo E. Martinez  <guillermo.e.martinez@oracle.com>
+
+	PR gas/29728
+	* testsuite/gas/all/assign-bad-recursive.d: Skip test in bpf-*
+	targets.
+	* testsuite/gas/all/eqv-dot.d: Likewise.
+	* testsuite/gas/all/gas.exp: Skip other assignment tests in bpf-*.
+	* testsuite/gas/bpf/alu-pseudoc.s: New file.
+	* testsuite/gas/bpf/pseudoc-normal.s: Likewise.
+	* testsuite/gas/bpf/pseudoc-normal.d: Likewise.
+	* testsuite/gas/bpf/pseudoc-normal-be.d: Likewise.
+	* testsuite/gas/bpf/mem-pseudoc.s: Likewise.
+	* testsuite/gas/bpf/lddw-pseudoc.s: Likewise.
+	* testsuite/gas/bpf/jump32-pseudoc.s: Likewise.
+	* testsuite/gas/bpf/jump-pseudoc.s: Likewise.
+	* testsuite/gas/bpf/indcall-1-pseudoc.s: Likewise.
+	* testsuite/gas/bpf/atomic-pseudoc.s: Likewise.
+	* testsuite/gas/bpf/alu32-pseudoc.s: Likewise.
+	* testsuite/gas/bpf/*.d: Add -pseudoc variants of the tests.
+
+2023-04-20  Guillermo E. Martinez  <guillermo.e.martinez@oracle.com>
+
+	PR gas/29728
+	* config/tc-bpf.h (TC_EQUAL_IN_INSN): Define.
+	* config/tc-bpf.c (LEX_IS_SYMBOL_COMPONENT): Define.
+	(LEX_IS_WHITESPACE): Likewise.
+	(LEX_IS_NEWLINE): Likewise.
+	(LEX_IS_ARITHM_OP): Likewise.
+	(LEX_IS_STAR): Likewise.
+	(LEX_IS_CLSE_BR): Likewise.
+	(LEX_IS_OPEN_BR): Likewise.
+	(LEX_IS_EQUAL): Likewise.
+	(LEX_IS_EXCLA): Likewise.
+	(ST_EOI): Likewise.
+	(MAX_TOKEN_SZ): Likewise.
+	(init_pseudoc_lex): New function.
+	(md_begin): Call init_pseudoc_lex.
+	(valid_expr): New function.
+	(build_bpf_non_generic_load): Likewise.
+	(build_bpf_atomic_insn): Likewise.
+	(build_bpf_jmp_insn): Likewise.
+	(build_bpf_arithm_insn): Likewise.
+	(build_bpf_endianness): Likewise.
+	(build_bpf_load_store_insn): Likewise.
+	(look_for_reserved_word): Likewise.
+	(is_register): Likewise.
+	(is_cast): Likewise.
+	(get_token): Likewise.
+	(bpf_pseudoc_to_normal_syntax): Likewise.
+	(md_assemble): Try pseudo-C syntax if an instruction cannot be
+	parsed.
+
+2023-04-18  mengqinggang  <mengqinggang@loongson.cn>
+
+	* config/tc-loongarch.c (loongarch_fix_adjustable): Symbols with
+	GOT relocatios do not fix adjustbale.
+	* testsuite/gas/loongarch/macro_op_large_abs.d: Regenerated.
+	* testsuite/gas/loongarch/macro_op_large_pc.d: Regenerated.
+
+2023-04-18  Thomas Koenig  <tkoenig@netcologne.de>
+
+	* doc/internals.texi (Relaxing with a table): Describe handling of
+	opcodes for relaxation a bit better.
+
+2023-04-13  Claudiu Zissulescu  <claziss@synopsys.com>
+
+        * testsuite/gas/cfi/cfi-arc-1.s: Use baseline instructions.
+        * testsuite/gas/cfi/cfi-arc-1.d: Update matching patterns.
+
+2023-04-13  Claudiu Zissulescu  <claziss@synopsys.com>
+
+	* testsuite/gas/arc/dsp.s: Remove unimplemented dsp instructions.
+	* testsuite/gas/arc/dsp.d: Update the test.
+
+2023-03-14  Nick Clifton  <nickc@redhat.com>
+
+	PR 30206
+	* doc/as.texi (Pseudo Ops): Document that data directives such as
+	.byte and .int are not intended for encoding instructions.
+
+2023-02-28  Richard Ball  <richard.ball@arm.com>
+
+	* testsuite/gas/aarch64/mec-invalid.d: New test.
+	* testsuite/gas/aarch64/mec-invalid.l: New test.
+	* testsuite/gas/aarch64/mec-invalid.s: New test.
+	* testsuite/gas/aarch64/mec.d: New test.
+	* testsuite/gas/aarch64/mec.s: New test.
+
+2023-02-27  Benson Muite  <benson_muite@emailplus.org>
+
+	PR 28909
+	* doc/local.mk (asconfig.texi): Use "cp -p" to preserve
+	timestamps.
+	* Makefile.in: Regenerate.
+
+2023-02-01  Nick Clifton  <nickc@redhat.com>
+
+	* dwarf2dbg.c (emit_inc_line_addr): Use unsigned constants when
+	checking addr_delta.
+
+2023-01-20  Frederic Cambus  <fred@statdns.com>
+
+	* configure.tgt (arm-*-openbsd*): Add target.
+
+2023-01-16  Nick Clifton  <nickc@redhat.com>
+
+	* po/ru.po: Updated Russian translation.
+
+2023-01-03  Nick Clifton  <nickc@redhat.com>
+
+	PR 29952
+	* config/tc-i386.c (md_assemble): Avoid constructing translatable
+	strings.
+
+2023-01-03  Nick Clifton  <nickc@redhat.com>
+
+	* po/fr.po: Updated French translation.
+	* po/uk.po: Updated Ukrainian translation.
+
+2022-12-31  Nick Clifton  <nickc@redhat.com>
+
+	* 2.40 branch created.
+
 2022-11-21  Nick Clifton  <nickc@redhat.com>
 
 	PR 29764
@@ -2754,7 +2922,7 @@
 
 For older changes see ChangeLog-2020
 
-Copyright (C) 2021-2022 Free Software Foundation, Inc.
+Copyright (C) 2021-2023 Free Software Foundation, Inc.
 
 Copying and distribution of this file, with or without modification,
 are permitted in any medium without royalty provided the copyright

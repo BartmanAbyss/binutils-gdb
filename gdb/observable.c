@@ -1,6 +1,6 @@
 /* GDB Notifications to Observers.
 
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -34,7 +34,6 @@ bool observer_debug = false;
 
 DEFINE_OBSERVABLE (normal_stop);
 DEFINE_OBSERVABLE (signal_received);
-DEFINE_OBSERVABLE (end_stepping_range);
 DEFINE_OBSERVABLE (signal_exited);
 DEFINE_OBSERVABLE (exited);
 DEFINE_OBSERVABLE (no_history);
@@ -44,6 +43,7 @@ DEFINE_OBSERVABLE (target_changed);
 DEFINE_OBSERVABLE (executable_changed);
 DEFINE_OBSERVABLE (inferior_created);
 DEFINE_OBSERVABLE (inferior_execd);
+DEFINE_OBSERVABLE (inferior_forked);
 DEFINE_OBSERVABLE (record_changed);
 DEFINE_OBSERVABLE (solib_loaded);
 DEFINE_OBSERVABLE (solib_unloaded);
@@ -62,6 +62,7 @@ DEFINE_OBSERVABLE (architecture_changed);
 DEFINE_OBSERVABLE (thread_ptid_changed);
 DEFINE_OBSERVABLE (inferior_added);
 DEFINE_OBSERVABLE (inferior_appeared);
+DEFINE_OBSERVABLE (inferior_pre_detach);
 DEFINE_OBSERVABLE (inferior_exit);
 DEFINE_OBSERVABLE (inferior_removed);
 DEFINE_OBSERVABLE (memory_changed);

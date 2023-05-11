@@ -1,6 +1,6 @@
 /* Target-dependent code for FreeBSD, architecture-independent.
 
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -663,7 +663,7 @@ fbsd_make_note_desc (enum target_object object, uint32_t structsize)
 
   gdb::byte_vector desc (sizeof (structsize) + buf->size ());
   memcpy (desc.data (), &structsize, sizeof (structsize));
-  memcpy (desc.data () + sizeof (structsize), buf->data (), buf->size ());
+  std::copy (buf->begin (), buf->end (), desc.data () + sizeof (structsize));
   return desc;
 }
 
@@ -1594,11 +1594,12 @@ fbsd_get_siginfo_type (struct gdbarch *gdbarch)
   if (fbsd_gdbarch_data->siginfo_type != NULL)
     return fbsd_gdbarch_data->siginfo_type;
 
-  int_type = arch_integer_type (gdbarch, gdbarch_int_bit (gdbarch),
+  type_allocator alloc (gdbarch);
+  int_type = init_integer_type (alloc, gdbarch_int_bit (gdbarch),
 				0, "int");
-  int32_type = arch_integer_type (gdbarch, 32, 0, "int32_t");
-  uint32_type = arch_integer_type (gdbarch, 32, 1, "uint32_t");
-  long_type = arch_integer_type (gdbarch, gdbarch_long_bit (gdbarch),
+  int32_type = init_integer_type (alloc, 32, 0, "int32_t");
+  uint32_type = init_integer_type (alloc, 32, 1, "uint32_t");
+  long_type = init_integer_type (alloc, gdbarch_long_bit (gdbarch),
 				 0, "long");
   void_ptr_type = lookup_pointer_type (builtin_type (gdbarch)->builtin_void);
 
@@ -1609,15 +1610,16 @@ fbsd_get_siginfo_type (struct gdbarch *gdbarch)
   append_composite_type_field (sigval_type, "sival_ptr", void_ptr_type);
 
   /* __pid_t */
-  pid_type = arch_type (gdbarch, TYPE_CODE_TYPEDEF,
-			int32_type->length () * TARGET_CHAR_BIT, "__pid_t");
+  pid_type = alloc.new_type (TYPE_CODE_TYPEDEF,
+			     int32_type->length () * TARGET_CHAR_BIT,
+			     "__pid_t");
   pid_type->set_target_type (int32_type);
   pid_type->set_target_is_stub (true);
 
   /* __uid_t */
-  uid_type = arch_type (gdbarch, TYPE_CODE_TYPEDEF,
-			uint32_type->length () * TARGET_CHAR_BIT,
-			"__uid_t");
+  uid_type = alloc.new_type (TYPE_CODE_TYPEDEF,
+			     uint32_type->length () * TARGET_CHAR_BIT,
+			     "__uid_t");
   uid_type->set_target_type (uint32_type);
   pid_type->set_target_is_stub (true);
 

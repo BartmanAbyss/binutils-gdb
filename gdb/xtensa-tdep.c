@@ -1,6 +1,6 @@
 /* Target-dependent code for the Xtensa port of GDB, the GNU debugger.
 
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -312,8 +312,9 @@ xtensa_register_type (struct gdbarch *gdbarch, int regnum)
 		  tp->next = tdep->type_entries;
 		  tdep->type_entries = tp;
 		  tp->size = size;
+		  type_allocator alloc (gdbarch);
 		  tp->virtual_type
-		    = arch_integer_type (gdbarch, size * 8, 1, name.c_str ());
+		    = init_integer_type (alloc, size * 8, 1, name.c_str ());
 		}
 
 	      reg->ctype = tp->virtual_type;
@@ -1712,7 +1713,7 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
       for (int i = 0; i < nargs; i++)
 	{
 	  struct value *arg = args[i];
-	  struct type *arg_type = check_typedef (value_type (arg));
+	  struct type *arg_type = check_typedef (arg->type ());
 	  gdb_printf (gdb_stdlog, "%2d: %s %3s ", i,
 		      host_address_to_string (arg),
 		      pulongest (arg_type->length ()));
@@ -1729,7 +1730,7 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
 	      break;
 	    }
 	  gdb_printf (gdb_stdlog, " %s\n",
-		      host_address_to_string (value_contents (arg).data ()));
+		      host_address_to_string (arg->contents ().data ()));
 	}
     }
 
@@ -1748,7 +1749,7 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
     {
       struct argument_info *info = &arg_info[i];
       struct value *arg = args[i];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
 
       switch (arg_type->code ())
 	{
@@ -1785,7 +1786,7 @@ xtensa_push_dummy_call (struct gdbarch *gdbarch,
 	  break;
 	}
       info->length = arg_type->length ();
-      info->contents = value_contents (arg).data ();
+      info->contents = arg->contents ().data ();
 
       /* Align size and onstack_size.  */
       size = (size + info->align - 1) & ~(info->align - 1);
@@ -3145,13 +3146,11 @@ xtensa_derive_tdep (xtensa_gdbarch_tdep *tdep)
 
 /* Module "constructor" function.  */
 
-extern xtensa_gdbarch_tdep xtensa_tdep;
+extern xtensa_register_t xtensa_rmap[];
 
 static struct gdbarch *
 xtensa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
-
   DEBUGTRACE ("gdbarch_init()\n");
 
   if (!xtensa_default_isa)
@@ -3160,8 +3159,10 @@ xtensa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   /* We have to set the byte order before we call gdbarch_alloc.  */
   info.byte_order = XCHAL_HAVE_BE ? BFD_ENDIAN_BIG : BFD_ENDIAN_LITTLE;
 
-  xtensa_gdbarch_tdep *tdep = &xtensa_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info,
+		     gdbarch_tdep_up (new xtensa_gdbarch_tdep (xtensa_rmap)));
+  xtensa_gdbarch_tdep *tdep = gdbarch_tdep<xtensa_gdbarch_tdep> (gdbarch);
   xtensa_derive_tdep (tdep);
 
   /* Verify our configuration.  */

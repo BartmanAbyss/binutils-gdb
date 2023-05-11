@@ -1,6 +1,6 @@
 /* Intel 386 target-dependent stuff.
 
-   Copyright (C) 1988-2022 Free Software Foundation, Inc.
+   Copyright (C) 1988-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -830,7 +830,7 @@ i386_displaced_step_copy_insn (struct gdbarch *gdbarch,
 
   displaced_debug_printf ("%s->%s: %s",
 			  paddress (gdbarch, from), paddress (gdbarch, to),
-			  displaced_step_dump_bytes (buf, len).c_str ());
+			  bytes_to_string (buf, len).c_str ());
 
   /* This is a work around for a problem with g++ 4.8.  */
   return displaced_step_copy_insn_closure_up (closure.release ());
@@ -843,7 +843,7 @@ void
 i386_displaced_step_fixup (struct gdbarch *gdbarch,
 			   struct displaced_step_copy_insn_closure *closure_,
 			   CORE_ADDR from, CORE_ADDR to,
-			   struct regcache *regs)
+			   struct regcache *regs, bool completed_p)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
 
@@ -886,14 +886,14 @@ i386_displaced_step_fixup (struct gdbarch *gdbarch,
      the displaced instruction; make it relative.  Well, signal
      handler returns don't need relocation either, but we use the
      value of %eip to recognize those; see below.  */
-  if (! i386_absolute_jmp_p (insn)
-      && ! i386_absolute_call_p (insn)
-      && ! i386_ret_p (insn))
+  if (!completed_p
+      || (!i386_absolute_jmp_p (insn)
+	  && !i386_absolute_call_p (insn)
+	  && !i386_ret_p (insn)))
     {
-      ULONGEST orig_eip;
       int insn_len;
 
-      regcache_cooked_read_unsigned (regs, I386_EIP_REGNUM, &orig_eip);
+      CORE_ADDR pc = regcache_read_pc (regs);
 
       /* A signal trampoline system call changes the %eip, resuming
 	 execution of the main program after the signal handler has
@@ -910,25 +910,25 @@ i386_displaced_step_fixup (struct gdbarch *gdbarch,
 	 it unrelocated.  Goodness help us if there are PC-relative
 	 system calls.  */
       if (i386_syscall_p (insn, &insn_len)
-	  && orig_eip != to + (insn - insn_start) + insn_len
+	  && pc != to + (insn - insn_start) + insn_len
 	  /* GDB can get control back after the insn after the syscall.
 	     Presumably this is a kernel bug.
 	     i386_displaced_step_copy_insn ensures its a nop,
 	     we add one to the length for it.  */
-	  && orig_eip != to + (insn - insn_start) + insn_len + 1)
+	  && pc != to + (insn - insn_start) + insn_len + 1)
 	displaced_debug_printf ("syscall changed %%eip; not relocating");
       else
 	{
-	  ULONGEST eip = (orig_eip - insn_offset) & 0xffffffffUL;
+	  ULONGEST eip = (pc - insn_offset) & 0xffffffffUL;
 
 	  /* If we just stepped over a breakpoint insn, we don't backup
 	     the pc on purpose; this is to match behaviour without
 	     stepping.  */
 
-	  regcache_cooked_write_unsigned (regs, I386_EIP_REGNUM, eip);
+	  regcache_write_pc (regs, eip);
 
 	  displaced_debug_printf ("relocated %%eip from %s to %s",
-				  paddress (gdbarch, orig_eip),
+				  paddress (gdbarch, pc),
 				  paddress (gdbarch, eip));
 	}
     }
@@ -941,7 +941,7 @@ i386_displaced_step_fixup (struct gdbarch *gdbarch,
   /* If the instruction was a call, the return address now atop the
      stack is the address following the copied instruction.  We need
      to make it the address following the original instruction.  */
-  if (i386_call_p (insn))
+  if (completed_p && i386_call_p (insn))
     {
       ULONGEST esp;
       ULONGEST retaddr;
@@ -1856,7 +1856,7 @@ i386_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR start_pc)
 	      && cust->producer () != NULL
 	      && (producer_is_llvm (cust->producer ())
 	      || producer_is_icc_ge_19 (cust->producer ()))))
-        return std::max (start_pc, post_prologue_pc);
+	return std::max (start_pc, post_prologue_pc);
     }
  
   cache.locals = -1;
@@ -2219,12 +2219,6 @@ static int
 i386_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
   gdb_byte insn;
-  struct compunit_symtab *cust;
-
-  cust = find_pc_compunit_symtab (pc);
-  if (cust != NULL && cust->epilogue_unwind_valid ())
-    return 0;
-
   if (target_read_memory (pc, &insn, 1))
     return 0;	/* Can't read memory at pc.  */
 
@@ -2235,15 +2229,54 @@ i386_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 }
 
 static int
+i386_epilogue_frame_sniffer_1 (const struct frame_unwind *self,
+			       frame_info_ptr this_frame,
+			       void **this_prologue_cache, bool override_p)
+{
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  CORE_ADDR pc = get_frame_pc (this_frame);
+
+  if (frame_relative_level (this_frame) != 0)
+    /* We're not in the inner frame, so assume we're not in an epilogue.  */
+    return 0;
+
+  bool unwind_valid_p
+    = compunit_epilogue_unwind_valid (find_pc_compunit_symtab (pc));
+  if (override_p)
+    {
+      if (unwind_valid_p)
+	/* Don't override the symtab unwinders, skip
+	   "i386 epilogue override".  */
+	return 0;
+    }
+  else
+    {
+      if (!unwind_valid_p)
+	/* "i386 epilogue override" unwinder already ran, skip
+	   "i386 epilogue".  */
+	return 0;
+    }
+
+  /* Check whether we're in an epilogue.  */
+  return i386_stack_frame_destroyed_p (gdbarch, pc);
+}
+
+static int
+i386_epilogue_override_frame_sniffer (const struct frame_unwind *self,
+				      frame_info_ptr this_frame,
+				      void **this_prologue_cache)
+{
+  return i386_epilogue_frame_sniffer_1 (self, this_frame, this_prologue_cache,
+					true);
+}
+
+static int
 i386_epilogue_frame_sniffer (const struct frame_unwind *self,
 			     frame_info_ptr this_frame,
 			     void **this_prologue_cache)
 {
-  if (frame_relative_level (this_frame) == 0)
-    return i386_stack_frame_destroyed_p (get_frame_arch (this_frame),
-					 get_frame_pc (this_frame));
-  else
-    return 0;
+  return i386_epilogue_frame_sniffer_1 (self, this_frame, this_prologue_cache,
+					false);
 }
 
 static struct i386_frame_cache *
@@ -2317,6 +2350,17 @@ i386_epilogue_frame_prev_register (frame_info_ptr this_frame,
 
   return i386_frame_prev_register (this_frame, this_cache, regnum);
 }
+
+static const struct frame_unwind i386_epilogue_override_frame_unwind =
+{
+  "i386 epilogue override",
+  NORMAL_FRAME,
+  i386_epilogue_frame_unwind_stop_reason,
+  i386_epilogue_frame_this_id,
+  i386_epilogue_frame_prev_register,
+  NULL,
+  i386_epilogue_override_frame_sniffer
+};
 
 static const struct frame_unwind i386_epilogue_frame_unwind =
 {
@@ -2654,7 +2698,7 @@ i386_16_byte_align_p (struct type *type)
       int i;
       for (i = 0; i < type->num_fields (); i++)
 	{
-	  if (field_is_static (&type->field (i)))
+	  if (type->field (i).is_static ())
 	    continue;
 	  if (i386_16_byte_align_p (type->field (i).type ()))
 	    return 1;
@@ -2725,15 +2769,15 @@ i386_thiscall_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
       for (i = thiscall ? 1 : 0; i < nargs; i++)
 	{
-	  int len = value_enclosing_type (args[i])->length ();
+	  int len = args[i]->enclosing_type ()->length ();
 
 	  if (write_pass)
 	    {
-	      if (i386_16_byte_align_p (value_enclosing_type (args[i])))
+	      if (i386_16_byte_align_p (args[i]->enclosing_type ()))
 		args_space_used = align_up (args_space_used, 16);
 
 	      write_memory (sp + args_space_used,
-			    value_contents_all (args[i]).data (), len);
+			    args[i]->contents_all ().data (), len);
 	      /* The System V ABI says that:
 
 	      "An argument's size is increased, if necessary, to make it a
@@ -2745,7 +2789,7 @@ i386_thiscall_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	    }
 	  else
 	    {
-	      if (i386_16_byte_align_p (value_enclosing_type (args[i])))
+	      if (i386_16_byte_align_p (args[i]->enclosing_type ()))
 		args_space = align_up (args_space, 16);
 	      args_space += align_up (len, 4);
 	    }
@@ -2778,7 +2822,7 @@ i386_thiscall_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   /* The 'this' pointer needs to be in ECX.  */
   if (thiscall)
     regcache->cooked_write (I386_ECX_REGNUM,
-			    value_contents_all (args[0]).data ());
+			    args[0]->contents_all ().data ());
 
   /* If the PLT is position-independent, the SYSTEM V ABI requires %ebx to be
      set to the address of the GOT when doing a call to a PLT address.
@@ -3006,7 +3050,8 @@ i386_reg_struct_return_p (struct gdbarch *gdbarch, struct type *type)
 
   if (struct_convention == pcc_struct_convention
       || (struct_convention == default_struct_convention
-	  && tdep->struct_return == pcc_struct_return))
+	  && tdep->struct_return == pcc_struct_return)
+      || TYPE_HAS_DYNAMIC_LENGTH (type))
     return 0;
 
   /* Structures consisting of a single `float', `double' or 'long
@@ -3030,7 +3075,7 @@ i386_reg_struct_return_p (struct gdbarch *gdbarch, struct type *type)
 static enum return_value_convention
 i386_return_value (struct gdbarch *gdbarch, struct value *function,
 		   struct type *type, struct regcache *regcache,
-		   gdb_byte *readbuf, const gdb_byte *writebuf)
+		   struct value **read_value, const gdb_byte *writebuf)
 {
   enum type_code code = type->code ();
 
@@ -3061,12 +3106,12 @@ i386_return_value (struct gdbarch *gdbarch, struct value *function,
 	 a record, so the convention applied to records also applies
 	 to arrays.  */
 
-      if (readbuf)
+      if (read_value != nullptr)
 	{
 	  ULONGEST addr;
 
 	  regcache_raw_read_unsigned (regcache, I386_EAX_REGNUM, &addr);
-	  read_memory (addr, readbuf, type->length ());
+	  *read_value = value_at_non_lval (type, addr);
 	}
 
       return RETURN_VALUE_ABI_RETURNS_ADDRESS;
@@ -3081,13 +3126,21 @@ i386_return_value (struct gdbarch *gdbarch, struct value *function,
      here.  */
   if (code == TYPE_CODE_STRUCT && type->num_fields () == 1)
     {
-      type = check_typedef (type->field (0).type ());
-      return i386_return_value (gdbarch, function, type, regcache,
-				readbuf, writebuf);
+      struct type *inner_type = check_typedef (type->field (0).type ());
+      enum return_value_convention result
+	= i386_return_value (gdbarch, function, inner_type, regcache,
+			     read_value, writebuf);
+      if (read_value != nullptr)
+	(*read_value)->deprecated_set_type (type);
+      return result;
     }
 
-  if (readbuf)
-    i386_extract_return_value (gdbarch, type, regcache, readbuf);
+  if (read_value != nullptr)
+    {
+      *read_value = value::allocate (type);
+      i386_extract_return_value (gdbarch, type, regcache,
+				 (*read_value)->contents_raw ().data ());
+    }
   if (writebuf)
     i386_store_return_value (gdbarch, type, regcache, writebuf);
 
@@ -3370,7 +3423,7 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 {
   gdb_byte raw_buf[I386_MAX_REGISTER_SIZE];
   enum register_status status;
-  gdb_byte *buf = value_contents_raw (result_value).data ();
+  gdb_byte *buf = result_value->contents_raw ().data ();
 
   if (i386_mmx_regnum_p (gdbarch, regnum))
     {
@@ -3379,8 +3432,8 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
       /* Extract (always little endian).  */
       status = regcache->raw_read (fpnum, raw_buf);
       if (status != REG_VALID)
-	mark_value_bytes_unavailable (result_value, 0,
-				      value_type (result_value)->length ());
+	result_value->mark_bytes_unavailable (0,
+					      result_value->type ()->length ());
       else
 	memcpy (buf, raw_buf, register_size (gdbarch, regnum));
     }
@@ -3395,7 +3448,7 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	  status = regcache->raw_read (I387_BND0R_REGNUM (tdep) + regnum,
 				       raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 0, 16);
+	    result_value->mark_bytes_unavailable (0, 16);
 	  else
 	    {
 	      enum bfd_endian byte_order = gdbarch_byte_order (target_gdbarch ());
@@ -3417,7 +3470,7 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	  /* Extract (always little endian).  */
 	  status = regcache->raw_read (tdep->k0_regnum + regnum, raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 0, 8);
+	    result_value->mark_bytes_unavailable (0, 8);
 	  else
 	    memcpy (buf, raw_buf, 8);
 	}
@@ -3431,7 +3484,7 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	      status = regcache->raw_read (I387_XMM0_REGNUM (tdep) + regnum,
 					   raw_buf);
 	      if (status != REG_VALID)
-		mark_value_bytes_unavailable (result_value, 0, 16);
+		result_value->mark_bytes_unavailable (0, 16);
 	      else
 		memcpy (buf, raw_buf, 16);
 
@@ -3439,7 +3492,7 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	      status = regcache->raw_read (tdep->ymm0h_regnum + regnum,
 					   raw_buf);
 	      if (status != REG_VALID)
-		mark_value_bytes_unavailable (result_value, 16, 16);
+		result_value->mark_bytes_unavailable (16, 16);
 	      else
 		memcpy (buf + 16, raw_buf, 16);
 	    }
@@ -3450,7 +3503,7 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 					   - num_lower_zmm_regs,
 					   raw_buf);
 	      if (status != REG_VALID)
-		mark_value_bytes_unavailable (result_value, 0, 16);
+		result_value->mark_bytes_unavailable (0, 16);
 	      else
 		memcpy (buf, raw_buf, 16);
 
@@ -3459,7 +3512,7 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 					   - num_lower_zmm_regs,
 					   raw_buf);
 	      if (status != REG_VALID)
-		mark_value_bytes_unavailable (result_value, 16, 16);
+		result_value->mark_bytes_unavailable (16, 16);
 	      else
 		memcpy (buf + 16, raw_buf, 16);
 	    }
@@ -3468,7 +3521,7 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	  status = regcache->raw_read (tdep->zmm0h_regnum + regnum,
 				       raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 32, 32);
+	    result_value->mark_bytes_unavailable (32, 32);
 	  else
 	    memcpy (buf + 32, raw_buf, 32);
 	}
@@ -3480,14 +3533,14 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	  status = regcache->raw_read (I387_XMM0_REGNUM (tdep) + regnum,
 				       raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 0, 16);
+	    result_value->mark_bytes_unavailable (0, 16);
 	  else
 	    memcpy (buf, raw_buf, 16);
 	  /* Read upper 128bits.  */
 	  status = regcache->raw_read (tdep->ymm0h_regnum + regnum,
 				       raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 16, 32);
+	    result_value->mark_bytes_unavailable (16, 32);
 	  else
 	    memcpy (buf + 16, raw_buf, 16);
 	}
@@ -3498,14 +3551,14 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	  status = regcache->raw_read (I387_XMM16_REGNUM (tdep) + regnum,
 				       raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 0, 16);
+	    result_value->mark_bytes_unavailable (0, 16);
 	  else
 	    memcpy (buf, raw_buf, 16);
 	  /* Read upper 128bits.  */
 	  status = regcache->raw_read (tdep->ymm16h_regnum + regnum,
 				       raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 16, 16);
+	    result_value->mark_bytes_unavailable (16, 16);
 	  else
 	    memcpy (buf + 16, raw_buf, 16);
 	}
@@ -3516,8 +3569,8 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	  /* Extract (always little endian).  */
 	  status = regcache->raw_read (gpnum, raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 0,
-					  value_type (result_value)->length ());
+	    result_value->mark_bytes_unavailable (0,
+						  result_value->type ()->length ());
 	  else
 	    memcpy (buf, raw_buf, 2);
 	}
@@ -3529,8 +3582,8 @@ i386_pseudo_register_read_into_value (struct gdbarch *gdbarch,
 	     upper registers.  */
 	  status = regcache->raw_read (gpnum % 4, raw_buf);
 	  if (status != REG_VALID)
-	    mark_value_bytes_unavailable (result_value, 0,
-					  value_type (result_value)->length ());
+	    result_value->mark_bytes_unavailable (0,
+						  result_value->type ()->length ());
 	  else if (gpnum >= 4)
 	    memcpy (buf, raw_buf + 1, 1);
 	  else
@@ -3548,8 +3601,8 @@ i386_pseudo_register_read_value (struct gdbarch *gdbarch,
 {
   struct value *result;
 
-  result = allocate_value (register_type (gdbarch, regnum));
-  VALUE_LVAL (result) = lval_register;
+  result = value::allocate (register_type (gdbarch, regnum));
+  result->set_lval (lval_register);
   VALUE_REGNUM (result) = regnum;
 
   i386_pseudo_register_read_into_value (gdbarch, regcache, regnum, result);
@@ -8229,12 +8282,14 @@ i386_floatformat_for_type (struct gdbarch *gdbarch,
 	|| strcmp (name, "_Float128") == 0
 	|| strcmp (name, "complex _Float128") == 0
 	|| strcmp (name, "complex(kind=16)") == 0
+	|| strcmp (name, "COMPLEX(16)") == 0
 	|| strcmp (name, "complex*32") == 0
 	|| strcmp (name, "COMPLEX*32") == 0
 	|| strcmp (name, "quad complex") == 0
 	|| strcmp (name, "real(kind=16)") == 0
 	|| strcmp (name, "real*16") == 0
-	|| strcmp (name, "REAL*16") == 0)
+	|| strcmp (name, "REAL*16") == 0
+	|| strcmp (name, "REAL(16)") == 0)
       return floatformats_ieee_quad;
 
   return default_floatformat_for_type (gdbarch, name, len);
@@ -8443,7 +8498,6 @@ i386_type_align (struct gdbarch *gdbarch, struct type *type)
 static struct gdbarch *
 i386_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   const struct target_desc *tdesc;
   int mm0_regnum;
   int ymm0_regnum;
@@ -8456,8 +8510,9 @@ i386_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     return arches->gdbarch;
 
   /* Allocate space for the new architecture.  Assume i386 for now.  */
-  i386_gdbarch_tdep *tdep = new i386_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new i386_gdbarch_tdep));
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 
   /* General-purpose registers.  */
   tdep->gregset_reg_offset = NULL;
@@ -8572,7 +8627,7 @@ i386_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   set_gdbarch_register_to_value (gdbarch,  i386_register_to_value);
   set_gdbarch_value_to_register (gdbarch, i386_value_to_register);
 
-  set_gdbarch_return_value (gdbarch, i386_return_value);
+  set_gdbarch_return_value_as_value (gdbarch, i386_return_value);
 
   set_gdbarch_skip_prologue (gdbarch, i386_skip_prologue);
 
@@ -8604,12 +8659,16 @@ i386_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
      appended to the list first, so that it supercedes the DWARF
      unwinder in function epilogues (where the DWARF unwinder
      currently fails).  */
-  frame_unwind_append_unwinder (gdbarch, &i386_epilogue_frame_unwind);
+  if (info.bfd_arch_info->bits_per_word == 32)
+    frame_unwind_append_unwinder (gdbarch, &i386_epilogue_override_frame_unwind);
 
   /* Hook in the DWARF CFI frame unwinder.  This unwinder is appended
      to the list before the prologue-based unwinders, so that DWARF
      CFI info will be used if it is available.  */
   dwarf2_append_unwinders (gdbarch);
+
+  if (info.bfd_arch_info->bits_per_word == 32)
+    frame_unwind_append_unwinder (gdbarch, &i386_epilogue_frame_unwind);
 
   frame_base_set_default (gdbarch, &i386_frame_base);
 
@@ -8700,7 +8759,6 @@ i386_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   if (!i386_validate_tdesc_p (tdep, tdesc_data.get ()))
     {
-      delete tdep;
       gdbarch_free (gdbarch);
       return NULL;
     }
@@ -8784,9 +8842,12 @@ i386_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     tdep-> bnd0_regnum = -1;
 
   /* Hook in the legacy prologue-based unwinders last (fallback).  */
-  frame_unwind_append_unwinder (gdbarch, &i386_stack_tramp_frame_unwind);
-  frame_unwind_append_unwinder (gdbarch, &i386_sigtramp_frame_unwind);
-  frame_unwind_append_unwinder (gdbarch, &i386_frame_unwind);
+  if (info.bfd_arch_info->bits_per_word == 32)
+    {
+      frame_unwind_append_unwinder (gdbarch, &i386_stack_tramp_frame_unwind);
+      frame_unwind_append_unwinder (gdbarch, &i386_sigtramp_frame_unwind);
+      frame_unwind_append_unwinder (gdbarch, &i386_frame_unwind);
+    }
 
   /* If we have a register mapping, enable the generic core file
      support, unless it has already been enabled.  */

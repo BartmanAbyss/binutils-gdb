@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux on LoongArch processors.
 
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
    Contributed by Loongson Ltd.
 
    This file is part of GDB.
@@ -336,7 +336,7 @@ void
 _initialize_loongarch_linux_tdep ()
 {
   gdbarch_register_osabi (bfd_arch_loongarch, bfd_mach_loongarch32,
-                          GDB_OSABI_LINUX, loongarch_linux_init_abi);
+			  GDB_OSABI_LINUX, loongarch_linux_init_abi);
   gdbarch_register_osabi (bfd_arch_loongarch, bfd_mach_loongarch64,
-                          GDB_OSABI_LINUX, loongarch_linux_init_abi);
+			  GDB_OSABI_LINUX, loongarch_linux_init_abi);
 }

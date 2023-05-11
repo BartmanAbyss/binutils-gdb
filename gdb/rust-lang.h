@@ -1,6 +1,6 @@
 /* Rust language support definitions for GDB, the GNU debugger.
 
-   Copyright (C) 2016-2022 Free Software Foundation, Inc.
+   Copyright (C) 2016-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -93,7 +93,7 @@ public:
        (const char *mangled, gdb::unique_xmalloc_ptr<char> *demangled)
        const override
   {
-    *demangled = gdb_demangle (mangled, DMGL_PARAMS | DMGL_ANSI);
+    demangled->reset (rust_demangle (mangled, 0));
     return *demangled != NULL;
   }
 
@@ -102,7 +102,7 @@ public:
   gdb::unique_xmalloc_ptr<char> demangle_symbol (const char *mangled,
 						 int options) const override
   {
-    return gdb_demangle (mangled, options);
+    return gdb::unique_xmalloc_ptr<char> (rust_demangle (mangled, options));
   }
 
   /* See language.h.  */
@@ -148,21 +148,16 @@ public:
   {
     struct block_symbol result = {};
 
-    if (symbol_lookup_debug)
-      {
-	gdb_printf (gdb_stdlog,
-		    "rust_lookup_symbol_non_local"
-		    " (%s, %s (scope %s), %s)\n",
-		    name, host_address_to_string (block),
-		    block_scope (block), domain_name (domain));
-      }
+    const char *scope = block == nullptr ? "" : block->scope ();
+    symbol_lookup_debug_printf
+      ("rust_lookup_symbol_non_local (%s, %s (scope %s), %s)",
+       name, host_address_to_string (block), scope,
+       domain_name (domain));
 
     /* Look up bare names in the block's scope.  */
     std::string scopedname;
     if (name[cp_find_first_component (name)] == '\0')
       {
-	const char *scope = block_scope (block);
-
 	if (scope[0] != '\0')
 	  {
 	    scopedname = std::string (scope) + "::" + name;

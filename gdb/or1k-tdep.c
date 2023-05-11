@@ -1,5 +1,5 @@
 /* Target-dependent code for the 32-bit OpenRISC 1000, for the GDB.
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,8 +29,7 @@
 #include "gdbtypes.h"
 #include "target.h"
 #include "regcache.h"
-#include "safe-ctype.h"
-#include "block.h"
+#include "gdbsupport/gdb-safe-ctype.h"
 #include "reggroups.h"
 #include "arch-utils.h"
 #include "frame-unwind.h"
@@ -638,7 +637,7 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   or1k_gdbarch_tdep *tdep = gdbarch_tdep<or1k_gdbarch_tdep> (gdbarch);
   int bpa = tdep->bytes_per_address;
   int bpw = tdep->bytes_per_word;
-  struct type *func_type = value_type (function);
+  struct type *func_type = function->type ();
 
   /* Return address */
   regcache_cooked_write_unsigned (regcache, OR1K_LR_REGNUM, bp_addr);
@@ -662,7 +661,7 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       gdb_byte valbuf[sizeof (ULONGEST)];
 
       struct value *arg = args[argnum];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
       int len = arg_type->length ();
       enum type_code typecode = arg_type->code ();
 
@@ -673,7 +672,7 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       if ((TYPE_CODE_STRUCT == typecode) || (TYPE_CODE_UNION == typecode)
 	  || (len > bpw * 2))
 	{
-	  CORE_ADDR valaddr = value_address (arg);
+	  CORE_ADDR valaddr = arg->address ();
 
 	  /* If the arg is fabricated (i.e. 3*i, instead of i) valaddr is
 	     undefined.  */
@@ -686,7 +685,7 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	      heap_offset += align_up (len, bpw);
 	      valaddr = heap_sp + heap_offset;
 
-	      write_memory (valaddr, value_contents (arg).data (), len);
+	      write_memory (valaddr, arg->contents ().data (), len);
 	    }
 
 	  /* The ABI passes all structures by reference, so get its
@@ -698,7 +697,7 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       else
 	{
 	  /* Everything else, we just get the value.  */
-	  val = value_contents (arg).data ();
+	  val = arg->contents ().data ();
 	}
 
       /* Stick the value in a register.  */
@@ -752,7 +751,7 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   for (argnum = first_stack_arg; argnum < nargs; argnum++)
     {
       struct value *arg = args[argnum];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
       int len = arg_type->length ();
       enum type_code typecode = arg_type->code ();
 
@@ -784,7 +783,7 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       gdb_byte valbuf[sizeof (ULONGEST)];
 
       struct value *arg = args[argnum];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
       int len = arg_type->length ();
       enum type_code typecode = arg_type->code ();
       /* The EABI passes structures that do not fit in a register by
@@ -793,12 +792,12 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	  || (len > bpw * 2))
 	{
 	  store_unsigned_integer (valbuf, bpa, byte_order,
-				  value_address (arg));
+				  arg->address ());
 	  len = bpa;
 	  val = valbuf;
 	}
       else
-	val = value_contents (arg).data ();
+	val = arg->contents ().data ();
 
       while (len > 0)
 	{
@@ -1142,7 +1141,6 @@ static const struct frame_unwind or1k_frame_unwind = {
 static struct gdbarch *
 or1k_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
   const struct bfd_arch_info *binfo;
   tdesc_arch_data_up tdesc_data;
   const struct target_desc *tdesc = info.target_desc;
@@ -1157,10 +1155,12 @@ or1k_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
      actually know which target we are talking to, but put in some defaults
      for now.  */
   binfo = info.bfd_arch_info;
-  or1k_gdbarch_tdep *tdep = new or1k_gdbarch_tdep;
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new or1k_gdbarch_tdep));
+  or1k_gdbarch_tdep *tdep = gdbarch_tdep<or1k_gdbarch_tdep> (gdbarch);
+
   tdep->bytes_per_word = binfo->bits_per_word / binfo->bits_per_byte;
   tdep->bytes_per_address = binfo->bits_per_address / binfo->bits_per_byte;
-  gdbarch = gdbarch_alloc (&info, tdep);
 
   /* Target data types */
   set_gdbarch_short_bit (gdbarch, 16);

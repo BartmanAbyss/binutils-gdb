@@ -1,6 +1,6 @@
 /* Handle JIT code generation in the inferior for GDB, the GNU Debugger.
 
-   Copyright (C) 2009-2022 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -491,9 +491,9 @@ jit_symtab_line_mapping_add_impl (struct gdb_symbol_callbacks *cb,
   stab->linetable->nitems = nlines;
   for (i = 0; i < nlines; i++)
     {
-      stab->linetable->item[i].pc = (CORE_ADDR) map[i].pc;
+      stab->linetable->item[i].set_raw_pc (unrelocated_addr (map[i].pc));
       stab->linetable->item[i].line = map[i].line;
-      stab->linetable->item[i].is_stmt = 1;
+      stab->linetable->item[i].is_stmt = true;
     }
 }
 
@@ -543,9 +543,11 @@ finalize_symtab (struct gdb_symtab *stab, struct objfile *objfile)
       size_t size = ((stab->linetable->nitems - 1)
 		     * sizeof (struct linetable_entry)
 		     + sizeof (struct linetable));
-      filetab->set_linetable ((struct linetable *)
-			      obstack_alloc (&objfile->objfile_obstack, size));
-      memcpy (filetab->linetable (), stab->linetable.get (), size);
+      struct linetable *new_table
+	= (struct linetable *) obstack_alloc (&objfile->objfile_obstack,
+					      size);
+      memcpy (new_table, stab->linetable.get (), size);
+      filetab->set_linetable (new_table);
     }
 
   blockvector_size = (sizeof (struct blockvector)
@@ -567,12 +569,9 @@ finalize_symtab (struct gdb_symtab *stab, struct objfile *objfile)
   int block_idx = FIRST_LOCAL_BLOCK;
   for (gdb_block &gdb_block_iter : stab->blocks)
     {
-      struct block *new_block = allocate_block (&objfile->objfile_obstack);
+      struct block *new_block = new (&objfile->objfile_obstack) block;
       struct symbol *block_name = new (&objfile->objfile_obstack) symbol;
-      struct type *block_type = arch_type (objfile->arch (),
-					   TYPE_CODE_VOID,
-					   TARGET_CHAR_BIT,
-					   "void");
+      struct type *block_type = builtin_type (objfile->arch ())->builtin_void;
 
       new_block->set_multidict
 	(mdict_create_linear (&objfile->objfile_obstack, NULL));
@@ -609,9 +608,10 @@ finalize_symtab (struct gdb_symtab *stab, struct objfile *objfile)
     {
       struct block *new_block;
 
-      new_block = (i == GLOBAL_BLOCK
-		   ? allocate_global_block (&objfile->objfile_obstack)
-		   : allocate_block (&objfile->objfile_obstack));
+      if (i == GLOBAL_BLOCK)
+	new_block = new (&objfile->objfile_obstack) global_block;
+      else
+	new_block = new (&objfile->objfile_obstack) block;
       new_block->set_multidict
 	(mdict_create_linear (&objfile->objfile_obstack, NULL));
       new_block->set_superblock (block_iter);
@@ -623,7 +623,7 @@ finalize_symtab (struct gdb_symtab *stab, struct objfile *objfile)
       bv->set_block (i, new_block);
 
       if (i == GLOBAL_BLOCK)
-	set_block_compunit_symtab (new_block, cust);
+	new_block->set_compunit_symtab (cust);
     }
 
   /* Fill up the superblock fields for the real blocks, using the
@@ -715,7 +715,7 @@ jit_reader_try_read_symtab (gdbarch *gdbarch, jit_code_entry *code_entry,
 			      code_entry->symfile_size))
 	status = 0;
     }
-  catch (const gdb_exception &e)
+  catch (const gdb_exception_error &e)
     {
       status = 0;
     }
@@ -1147,7 +1147,10 @@ jit_prepend_unwinder (struct gdbarch *gdbarch)
     }
 }
 
-/* Register any already created translations.  */
+/* Looks for the descriptor and registration symbols and breakpoints
+   the registration function.  If it finds both, it registers all the
+   already JITed code.  If it has already found the symbols, then it
+   doesn't try again.  */
 
 static void
 jit_inferior_init (inferior *inf)
@@ -1203,15 +1206,20 @@ jit_inferior_init (inferior *inf)
     }
 }
 
-/* Looks for the descriptor and registration symbols and breakpoints
-   the registration function.  If it finds both, it registers all the
-   already JITed code.  If it has already found the symbols, then it
-   doesn't try again.  */
+/* inferior_created observer.  */
 
 static void
 jit_inferior_created_hook (inferior *inf)
 {
   jit_inferior_init (inf);
+}
+
+/* inferior_execd observer.  */
+
+static void
+jit_inferior_execd_hook (inferior *exec_inf, inferior *follow_inf)
+{
+  jit_inferior_init (follow_inf);
 }
 
 /* Exported routine to call to re-set the jit breakpoints,
@@ -1304,7 +1312,7 @@ _initialize_jit ()
 	   &maintenanceinfolist);
 
   gdb::observers::inferior_created.attach (jit_inferior_created_hook, "jit");
-  gdb::observers::inferior_execd.attach (jit_inferior_created_hook, "jit");
+  gdb::observers::inferior_execd.attach (jit_inferior_execd_hook, "jit");
   gdb::observers::inferior_exit.attach (jit_inferior_exit_hook, "jit");
   gdb::observers::breakpoint_deleted.attach (jit_breakpoint_deleted, "jit");
 

@@ -1,6 +1,6 @@
 /* Exception (throw catch) mechanism, for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -26,7 +26,7 @@
 #include "ui-out.h"
 #include "serial.h"
 #include "gdbthread.h"
-#include "top.h"
+#include "ui.h"
 #include "gdbsupport/gdb_optional.h"
 
 static void
@@ -90,6 +90,7 @@ print_exception (struct ui_file *file, const struct gdb_exception &e)
   switch (e.reason)
     {
     case RETURN_QUIT:
+    case RETURN_FORCED_QUIT:
       annotate_quit ();
       break;
     case RETURN_ERROR:

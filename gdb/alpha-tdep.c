@@ -1,6 +1,6 @@
 /* Target-dependent code for the ALPHA architecture, for GDB, the GNU Debugger.
 
-   Copyright (C) 1993-2022 Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,7 +35,6 @@
 #include "reggroups.h"
 #include "arch-utils.h"
 #include "osabi.h"
-#include "block.h"
 #include "infcall.h"
 #include "trad-frame.h"
 
@@ -242,8 +241,8 @@ alpha_register_to_value (frame_info_ptr frame, int regnum,
   struct value *value = get_frame_register_value (frame, regnum);
 
   gdb_assert (value != NULL);
-  *optimizedp = value_optimized_out (value);
-  *unavailablep = !value_entirely_available (value);
+  *optimizedp = value->optimized_out ();
+  *unavailablep = !value->entirely_available ();
 
   if (*optimizedp || *unavailablep)
     {
@@ -254,7 +253,7 @@ alpha_register_to_value (frame_info_ptr frame, int regnum,
   /* Convert to VALTYPE.  */
 
   gdb_assert (valtype->length () == 4);
-  alpha_sts (gdbarch, out, value_contents_all (value).data ());
+  alpha_sts (gdbarch, out, value->contents_all ().data ());
 
   release_value (value);
   return 1;
@@ -320,7 +319,7 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   for (i = 0, m_arg = alpha_args; i < nargs; i++, m_arg++)
     {
       struct value *arg = args[i];
-      struct type *arg_type = check_typedef (value_type (arg));
+      struct type *arg_type = check_typedef (arg->type ());
 
       /* Cast argument to long if necessary as the compiler does it too.  */
       switch (arg_type->code ())
@@ -361,7 +360,7 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	      sp = (sp & -16) - 16;
 
 	      /* Write the real data into the stack.  */
-	      write_memory (sp, value_contents (arg).data (), 16);
+	      write_memory (sp, arg->contents ().data (), 16);
 
 	      /* Construct the indirection.  */
 	      arg_type = lookup_pointer_type (arg_type);
@@ -382,7 +381,7 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	      sp = (sp & -16) - 16;
 
 	      /* Write the real data into the stack.  */
-	      write_memory (sp, value_contents (arg).data (), 32);
+	      write_memory (sp, arg->contents ().data (), 32);
 
 	      /* Construct the indirection.  */
 	      arg_type = lookup_pointer_type (arg_type);
@@ -396,7 +395,7 @@ alpha_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       m_arg->len = arg_type->length ();
       m_arg->offset = accumulate_size;
       accumulate_size = (accumulate_size + m_arg->len + 7) & ~7;
-      m_arg->contents = value_contents (arg).data ();
+      m_arg->contents = arg->contents ().data ();
     }
 
   /* Determine required argument register loads, loading an argument register
@@ -1719,15 +1718,14 @@ alpha_software_single_step (struct regcache *regcache)
 static struct gdbarch *
 alpha_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
-
   /* Find a candidate among extant architectures.  */
   arches = gdbarch_list_lookup_by_info (arches, &info);
   if (arches != NULL)
     return arches->gdbarch;
 
-  alpha_gdbarch_tdep *tdep = new alpha_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new alpha_gdbarch_tdep));
+  alpha_gdbarch_tdep *tdep = gdbarch_tdep<alpha_gdbarch_tdep> (gdbarch);
 
   /* Lowest text address.  This is used by heuristic_proc_start()
      to decide when to stop looking.  */

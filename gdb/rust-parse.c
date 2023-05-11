@@ -1,6 +1,6 @@
 /* Rust expression parsing for GDB, the GNU debugger.
 
-   Copyright (C) 2016-2022 Free Software Foundation, Inc.
+   Copyright (C) 2016-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -69,7 +69,7 @@ static const char number_regex_text[] =
 #define INT_TEXT 5
 #define INT_TYPE 6
   "(0x[a-fA-F0-9_]+|0o[0-7_]+|0b[01_]+|[0-9][0-9_]*)"
-  "([iu](size|8|16|32|64))?"
+  "([iu](size|8|16|32|64|128))?"
   ")";
 /* The number of subexpressions to allocate space for, including the
    "0th" whole match subexpression.  */
@@ -126,7 +126,7 @@ enum token_type : int
 
 struct typed_val_int
 {
-  ULONGEST val;
+  gdb_mpz val;
   struct type *type;
 };
 
@@ -373,7 +373,9 @@ rust_parser::crate_name (const std::string &name)
 std::string
 rust_parser::super_name (const std::string &ident, unsigned int n_supers)
 {
-  const char *scope = block_scope (pstate->expression_context_block);
+  const char *scope = "";
+  if (pstate->expression_context_block != nullptr)
+    scope = pstate->expression_context_block->scope ();
   int offset;
 
   if (scope[0] == '\0')
@@ -419,7 +421,7 @@ munge_name_and_block (const char **name, const struct block **block)
   if (startswith (*name, "::"))
     {
       *name += 2;
-      *block = block_static_block (*block);
+      *block = (*block)->static_block ();
     }
 }
 
@@ -1005,7 +1007,6 @@ rust_parser::lex_number ()
   /* Parse the number.  */
   if (is_integer)
     {
-      uint64_t value;
       int radix = 10;
       int offset = 0;
 
@@ -1024,14 +1025,22 @@ rust_parser::lex_number ()
 	    }
 	}
 
-      const char *trailer;
-      value = strtoulst (number.c_str () + offset, &trailer, radix);
-      if (*trailer != '\0')
-	error (_("Integer literal is too large"));
-      if (implicit_i32 && value >= ((uint64_t) 1) << 31)
-	type = get_type ("i64");
+      if (!current_int_val.val.set (number.c_str () + offset, radix))
+	{
+	  /* Shouldn't be possible.  */
+	  error (_("Invalid integer"));
+	}
+      if (implicit_i32)
+	{
+	  static gdb_mpz sixty_three_bit = gdb_mpz::pow (2, 63);
+	  static gdb_mpz thirty_one_bit = gdb_mpz::pow (2, 31);
 
-      current_int_val.val = value;
+	  if (current_int_val.val >= sixty_three_bit)
+	    type = get_type ("i128");
+	  else if (current_int_val.val >= thirty_one_bit)
+	    type = get_type ("i64");
+	}
+
       current_int_val.type = type;
     }
   else
@@ -1181,7 +1190,7 @@ rust_parser::parse_array ()
       result = make_operation<rust_array_operation> (std::move (expr),
 						     std::move (rhs));
     }
-  else if (current_token == ',')
+  else if (current_token == ',' || current_token == ']')
     {
       std::vector<operation_up> ops;
       ops.push_back (std::move (expr));
@@ -1196,7 +1205,7 @@ rust_parser::parse_array ()
       int len = ops.size () - 1;
       result = make_operation<array_operation> (0, len, std::move (ops));
     }
-  else if (current_token != ']')
+  else
     error (_("',', ';', or ']' expected"));
 
   require (']');
@@ -1344,6 +1353,8 @@ rust_parser::parse_binop (bool required)
   OPERATION (ANDAND, 2, logical_and_operation)	\
   OPERATION (OROR, 1, logical_or_operation)
 
+#define ASSIGN_PREC 0
+
   operation_up start = parse_atom (required);
   if (start == nullptr)
     {
@@ -1376,7 +1387,7 @@ rust_parser::parse_binop (bool required)
 	  compound_assign_op = current_opcode;
 	  /* FALLTHROUGH */
 	case '=':
-	  precedence = 0;
+	  precedence = ASSIGN_PREC;
 	  lex ();
 	  break;
 
@@ -1396,9 +1407,13 @@ rust_parser::parse_binop (bool required)
 	  /* Arrange to pop the entire stack.  */
 	  precedence = -2;
 	  break;
-        }
+	}
 
-      while (precedence < operator_stack.back ().precedence
+      /* Make sure that assignments are right-associative while other
+	 operations are left-associative.  */
+      while ((precedence == ASSIGN_PREC
+	      ? precedence < operator_stack.back ().precedence
+	      : precedence <= operator_stack.back ().precedence)
 	     && operator_stack.size () > 1)
 	{
 	  rustop_item rhs = std::move (operator_stack.back ());
@@ -1548,9 +1563,11 @@ rust_parser::parse_field (operation_up &&lhs)
       break;
 
     case DECIMAL_INTEGER:
-      result = make_operation<rust_struct_anon> (current_int_val.val,
-						 std::move (lhs));
-      lex ();
+      {
+	int idx = current_int_val.val.as_integer<int> ();
+	result = make_operation<rust_struct_anon> (idx, std::move (lhs));
+	lex ();
+      }
       break;
 
     case INTEGER:
@@ -1651,7 +1668,7 @@ rust_parser::parse_array_type ()
 
   if (current_token != INTEGER && current_token != DECIMAL_INTEGER)
     error (_("integer expected"));
-  ULONGEST val = current_int_val.val;
+  ULONGEST val = current_int_val.val.as_integer<ULONGEST> ();
   lex ();
   require (']');
 

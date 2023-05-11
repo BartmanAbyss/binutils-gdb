@@ -1,5 +1,5 @@
 /* codeview.h - CodeView debug support
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -38,6 +38,7 @@
 
 #define CV_CFL_80386		0x03
 #define CV_CFL_X64		0xD0
+#define CV_CFL_ARM64		0xF6
 
 #define CHKSUM_TYPE_MD5		1
 

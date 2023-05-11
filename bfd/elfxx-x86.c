@@ -1,5 +1,5 @@
 /* x86 specific support for ELF
-   Copyright (C) 2017-2022 Free Software Foundation, Inc.
+   Copyright (C) 2017-2023 Free Software Foundation, Inc.
 
    This file is part of BFD, the Binary File Descriptor library.
 
@@ -1541,12 +1541,33 @@ elf_x86_size_or_finish_relative_reloc
 		    }
 		  else
 		    {
+		      bfd_byte *contents;
+
 		      if (rel.r_offset >= sec->size)
 			abort ();
+
+		      if (elf_section_data (sec)->this_hdr.contents
+			  != NULL)
+			contents
+			  = elf_section_data (sec)->this_hdr.contents;
+		      else
+			{
+			  if (!bfd_malloc_and_get_section (sec->owner,
+							   sec,
+							   &contents))
+			    info->callbacks->einfo
+			      /* xgettext:c-format */
+			      (_("%F%P: %pB: failed to allocate memory for section `%pA'\n"),
+			       info->output_bfd, sec);
+
+			  /* Cache the section contents for
+			     elf_link_input_bfd.  */
+			  elf_section_data (sec)->this_hdr.contents
+			    = contents;
+			}
 		      htab->elf_write_addend
 			(info->output_bfd, outrel->r_addend,
-			 (elf_section_data (sec)->this_hdr.contents
-			  + rel.r_offset));
+			 contents + rel.r_offset);
 		    }
 		}
 	    }
@@ -1783,7 +1804,7 @@ enum dynobj_sframe_plt_type
   SFRAME_PLT_SEC = 2
 };
 
-/* Create SFrame unwind info for the plt entries in the .plt section
+/* Create SFrame stack trace info for the plt entries in the .plt section
    of type PLT_SEC_TYPE.  */
 
 static bool
@@ -1798,7 +1819,7 @@ _bfd_x86_elf_create_sframe_plt (bfd *output_bfd,
   unsigned int plt0_entry_size;
   unsigned char func_info;
   unsigned int fre_type;
-  /* The dynamic plt section for which .sframe unwind information is being
+  /* The dynamic plt section for which .sframe stack trace information is being
      created.  */
   asection *dpltsec;
 
@@ -1811,7 +1832,7 @@ _bfd_x86_elf_create_sframe_plt (bfd *output_bfd,
 
   bed = get_elf_backend_data (output_bfd);
   htab = elf_x86_hash_table (info, bed->target_id);
-  /* Whether SFrame unwind info for plt0 is to be generated.  */
+  /* Whether SFrame stack trace info for plt0 is to be generated.  */
   plt0_generated_p = htab->plt.has_plt0;
   plt0_entry_size
     = (plt0_generated_p) ? htab->sframe_plt->plt0_entry_size : 0;
@@ -1857,8 +1878,7 @@ _bfd_x86_elf_create_sframe_plt (bfd *output_bfd,
 
   /* FRE type is dependent on the size of the function.  */
   fre_type = sframe_calc_fre_type (dpltsec->size);
-  func_info = sframe_fde_func_info (fre_type,
-				    SFRAME_FDE_TYPE_PCINC);
+  func_info = sframe_fde_create_func_info (fre_type, SFRAME_FDE_TYPE_PCINC);
 
   /* Add SFrame FDE and the associated FREs for plt0 if plt0 has been
      generated.  */
@@ -1886,9 +1906,10 @@ _bfd_x86_elf_create_sframe_plt (bfd *output_bfd,
       /* pltn entries use an SFrame FDE of type
 	 SFRAME_FDE_TYPE_PCMASK to exploit the repetitive
 	 pattern of the instructions in these entries.  Using this SFrame FDE
-	 type helps in keeping the unwind information for pltn entries
+	 type helps in keeping the SFrame stack trace info for pltn entries
 	 compact.  */
-      func_info	= sframe_fde_func_info (fre_type, SFRAME_FDE_TYPE_PCMASK);
+      func_info	= sframe_fde_create_func_info (fre_type,
+					       SFRAME_FDE_TYPE_PCMASK);
       /* Add the SFrame FDE for all PCs starting at the first pltn entry (hence,
 	 function start address = plt0_entry_size.  As usual, this will be
 	 updated later at _bfd_elf_merge_section_sframe, by when the
@@ -4415,20 +4436,6 @@ _bfd_x86_elf_link_setup_gnu_properties
 		  if (!bfd_set_section_alignment (sec, plt_alignment))
 		    goto error_alignment;
 		}
-	      else if (htab->params->bndplt && ABI_64_P (dynobj))
-		{
-		  /* Create the second PLT for Intel MPX support.  MPX
-		     PLT is supported only in 64-bit mode and is needed
-		     only for lazy binding.  */
-		  sec = bfd_make_section_anyway_with_flags (dynobj,
-							    ".plt.sec",
-							    pltflags);
-		  if (sec == NULL)
-		    info->callbacks->einfo (_("%F%P: failed to create BND PLT section\n"));
-
-		  if (!bfd_set_section_alignment (sec, non_lazy_plt_alignment))
-		    goto error_alignment;
-		}
 
 	      htab->plt_second = sec;
 	    }
@@ -4499,7 +4506,7 @@ _bfd_x86_elf_link_setup_gnu_properties
 
 	  htab->plt_sframe = sec;
 
-	  /* Second PLT is generated for Intel IBT / MPX Support + lazy plt.  */
+	  /* Second PLT is generated for Intel IBT + lazy plt.  */
 	  if (htab->plt_second != NULL)
 	    {
 	      sec = bfd_make_section_anyway_with_flags (dynobj,

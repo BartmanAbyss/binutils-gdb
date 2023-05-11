@@ -1,6 +1,6 @@
 /* Target-dependent code for the HP PA-RISC architecture.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    Contributed by the Center for Software Science at the
    University of Utah (pa-gdb-bugs@cs.utah.edu).
@@ -731,7 +731,7 @@ hppa32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
       for (i = 0; i < nargs; i++)
 	{
 	  struct value *arg = args[i];
-	  struct type *type = check_typedef (value_type (arg));
+	  struct type *type = check_typedef (arg->type ());
 	  /* The corresponding parameter that is pushed onto the
 	     stack, and [possibly] passed in a register.  */
 	  gdb_byte param_val[8];
@@ -745,7 +745,7 @@ hppa32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	      struct_ptr += align_up (type->length (), 8);
 	      if (write_pass)
 		write_memory (struct_end - struct_ptr,
-			      value_contents (arg).data (), type->length ());
+			      arg->contents ().data (), type->length ());
 	      store_unsigned_integer (param_val, 4, byte_order,
 				      struct_end - struct_ptr);
 	    }
@@ -757,13 +757,13 @@ hppa32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	      param_len = align_up (type->length (), 4);
 	      store_unsigned_integer
 		(param_val, param_len, byte_order,
-		 unpack_long (type, value_contents (arg).data ()));
+		 unpack_long (type, arg->contents ().data ()));
 	    }
 	  else if (type->code () == TYPE_CODE_FLT)
 	    {
 	      /* Floating point value store, right aligned.  */
 	      param_len = align_up (type->length (), 4);
-	      memcpy (param_val, value_contents (arg).data (), param_len);
+	      memcpy (param_val, arg->contents ().data (), param_len);
 	    }
 	  else
 	    {
@@ -771,7 +771,7 @@ hppa32_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 
 	      /* Small struct value are stored right-aligned.  */
 	      memcpy (param_val + param_len - type->length (),
-		      value_contents (arg).data (), type->length ());
+		      arg->contents ().data (), type->length ());
 
 	      /* Structures of size 5, 6 and 7 bytes are special in that
 		 the higher-ordered word is stored in the lower-ordered
@@ -910,7 +910,7 @@ static CORE_ADDR
 hppa64_convert_code_addr_to_fptr (struct gdbarch *gdbarch, CORE_ADDR code)
 {
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  struct obj_section *sec, *opd;
+  struct obj_section *sec;
 
   sec = find_pc_section (code);
 
@@ -921,25 +921,24 @@ hppa64_convert_code_addr_to_fptr (struct gdbarch *gdbarch, CORE_ADDR code)
   if (!(sec->the_bfd_section->flags & SEC_CODE))
     return code;
 
-  ALL_OBJFILE_OSECTIONS (sec->objfile, opd)
+  for (obj_section *opd : sec->objfile->sections ())
     {
       if (strcmp (opd->the_bfd_section->name, ".opd") == 0)
-	break;
-    }
-
-  if (opd < sec->objfile->sections_end)
-    {
-      for (CORE_ADDR addr = opd->addr (); addr < opd->endaddr (); addr += 2 * 8)
 	{
-	  ULONGEST opdaddr;
-	  gdb_byte tmp[8];
+	  for (CORE_ADDR addr = opd->addr ();
+	       addr < opd->endaddr ();
+	       addr += 2 * 8)
+	    {
+	      ULONGEST opdaddr;
+	      gdb_byte tmp[8];
 
-	  if (target_read_memory (addr, tmp, sizeof (tmp)))
-	      break;
-	  opdaddr = extract_unsigned_integer (tmp, sizeof (tmp), byte_order);
+	      if (target_read_memory (addr, tmp, sizeof (tmp)))
+		break;
+	      opdaddr = extract_unsigned_integer (tmp, sizeof (tmp), byte_order);
 
-	  if (opdaddr == code)
-	    return addr - 16;
+	      if (opdaddr == code)
+		return addr - 16;
+	    }
 	}
     }
 
@@ -965,7 +964,7 @@ hppa64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   for (i = 0; i < nargs; i++)
     {
       struct value *arg = args[i];
-      struct type *type = value_type (arg);
+      struct type *type = arg->type ();
       int len = type->length ();
       const bfd_byte *valbuf;
       bfd_byte fptrbuf[8];
@@ -1027,7 +1026,7 @@ hppa64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 		     the right halves of the floating point registers;
 		     the left halves are unused."  */
 		  regcache->cooked_write_part (regnum, offset % 8, len,
-					       value_contents (arg).data ());
+					       arg->contents ().data ());
 		}
 	    }
 	}
@@ -1051,7 +1050,7 @@ hppa64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	{
 	  ULONGEST codeptr, fptr;
 
-	  codeptr = unpack_long (type, value_contents (arg).data ());
+	  codeptr = unpack_long (type, arg->contents ().data ());
 	  fptr = hppa64_convert_code_addr_to_fptr (gdbarch, codeptr);
 	  store_unsigned_integer (fptrbuf, type->length (), byte_order,
 				  fptr);
@@ -1059,7 +1058,7 @@ hppa64_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 	}
       else
 	{
-	  valbuf = value_contents (arg).data ();
+	  valbuf = arg->contents ().data ();
 	}
 
       /* Always store the argument in memory.  */
@@ -2722,7 +2721,7 @@ hppa_frame_prev_register_helper (frame_info_ptr this_frame,
 	trad_frame_get_prev_register (this_frame, saved_regs,
 				      HPPA_PCOQ_HEAD_REGNUM);
 
-      pc = extract_unsigned_integer (value_contents_all (pcoq_val).data (),
+      pc = extract_unsigned_integer (pcoq_val->contents_all ().data (),
 				     size, byte_order);
       return frame_unwind_got_constant (this_frame, regnum, pc + 4);
     }
@@ -2982,16 +2981,15 @@ hppa_skip_trampoline_code (frame_info_ptr frame, CORE_ADDR pc)
 static struct gdbarch *
 hppa_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 {
-  struct gdbarch *gdbarch;
-
   /* find a candidate among the list of pre-declared architectures.  */
   arches = gdbarch_list_lookup_by_info (arches, &info);
   if (arches != NULL)
     return (arches->gdbarch);
 
   /* If none found, then allocate and initialize one.  */
-  hppa_gdbarch_tdep *tdep = new hppa_gdbarch_tdep;
-  gdbarch = gdbarch_alloc (&info, tdep);
+  gdbarch *gdbarch
+    = gdbarch_alloc (&info, gdbarch_tdep_up (new hppa_gdbarch_tdep));
+  hppa_gdbarch_tdep *tdep = gdbarch_tdep<hppa_gdbarch_tdep> (gdbarch);
 
   /* Determine from the bfd_arch_info structure if we are dealing with
      a 32 or 64 bits architecture.  If the bfd_arch_info is not available,

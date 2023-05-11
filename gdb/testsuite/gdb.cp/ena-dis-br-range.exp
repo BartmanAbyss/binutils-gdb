@@ -1,4 +1,4 @@
-# Copyright 2017-2022 Free Software Foundation, Inc.
+# Copyright 2017-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
 # multiple locations and breakpoints are found in
 # gdb.base/ena-dis-br.exp.
 
-if { [skip_cplus_tests] } { continue }
+require allow_cplus_tests
 
 standard_testfile .cc
 
@@ -29,7 +29,7 @@ if {[prepare_for_testing "failed to prepare" $testfile $srcfile {debug c++}]} {
     return -1
 }
 
-if ![runto 'marker'] then {
+if {![runto 'marker']} {
     return -1
 }
 

@@ -1,6 +1,6 @@
 /* Native-dependent code for FreeBSD x86.
 
-   Copyright (C) 2022 Free Software Foundation, Inc.
+   Copyright (C) 2022-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -27,6 +27,7 @@
 
 class x86_fbsd_nat_target : public x86bsd_nat_target<fbsd_nat_target>
 {
+public:
   bool supports_stopped_by_hw_breakpoint () override
   { return true; }
 

@@ -1,5 +1,5 @@
 /* read.h - of read.c
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -79,8 +79,8 @@ extern const char line_separator_chars[];
 
 /* Table of -I directories.  */
 extern const char **include_dirs;
-extern int include_dir_count;
-extern int include_dir_maxlen;
+extern size_t include_dir_count;
+extern size_t include_dir_maxlen;
 
 /* The offset in the absolute section.  */
 extern addressT abs_section_offset;
@@ -124,7 +124,9 @@ extern unsigned int next_char_of_string (void);
 extern void s_mri_sect (char *);
 extern char *mri_comment_field (char *);
 extern void mri_comment_end (char *, int);
-extern void add_include_dir (char *path);
+extern void init_include_dir (void);
+extern void add_include_dir (char *);
+extern FILE *search_and_open (const char *, char *);
 extern void cons (int nbytes);
 extern void demand_empty_rest_of_line (void);
 extern void emit_expr (expressionS *exp, unsigned int nbytes);
@@ -149,6 +151,8 @@ extern void stabs_generate_asm_file (void);
 extern void stabs_generate_asm_lineno (void);
 extern void stabs_generate_asm_func (const char *, const char *);
 extern void stabs_generate_asm_endfunc (const char *, const char *);
+extern void stabs_begin (void);
+extern void stabs_end (void);
 extern void do_repeat (size_t, const char *, const char *, const char *);
 extern void end_repeat (int);
 extern void do_parse_cons_expression (expressionS *, int);

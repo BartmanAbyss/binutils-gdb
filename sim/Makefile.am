@@ -1,6 +1,6 @@
 ## Process this file with automake to generate Makefile.in
 ##
-#   Copyright (C) 1993-2022 Free Software Foundation, Inc.
+#   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,36 +19,49 @@ AUTOMAKE_OPTIONS = dejagnu foreign no-dist subdir-objects
 ACLOCAL_AMFLAGS = -Im4 -I.. -I../config
 
 GNULIB_PARENT_DIR = ..
-@include_makefile@ $(GNULIB_PARENT_DIR)/gnulib/Makefile.gnulib.inc
+@am__include@ @am__quote@$(GNULIB_PARENT_DIR)/gnulib/Makefile.gnulib.inc@am__quote@
 
 srccom = $(srcdir)/common
 srcroot = $(srcdir)/..
 
-SUBDIRS = @subdirs@ $(SIM_SUBDIRS)
+SUBDIRS = @subdirs@
 
 SIM_PRIMARY_TARGET = @SIM_PRIMARY_TARGET@
-AM_MAKEFLAGS =
 
 ## We don't set some of these vars here, but we need to define them so they may
 ## be used consistently in local.mk files we include below.
 pkginclude_HEADERS =
 check_PROGRAMS =
 noinst_PROGRAMS =
+EXTRA_LIBRARIES =
 noinst_LIBRARIES =
 EXTRA_PROGRAMS =
+BUILT_SOURCES =
 
 CLEANFILES =
 DISTCLEANFILES =
 MOSTLYCLEANFILES = core
+## We build some objects ourselves directly that Automake doesn't track, so
+## make sure all objects in subdirs get cleaned up.
+MOSTLYCLEANFILES += $(SIM_ENABLED_ARCHES:%=%/*.o)
 
-AM_CFLAGS = $(WERROR_CFLAGS) $(WARN_CFLAGS)
+AM_CFLAGS = \
+	$(WERROR_CFLAGS) \
+	$(WARN_CFLAGS) \
+	$(AM_CFLAGS_$(subst -,_,$(@D))) \
+	$(AM_CFLAGS_$(subst -,_,$(@D)_$(@F)))
 AM_CPPFLAGS = \
 	$(INCGNU) \
+	-I$(srcroot) \
 	-I$(srcroot)/include \
 	-I../bfd \
 	-I.. \
+	-I$(@D) \
+	-I$(srcdir)/$(@D) \
 	$(SIM_HW_CFLAGS) \
-	$(SIM_INLINE)
+	$(SIM_INLINE) \
+	$(AM_CPPFLAGS_$(subst -,_,$(@D))) \
+	$(AM_CPPFLAGS_$(subst -,_,$(@D)_$(@F)))
 
 AM_CPPFLAGS_FOR_BUILD = \
 	-I$(srcroot)/include \
@@ -80,10 +93,16 @@ pkginclude_HEADERS += \
 	$(srcroot)/include/sim/sim.h
 endif
 
+## Used for our custom rules to calculate the dependency output base name.
+## This form aligns with Automake's default rules.
+SIM_DEPBASE = $(@D)/$(DEPDIR)/$(@F:.o=)
+## Actual full compile command like Automake's default rules.
+SIM_COMPILE = \
+	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(SIM_DEPBASE).Tpo -c -o $@ $< && \
+	$(am__mv) $(SIM_DEPBASE).Tpo $(SIM_DEPBASE).Po
+
 include common/local.mk
-if SIM_ENABLE_IGEN
 include igen/local.mk
-endif
 include testsuite/local.mk
 
 ## Arch includes must come after common/local.mk.
@@ -186,12 +205,6 @@ endif
 
 ## Helper targets for running make from the top-level when some subdirs still
 ## have Makefiles in subdirs.
-
-%/libsim.a: | $(SIM_ALL_RECURSIVE_DEPS)
-	$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F)
-
-%/nrun.o: common/nrun.c | %/libsim.a $(SIM_ALL_RECURSIVE_DEPS)
-	$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F)
 
 all-recursive: $(SIM_ALL_RECURSIVE_DEPS)
 

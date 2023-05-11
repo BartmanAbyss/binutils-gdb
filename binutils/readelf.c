@@ -1,5 +1,5 @@
 /* readelf.c -- display contents of an ELF format file
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Originally developed by Eric Youngdale <eric@andante.jic.com>
    Modifications by Nick Clifton <nickc@redhat.com>
@@ -4640,6 +4640,7 @@ get_segment_type (Filedata * filedata, unsigned long p_type)
     case PT_GNU_PROPERTY: return "GNU_PROPERTY";
     case PT_GNU_SFRAME: return "GNU_SFRAME";
 
+    case PT_OPENBSD_MUTABLE: return "OPENBSD_MUTABLE";
     case PT_OPENBSD_RANDOMIZE: return "OPENBSD_RANDOMIZE";
     case PT_OPENBSD_WXNEEDED: return "OPENBSD_WXNEEDED";
     case PT_OPENBSD_BOOTDATA: return "OPENBSD_BOOTDATA";
@@ -7803,9 +7804,9 @@ process_section_headers (Filedata * filedata)
 		    printf (_("       [<corrupt>]\n"));
 		  else
 		    {
-		      if (chdr.ch_type == ELFCOMPRESS_ZLIB)
+		      if (chdr.ch_type == ch_compress_zlib)
 			printf ("       ZLIB, ");
-		      else if (chdr.ch_type == ELFCOMPRESS_ZSTD)
+		      else if (chdr.ch_type == ch_compress_zstd)
 			printf ("       ZSTD, ");
 		      else
 			printf (_("       [<unknown>: 0x%x], "),
@@ -11551,7 +11552,7 @@ the .dynstr section doesn't match the DT_STRTAB and DT_STRSZ tags\n"));
 		filedata->dynamic_addr,
 		filedata->dynamic_nent);
       else
-	printf (ngettext ("\nDynamic section at offset %#" PRIx64 " contains %" PRId64 " entry:\n",
+	printf (ngettext ("\nDynamic section at offset %#" PRIx64 " contains %" PRIu64 " entry:\n",
 			  "\nDynamic section at offset %#" PRIx64 " contains %" PRIu64 " entries:\n",
 			  filedata->dynamic_nent),
 		filedata->dynamic_addr,
@@ -15267,15 +15268,30 @@ get_section_contents (Elf_Internal_Shdr * section, Filedata * filedata)
 /* Uncompresses a section that was compressed using zlib/zstd, in place.  */
 
 static bool
-uncompress_section_contents (bool is_zstd, unsigned char **buffer,
-			     uint64_t uncompressed_size, uint64_t *size)
+uncompress_section_contents (bool              is_zstd,
+			     unsigned char **  buffer,
+			     uint64_t          uncompressed_size,
+			     uint64_t *        size,
+			     uint64_t          file_size)
 {
   uint64_t compressed_size = *size;
   unsigned char *compressed_buffer = *buffer;
-  unsigned char *uncompressed_buffer = xmalloc (uncompressed_size);
+  unsigned char *uncompressed_buffer = NULL;
   z_stream strm;
   int rc;
 
+  /* Similar to _bfd_section_size_insane() in the BFD library we expect an
+     upper limit of ~10x compression.  Any compression larger than that is
+     thought to be due to fuzzing of the compression header.  */
+  if (uncompressed_size > file_size * 10)
+    {
+      error (_("Uncompressed section size is suspiciously large: 0x%" PRIu64 "\n"),
+	       uncompressed_size);
+      goto fail;
+    }
+
+  uncompressed_buffer = xmalloc (uncompressed_size);
+  
   if (is_zstd)
     {
 #ifdef HAVE_ZSTD
@@ -15369,10 +15385,10 @@ dump_section_as_strings (Elf_Internal_Shdr * section, Filedata * filedata)
 	       by get_compression_header.  */
 	    goto error_out;
 
-	  if (chdr.ch_type == ELFCOMPRESS_ZLIB)
+	  if (chdr.ch_type == ch_compress_zlib)
 	    ;
 #ifdef HAVE_ZSTD
-	  else if (chdr.ch_type == ELFCOMPRESS_ZSTD)
+	  else if (chdr.ch_type == ch_compress_zstd)
 	    is_zstd = true;
 #endif
 	  else
@@ -15405,7 +15421,7 @@ dump_section_as_strings (Elf_Internal_Shdr * section, Filedata * filedata)
       if (uncompressed_size)
 	{
 	  if (uncompress_section_contents (is_zstd, &start, uncompressed_size,
-					   &new_size))
+					   &new_size, filedata->file_size))
 	    num_bytes = new_size;
 	  else
 	    {
@@ -15592,10 +15608,10 @@ dump_section_as_bytes (Elf_Internal_Shdr *section,
 	       by get_compression_header.  */
 	    goto error_out;
 
-	  if (chdr.ch_type == ELFCOMPRESS_ZLIB)
+	  if (chdr.ch_type == ch_compress_zlib)
 	    ;
 #ifdef HAVE_ZSTD
-	  else if (chdr.ch_type == ELFCOMPRESS_ZSTD)
+	  else if (chdr.ch_type == ch_compress_zstd)
 	    is_zstd = true;
 #endif
 	  else
@@ -15628,7 +15644,7 @@ dump_section_as_bytes (Elf_Internal_Shdr *section,
       if (uncompressed_size)
 	{
 	  if (uncompress_section_contents (is_zstd, &start, uncompressed_size,
-					   &new_size))
+					   &new_size, filedata->file_size))
 	    {
 	      section_size = new_size;
 	    }
@@ -16024,10 +16040,10 @@ load_specific_debug_section (enum dwarf_section_display_enum  debug,
 	       by get_compression_header.  */
 	    return false;
 
-	  if (chdr.ch_type == ELFCOMPRESS_ZLIB)
+	  if (chdr.ch_type == ch_compress_zlib)
 	    ;
 #ifdef HAVE_ZSTD
-	  else if (chdr.ch_type == ELFCOMPRESS_ZSTD)
+	  else if (chdr.ch_type == ch_compress_zstd)
 	    is_zstd = true;
 #endif
 	  else
@@ -16060,7 +16076,7 @@ load_specific_debug_section (enum dwarf_section_display_enum  debug,
       if (uncompressed_size)
 	{
 	  if (uncompress_section_contents (is_zstd, &start, uncompressed_size,
-					   &size))
+					   &size, filedata->file_size))
 	    {
 	      /* Free the compressed buffer, update the section buffer
 		 and the section size if uncompress is successful.  */
@@ -19547,6 +19563,10 @@ get_note_type (Filedata * filedata, unsigned e_type)
 	return _("NT_ARM_PACG_KEYS (ARM pointer authentication generic keys)");
       case NT_ARM_TAGGED_ADDR_CTRL:
 	return _("NT_ARM_TAGGED_ADDR_CTRL (AArch tagged address control)");
+      case NT_ARM_SSVE:
+	return _("NT_ARM_SSVE (AArch64 streaming SVE registers)");
+      case NT_ARM_ZA:
+	return _("NT_ARM_ZA (AArch64 SME ZA register)");
       case NT_ARM_PAC_ENABLED_KEYS:
 	return _("NT_ARM_PAC_ENABLED_KEYS (AArch64 pointer authentication enabled keys)");
       case NT_ARC_V2:
@@ -20719,6 +20739,38 @@ get_openbsd_elfcore_note_type (Filedata * filedata, unsigned e_type)
 }
 
 static const char *
+get_qnx_elfcore_note_type (Filedata * filedata, unsigned e_type)
+{
+  switch (e_type)
+    {
+    case QNT_DEBUG_FULLPATH:
+      return _("QNX debug fullpath");
+    case QNT_DEBUG_RELOC:
+      return _("QNX debug relocation");
+    case QNT_STACK:
+      return _("QNX stack");
+    case QNT_GENERATOR:
+      return _("QNX generator");
+    case QNT_DEFAULT_LIB:
+      return _("QNX default library");
+    case QNT_CORE_SYSINFO:
+      return _("QNX core sysinfo");
+    case QNT_CORE_INFO:
+      return _("QNX core info");
+    case QNT_CORE_STATUS:
+      return _("QNX core status");
+    case QNT_CORE_GREG:
+      return _("QNX general registers");
+    case QNT_CORE_FPREG:
+      return _("QNX floating point registers");
+    case QNT_LINK_MAP:
+      return _("QNX link map");
+    }
+
+  return get_note_type (filedata, e_type);
+}
+
+static const char *
 get_stapsdt_note_type (unsigned e_type)
 {
   static char buff[64];
@@ -21642,6 +21694,35 @@ print_amdgpu_note (Elf_Internal_Note *pnote)
 #endif
 }
 
+static bool
+print_qnx_note (Elf_Internal_Note *pnote)
+{
+  switch (pnote->type)
+    {
+    case QNT_STACK:
+      if (pnote->descsz != 12)
+	goto desc_size_fail;
+
+      printf (_("   Stack Size: 0x%" PRIx32 "\n"),
+	      (unsigned) byte_get ((unsigned char *) pnote->descdata, 4));
+      printf (_("   Stack allocated: %" PRIx32 "\n"),
+	      (unsigned) byte_get ((unsigned char *) pnote->descdata + 4, 4));
+      printf (_("   Executable: %s\n"),
+	      ((unsigned) byte_get ((unsigned char *) pnote->descdata + 8, 1)) ? "no": "yes");
+      break;
+
+    default:
+      print_note_contents_hex(pnote);
+    }
+  return true;
+
+desc_size_fail:
+  printf (_("  <corrupt - data size is too small>\n"));
+  error (_("corrupt QNX note: data size is too small\n"));
+  return false;
+}
+
+
 /* Note that by the ELF standard, the name field is already null byte
    terminated, and namesz includes the terminating null byte.
    I.E. the value of namesz for the name "FSF" is 4.
@@ -21687,6 +21768,10 @@ process_note (Elf_Internal_Note *  pnote,
   else if (startswith (pnote->namedata, "OpenBSD"))
     /* OpenBSD-specific core file notes.  */
     nt = get_openbsd_elfcore_note_type (filedata, pnote->type);
+
+  else if (startswith (pnote->namedata, "QNX"))
+    /* QNX-specific core file notes.  */
+    nt = get_qnx_elfcore_note_type (filedata, pnote->type);
 
   else if (startswith (pnote->namedata, "SPU/"))
     {
@@ -21742,6 +21827,8 @@ process_note (Elf_Internal_Note *  pnote,
   else if (startswith (pnote->namedata, "AMDGPU")
 	   && pnote->type == NT_AMDGPU_METADATA)
     return print_amdgpu_note (pnote);
+  else if (startswith (pnote->namedata, "QNX"))
+    return print_qnx_note (pnote);
 
   print_note_contents_hex (pnote);
   return true;
