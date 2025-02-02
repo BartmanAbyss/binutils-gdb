@@ -1,6 +1,6 @@
 /* Top level stuff for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
-#include "gdbcmd.h"
+#include "exceptions.h"
 #include "cli/cli-cmds.h"
 #include "cli/cli-script.h"
 #include "cli/cli-setshow.h"
@@ -77,6 +76,7 @@
 
 #if defined(TUI)
 # include "tui/tui.h"
+# include "tui/tui-io.h"
 #endif
 
 #ifndef O_NOCTTY
@@ -84,10 +84,6 @@
 #endif
 
 extern void initialize_all_files (void);
-
-#define PROMPT(X) the_prompts.prompt_stack[the_prompts.top + X].prompt
-#define PREFIX(X) the_prompts.prompt_stack[the_prompts.top + X].prefix
-#define SUFFIX(X) the_prompts.prompt_stack[the_prompts.top + X].suffix
 
 /* Default command line prompt.  This is overridden in some configs.  */
 
@@ -217,10 +213,6 @@ void (*deprecated_print_frame_info_listing_hook) (struct symtab * s,
 /* Replaces most of query.  */
 
 int (*deprecated_query_hook) (const char *, va_list);
-
-/* Replaces most of warning.  */
-
-void (*deprecated_warning_hook) (const char *, va_list);
 
 /* These three functions support getting lines of text from the user.
    They are used in sequence.  First deprecated_readline_begin_hook is
@@ -359,7 +351,7 @@ prepare_execute_command ()
      it.  For the duration of the command, though, use the dcache to
      help things like backtrace.  */
   if (non_stop)
-    target_dcache_invalidate ();
+    target_dcache_invalidate (current_program_space->aspace);
 
   return scoped_value_mark ();
 }
@@ -392,7 +384,7 @@ check_frame_language_change (void)
   /* FIXME: This should be cacheing the frame and only running when
      the frame changes.  */
 
-  if (has_stack_frames ())
+  if (warn_frame_lang_mismatch && has_stack_frames ())
     {
       enum language flang;
 
@@ -470,6 +462,8 @@ execute_command (const char *p, int from_tty)
       cleanup_if_error.release ();
       return;
     }
+
+  std::string cmd_copy = p;
 
   target_log_command (p);
 
@@ -551,12 +545,10 @@ execute_command (const char *p, int from_tty)
 	   that can be followed by its args), report the list of
 	   subcommands.  */
 	{
-	  std::string prefixname = c->prefixname ();
-	  std::string prefixname_no_space
-	    = prefixname.substr (0, prefixname.length () - 1);
+	  std::string prefixname = c->prefixname_no_space ();
 	  gdb_printf
 	    ("\"%s\" must be followed by the name of a subcommand.\n",
-	     prefixname_no_space.c_str ());
+	     prefixname.c_str ());
 	  help_list (*c->subcommands, prefixname.c_str (), all_commands,
 		     gdb_stdout);
 	}
@@ -577,7 +569,7 @@ execute_command (const char *p, int from_tty)
 	 We need to lookup the command again since during its execution,
 	 a command may redefine itself.  In this case, C pointer
 	 becomes invalid so we need to look it up again.  */
-      const char *cmd2 = cmd_start;
+      const char *cmd2 = cmd_copy.c_str ();
       c = lookup_cmd (&cmd2, cmdlist, "", nullptr, 1, 1);
       if (c != nullptr)
 	execute_cmd_post_hook (c);
@@ -600,9 +592,10 @@ execute_command (const char *p, int from_tty)
   cleanup_if_error.release ();
 }
 
-/* See gdbcmd.h.  */
+/* Run FN.  Send its output to FILE, do not display it to the screen.
+   The global BATCH_FLAG will be temporarily set to true.  */
 
-void
+static void
 execute_fn_to_ui_file (struct ui_file *file, std::function<void(void)> fn)
 {
   /* GDB_STDOUT should be better already restored during these
@@ -611,25 +604,21 @@ execute_fn_to_ui_file (struct ui_file *file, std::function<void(void)> fn)
 
   scoped_restore save_async = make_scoped_restore (&current_ui->async, 0);
 
-  {
-    ui_out_redirect_pop redirect_popper (current_uiout, file);
+  ui_out_redirect_pop redirect_popper (current_uiout, file);
 
-    scoped_restore save_stdout
-      = make_scoped_restore (&gdb_stdout, file);
-    scoped_restore save_stderr
-      = make_scoped_restore (&gdb_stderr, file);
-    scoped_restore save_stdlog
-      = make_scoped_restore (&gdb_stdlog, file);
-    scoped_restore save_stdtarg
-      = make_scoped_restore (&gdb_stdtarg, file);
-    scoped_restore save_stdtargerr
-      = make_scoped_restore (&gdb_stdtargerr, file);
+  scoped_restore save_stdout
+    = make_scoped_restore (&gdb_stdout, file);
+  scoped_restore save_stderr
+    = make_scoped_restore (&gdb_stderr, file);
+  scoped_restore save_stdlog
+    = make_scoped_restore (&gdb_stdlog, file);
+  scoped_restore save_stdtarg
+    = make_scoped_restore (&gdb_stdtarg, file);
 
-    fn ();
-  }
+  fn ();
 }
 
-/* See gdbcmd.h.  */
+/* See top.h.  */
 
 void
 execute_fn_to_string (std::string &res, std::function<void(void)> fn,
@@ -637,22 +626,12 @@ execute_fn_to_string (std::string &res, std::function<void(void)> fn,
 {
   string_file str_file (term_out);
 
-  try
-    {
-      execute_fn_to_ui_file (&str_file, fn);
-    }
-  catch (...)
-    {
-      /* Finally.  */
-      res = std::move (str_file.string ());
-      throw;
-    }
+  SCOPE_EXIT { res = str_file.release (); };
 
-  /* And finally.  */
-  res = std::move (str_file.string ());
+  execute_fn_to_ui_file (&str_file, fn);
 }
 
-/* See gdbcmd.h.  */
+/* See top.h.  */
 
 void
 execute_command_to_ui_file (struct ui_file *file,
@@ -661,7 +640,7 @@ execute_command_to_ui_file (struct ui_file *file,
   execute_fn_to_ui_file (file, [=]() { execute_command (p, from_tty); });
 }
 
-/* See gdbcmd.h.  */
+/* See top.h.  */
 
 void
 execute_command_to_string (std::string &res, const char *p, int from_tty,
@@ -671,7 +650,7 @@ execute_command_to_string (std::string &res, const char *p, int from_tty,
 			term_out);
 }
 
-/* See gdbcmd.h.  */
+/* See top.h.  */
 
 void
 execute_command_to_string (const char *p, int from_tty,
@@ -956,6 +935,11 @@ gdb_readline_wrapper_line (gdb::unique_xmalloc_ptr<char> &&line)
   saved_after_char_processing_hook = after_char_processing_hook;
   after_char_processing_hook = NULL;
 
+#if defined(TUI)
+  if (tui_active)
+    tui_inject_newline_into_command_window ();
+#endif
+
   /* Prevent parts of the prompt from being redisplayed if annotations
      are enabled, and readline's state getting out of sync.  We'll
      reinstall the callback handler, which puts the terminal in raw
@@ -1064,11 +1048,14 @@ static int operate_saved_history = -1;
 static void
 gdb_rl_operate_and_get_next_completion (void)
 {
-  int delta = where_history () - operate_saved_history;
+  if (operate_saved_history != -1)
+    {
+      int delta = where_history () - operate_saved_history;
 
-  /* The `key' argument to rl_get_previous_history is ignored.  */
-  rl_get_previous_history (delta, 0);
-  operate_saved_history = -1;
+      /* The `key' argument to rl_get_previous_history is ignored.  */
+      rl_get_previous_history (delta, 0);
+      operate_saved_history = -1;
+    }
 
   /* readline doesn't automatically update the display for us.  */
   rl_redisplay ();
@@ -1093,9 +1080,10 @@ gdb_rl_operate_and_get_next (int count, int key)
   /* Find the current line, and find the next line to use.  */
   where = where_history();
 
-  if ((history_is_stifled () && (history_length >= history_max_entries))
-      || (where >= history_length - 1))
+  if (history_is_stifled () && history_length >= history_max_entries)
     operate_saved_history = where;
+  else if (where >= history_length - 1)
+    operate_saved_history = -1;
   else
     operate_saved_history = where + 1;
 
@@ -1323,7 +1311,7 @@ print_gdb_version (struct ui_file *stream, bool interactive)
   /* Second line is a copyright notice.  */
 
   gdb_printf (stream,
-	      "Copyright (C) 2023 Free Software Foundation, Inc.\n");
+	      "Copyright (C) 2024 Free Software Foundation, Inc.\n");
 
   /* Following the copyright is a brief statement that the program is
      free software, that users are free to copy and change it on
@@ -1340,8 +1328,9 @@ There is NO WARRANTY, to the extent permitted by law.",
   if (!interactive)
     return;
 
-  gdb_printf (stream, ("\nType \"show copying\" and "
-		       "\"show warranty\" for details.\n"));
+  gdb_printf (stream, ("\nType \"%ps\" and \"%ps\" for details.\n"),
+	      styled_string (command_style.style (), "show copying"),
+	      styled_string (command_style.style (), "show warranty"));
 
   /* After the required info we print the configuration information.  */
 
@@ -1357,8 +1346,8 @@ There is NO WARRANTY, to the extent permitted by law.",
     }
   gdb_printf (stream, "\".\n");
 
-  gdb_printf (stream, _("Type \"show configuration\" "
-			"for configuration details.\n"));
+  gdb_printf (stream, _("Type \"%ps\" for configuration details.\n"),
+	      styled_string (command_style.style (), "show configuration"));
 
   if (REPORT_BUGS_TO[0])
     {
@@ -1374,10 +1363,11 @@ resources online at:\n    <%ps>."),
 	      styled_string (file_name_style.style (),
 			     "http://www.gnu.org/software/gdb/documentation/"));
   gdb_printf (stream, "\n\n");
-  gdb_printf (stream, _("For help, type \"help\".\n"));
+  gdb_printf (stream, _("For help, type \"%ps\".\n"),
+	      styled_string (command_style.style (), "help"));
   gdb_printf (stream,
-	      _("Type \"apropos word\" to search for commands \
-related to \"word\"."));
+	      _("Type \"%ps\" to search for commands related to \"word\"."),
+	      styled_string (command_style.style (), "apropos word"));
 }
 
 /* Print the details of GDB build-time configuration.  */
@@ -1388,6 +1378,11 @@ print_gdb_configuration (struct ui_file *stream)
 This GDB was configured as follows:\n\
    configure --host=%s --target=%s\n\
 "), host_name, target_name);
+
+#ifdef ENABLE_TARGETS
+  gdb_printf (stream, _("\
+	     --enable-targets=%s\n"), ENABLE_TARGETS);
+#endif
 
   gdb_printf (stream, _("\
 	     --with-auto-load-dir=%s\n\
@@ -1558,6 +1553,16 @@ This GDB was configured as follows:\n\
 "));
 #endif
 
+#ifdef HAVE_READLINE_READLINE_H
+  gdb_printf (stream, _("\
+	     --with-system-readline\n\
+"));
+#else
+  gdb_printf (stream, _("\
+	     --without-system-readline\n\
+"));
+#endif
+
 #ifdef RELOC_SRCDIR
   gdb_printf (stream, _("\
 	     --with-relocated-sources=%s\n\
@@ -1568,6 +1573,12 @@ This GDB was configured as follows:\n\
     gdb_printf (stream, _("\
 	     --with-separate-debug-dir=%s%s\n\
 "), DEBUGDIR, DEBUGDIR_RELOCATABLE ? " (relocatable)" : "");
+
+#ifdef ADDITIONAL_DEBUG_DIRS
+  gdb_printf (stream, _ ("\
+	     --with-additional-debug-dirs=%s\n\
+"), ADDITIONAL_DEBUG_DIRS);
+#endif
 
   if (TARGET_SYSTEM_ROOT[0])
     gdb_printf (stream, _("\
@@ -1590,6 +1601,16 @@ This GDB was configured as follows:\n\
 (\"Relocatable\" means the directory can be moved with the GDB installation\n\
 tree, and GDB will still find it.)\n\
 "));
+
+  gdb_printf (stream, "\n");
+  gdb_printf (stream, _("GNU Readline library version: %s\t%s\n"),
+	      rl_library_version,
+#ifdef HAVE_READLINE_READLINE_H
+	      "(system)"
+#else
+	      "(internal)"
+#endif
+	      );
 }
 
 
@@ -1783,12 +1804,6 @@ quit_force (int *exit_arg, int from_tty)
       exception_print (gdb_stderr, ex);
     }
 
-  /* Destroy any values currently allocated now instead of leaving it
-     to global destructors, because that may be too late.  For
-     example, the destructors of xmethod values call into the Python
-     runtime, which is finalized via a final cleanup.  */
-  finalize_values ();
-
   /* Do any final cleanups before exiting.  */
   try
     {
@@ -1798,6 +1813,8 @@ quit_force (int *exit_arg, int from_tty)
     {
       exception_print (gdb_stderr, ex);
     }
+
+  ext_lang_shutdown ();
 
   exit (exit_code);
 }
@@ -2085,7 +2102,7 @@ set_history_filename (const char *args,
      that was read.  */
   if (!history_filename.empty ()
       && !IS_ABSOLUTE_PATH (history_filename.c_str ()))
-    history_filename = gdb_abspath (history_filename.c_str ());
+    history_filename = gdb_abspath (history_filename);
 }
 
 /* Whether we're in quiet startup mode.  */
@@ -2111,6 +2128,17 @@ show_startup_quiet (struct ui_file *file, int from_tty,
 }
 
 static void
+init_colorsupport_var ()
+{
+  const std::vector<color_space> &cs = colorsupport ();
+  std::string s;
+  for (color_space c : cs)
+    s.append (s.empty () ? "" : ",").append (color_space_name (c));
+  struct internalvar *colorsupport_var = create_internalvar ("_colorsupport");
+  set_internalvar_string (colorsupport_var, s.c_str ());
+}
+
+static void
 init_main (void)
 {
   /* Initialize the prompt to a simple "(gdb) " prompt or to whatever
@@ -2123,10 +2151,6 @@ init_main (void)
   write_history_p = 0;
 
   /* Setup important stuff for command line editing.  */
-  rl_completion_word_break_hook = gdb_completion_word_break_characters;
-  rl_attempted_completion_function = gdb_rl_attempted_completion_function;
-  set_rl_completer_word_break_characters (default_word_break_characters ());
-  rl_completer_quote_characters = get_gdb_completer_quote_characters ();
   rl_completion_display_matches_hook = cli_display_match_list;
   rl_readline_name = "gdb";
   rl_terminal_name = getenv ("TERM");
@@ -2256,7 +2280,7 @@ input settings."),
 
   add_setshow_boolean_cmd ("startup-quietly", class_support,
 			       &startup_quiet, _("\
-Set whether GDB should start up quietly."), _("		\
+Set whether GDB should start up quietly."), _("\
 Show whether GDB should start up quietly."), _("\
 This setting will not affect the current session.  Instead this command\n\
 should be added to the .gdbearlyinit file in the users home directory to\n\
@@ -2318,6 +2342,9 @@ gdb_init ()
      during startup.  */
   set_language (language_c);
   expected_language = current_language;	/* Don't warn about the change.  */
+
+  /* Create $_colorsupport convenience variable.  */
+  init_colorsupport_var ();
 }
 
 void _initialize_top ();

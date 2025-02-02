@@ -1,4 +1,4 @@
-# Copyright 2022-2023 Free Software Foundation, Inc.
+# Copyright 2022-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from .startup import in_gdb_thread, exec_and_log, log
+from .startup import exec_and_log, in_gdb_thread, log
 
 
 @in_gdb_thread
@@ -22,4 +22,4 @@ def set_thread(thread_id):
     if thread_id == 0:
         log("+++ Thread == 0 +++")
     else:
-        exec_and_log(f"thread {thread_id}")
+        exec_and_log("thread " + str(thread_id))

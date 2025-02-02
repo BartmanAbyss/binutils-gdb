@@ -1,5 +1,5 @@
 /* Darwin support for GDB, the GNU debugger.
-   Copyright (C) 2008-2023 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    Contributed by AdaCore.
 
@@ -18,13 +18,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "bfd.h"
 #include "symfile.h"
 #include "objfiles.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "gdbcore.h"
 #include "mach-o.h"
 #include "aout/stab_gnu.h"
@@ -292,7 +291,7 @@ macho_symtab_read (minimal_symbol_reader &reader,
 		    case N_FUN:
 		      if (sym->name == NULL || sym->name[0] == 0)
 			break;
-		      /* Fall through.  */
+		      [[fallthrough]];
 		    case N_STSYM:
 		      /* Interesting symbol.  */
 		      nbr_syms++;
@@ -391,12 +390,14 @@ static CORE_ADDR
 macho_resolve_oso_sym_with_minsym (struct objfile *main_objfile, asymbol *sym)
 {
   /* For common symbol and global symbols, use the min symtab.  */
-  struct bound_minimal_symbol msym;
   const char *name = sym->name;
 
-  if (name[0] == bfd_get_symbol_leading_char (main_objfile->obfd.get ()))
+  if (*name != '\0'
+      && *name == bfd_get_symbol_leading_char (main_objfile->obfd.get ()))
     ++name;
-  msym = lookup_minimal_symbol (name, NULL, main_objfile);
+
+  bound_minimal_symbol msym
+    = lookup_minimal_symbol (current_program_space, name, main_objfile);
   if (msym.minsym == NULL)
     {
       warning (_("can't find symbol '%s' in minsymtab"), name);
@@ -433,7 +434,8 @@ macho_add_oso_symfile (oso_el *oso, const gdb_bfd_ref_ptr &abfd,
       return;
     }
 
-  if (abfd->my_archive == NULL && oso->mtime != bfd_get_mtime (abfd.get ()))
+  if (abfd->my_archive == nullptr
+      && oso->mtime != gdb_bfd_get_mtime (abfd.get ()))
     {
       warning (_("`%s': file time stamp mismatch."), oso->name);
       return;
@@ -446,8 +448,6 @@ macho_add_oso_symfile (oso_el *oso, const gdb_bfd_ref_ptr &abfd,
       warning (_("`%s': can't create hash table"), oso->name);
       return;
     }
-
-  bfd_set_cacheable (abfd.get (), 1);
 
   /* Read symbols table.  */
   storage = bfd_get_symtab_upper_bound (abfd.get ());
@@ -786,6 +786,8 @@ macho_symfile_read (struct objfile *objfile, symfile_add_flags symfile_flags)
      macho_symfile_read_all_oso at the end of this function.  */
   gdb::def_vector<asymbol *> symbol_table;
 
+  dwarf2_initialize_objfile (objfile);
+
   /* Get symbols from the symbol table only if the file is an executable.
      The symbol table of object files is not relocated and is expected to
      be in the executable.  */
@@ -823,9 +825,6 @@ macho_symfile_read (struct objfile *objfile, symfile_add_flags symfile_flags)
 	}
 
       /* Try to read .eh_frame / .debug_frame.  */
-      /* First, locate these sections.  We ignore the result status
-	 as it only checks for debug info.  */
-      dwarf2_has_info (objfile, NULL);
       dwarf2_build_frame_info (objfile);
 
       /* Check for DSYM file.  */
@@ -853,12 +852,6 @@ macho_symfile_read (struct objfile *objfile, symfile_add_flags symfile_flags)
 	  /* Don't try to read dwarf2 from main file or shared libraries.  */
 	  return;
 	}
-    }
-
-  if (dwarf2_has_info (objfile, NULL))
-    {
-      /* DWARF 2 sections */
-      dwarf2_initialize_objfile (objfile);
     }
 
   /* Then the oso.  */

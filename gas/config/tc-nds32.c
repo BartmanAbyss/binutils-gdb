@@ -1,5 +1,5 @@
 /* tc-nds32.c -- Assemble for the nds32
-   Copyright (C) 2012-2023 Free Software Foundation, Inc.
+   Copyright (C) 2012-2025 Free Software Foundation, Inc.
    Contributed by Andes Technology Corporation.
 
    This file is part of GAS, the GNU Assembler.
@@ -2313,8 +2313,8 @@ enum options
   OPTION_OPTIMIZE_SPACE
 };
 
-const char *md_shortopts = "m:O:";
-struct option md_longopts[] =
+const char md_shortopts[] = "m:O:";
+const struct option md_longopts[] =
 {
   {"O1", no_argument, NULL, OPTION_OPTIMIZE},
   {"Os", no_argument, NULL, OPTION_OPTIMIZE_SPACE},
@@ -2334,7 +2334,7 @@ struct option md_longopts[] =
   {NULL, no_argument, NULL, 0}
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 struct nds32_parse_option_table
 {
@@ -2519,6 +2519,7 @@ parse_expression (char *str, expressionS *exp)
   tmp = input_line_pointer;	/* Save line pointer.  */
   input_line_pointer = str;
   expression (exp);
+  resolve_register (exp);
   s = input_line_pointer;
   input_line_pointer = tmp;	/* Restore line pointer.  */
 
@@ -4571,6 +4572,7 @@ nds32_asm_parse_operand (struct nds32_asm_desc *pdesc ATTRIBUTE_UNUSED,
   hold = input_line_pointer;
   input_line_pointer = *pstr;
   expression (pexp);
+  resolve_register (pexp);
   *pstr = input_line_pointer;
   input_line_pointer = hold;
 
@@ -7824,9 +7826,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
   arelent *reloc;
   bfd_reloc_code_real_type code;
 
-  reloc = XNEW (arelent);
-
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   reloc->address = fixP->fx_frag->fr_address + fixP->fx_where;
 

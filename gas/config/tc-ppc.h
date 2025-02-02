@@ -1,5 +1,5 @@
 /* tc-ppc.h -- Header file for tc-ppc.c.
-   Copyright (C) 1994-2023 Free Software Foundation, Inc.
+   Copyright (C) 1994-2025 Free Software Foundation, Inc.
    Written by Ian Lance Taylor, Cygnus Support.
 
    This file is part of GAS, the GNU Assembler.
@@ -73,14 +73,14 @@ extern const char *ppc_target_format (void);
 #define WORKING_DOT_WORD
 
 #define MAX_MEM_FOR_RS_ALIGN_CODE 4
-#define HANDLE_ALIGN(FRAGP)						\
+#define HANDLE_ALIGN(SEC, FRAGP)						\
   if ((FRAGP)->fr_type == rs_align_code)				\
-    ppc_handle_align (FRAGP);
+    ppc_handle_align (SEC, FRAGP);
 
 extern unsigned int ppc_nop_select (void);
 #define NOP_OPCODE ppc_nop_select ()
 
-extern void ppc_handle_align (struct frag *);
+extern void ppc_handle_align (segT, struct frag *);
 extern void ppc_frag_check (struct frag *);
 
 #ifdef OBJ_ELF
@@ -149,7 +149,7 @@ struct ppc_tc_sy
 #define OBJ_COFF_MAX_AUXENTRIES 4
 
 /* Square and curly brackets are permitted in symbol names.  */
-#define LEX_BR 3
+#define LEX_BR (LEX_BEGIN_NAME | LEX_NAME)
 
 /* Canonicalize the symbol name.  */
 #define tc_canonicalize_symbol_name(name) ppc_canonicalize_symbol_name (name)

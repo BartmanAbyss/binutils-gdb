@@ -1,6 +1,6 @@
 /* libthread_db assisted debugging support, generic parts.
 
-   Copyright (C) 1999-2023 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,14 +17,14 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include <dlfcn.h>
+#include "exceptions.h"
 #include "gdb_proc_service.h"
 #include "nat/gdb_thread_db.h"
 #include "gdbsupport/gdb_vecs.h"
 #include "bfd.h"
 #include "command.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "gdbthread.h"
 #include "inferior.h"
 #include "infrun.h"
@@ -107,7 +107,7 @@ public:
   thread_info *thread_handle_to_thread_info (const gdb_byte *thread_handle,
 					     int handle_len,
 					     inferior *inf) override;
-  gdb::byte_vector thread_info_to_thread_handle (struct thread_info *) override;
+  gdb::array_view<const gdb_byte> thread_info_to_thread_handle (struct thread_info *) override;
 };
 
 static std::string libthread_db_search_path = LIBTHREAD_DB_SEARCH_PATH;
@@ -312,6 +312,7 @@ struct thread_db_thread_info : public private_thread_info
   /* Cached thread state.  */
   td_thrhandle_t th {};
   thread_t tid {};
+  std::optional<gdb::byte_vector> thread_handle;
 };
 
 static thread_db_thread_info *
@@ -466,11 +467,11 @@ verbose_dlsym (void *handle, const char *name)
 static int
 inferior_has_bug (const char *ver_symbol, int ver_major_min, int ver_minor_min)
 {
-  struct bound_minimal_symbol version_msym;
   CORE_ADDR version_addr;
   int got, retval = 0;
 
-  version_msym = lookup_minimal_symbol (ver_symbol, NULL, NULL);
+  bound_minimal_symbol version_msym
+    = lookup_minimal_symbol (current_program_space, ver_symbol);
   if (version_msym.minsym == NULL)
     return 0;
 
@@ -809,9 +810,8 @@ static bool
 libpthread_objfile_p (objfile *obj)
 {
   return (libpthread_name_p (objfile_name (obj))
-	  && lookup_minimal_symbol ("pthread_create",
-				    NULL,
-				    obj).minsym != NULL);
+	  && lookup_minimal_symbol (current_program_space,
+				    "pthread_create", obj).minsym != nullptr);
 }
 
 /* Attempt to initialize dlopen()ed libthread_db, described by INFO.
@@ -1219,7 +1219,7 @@ thread_db_load (void)
     return false;
 
   /* Don't attempt to use thread_db for remote targets.  */
-  if (!(target_can_run () || core_bfd))
+  if (!(target_can_run () || current_program_space->core_bfd () != nullptr))
     return false;
 
   if (thread_db_load_search ())
@@ -1277,13 +1277,12 @@ thread_db_new_objfile (struct objfile *objfile)
   /* This observer must always be called with inferior_ptid set
      correctly.  */
 
-  if (objfile != NULL
-      /* libpthread with separate debug info has its debug info file already
+  if (/* libpthread with separate debug info has its debug info file already
 	 loaded (and notified without successful thread_db initialization)
 	 the time gdb::observers::new_objfile.notify is called for the library itself.
 	 Static executables have their separate debug info loaded already
 	 before the inferior has started.  */
-      && objfile->separate_debug_objfile_backlink == NULL
+      objfile->separate_debug_objfile_backlink == NULL
       /* Only check for thread_db if we loaded libpthread,
 	 or if this is the main symbol file.
 	 We need to check OBJF_MAINLINE to handle the case of debugging
@@ -1366,7 +1365,8 @@ record_thread (struct thread_db_info *info,
      thread with this PTID, but it's marked exited, then the kernel
      reused the tid of an old thread.  */
   if (tp == NULL || tp->state == THREAD_EXITED)
-    tp = add_thread_with_info (info->process_target, ptid, priv);
+    tp = add_thread_with_info (info->process_target, ptid,
+			       private_thread_info_up (priv));
   else
     tp->priv.reset (priv);
 
@@ -1723,20 +1723,20 @@ thread_db_target::thread_handle_to_thread_info (const gdb_byte *thread_handle,
 
 /* Return the thread handle associated the thread_info pointer TP.  */
 
-gdb::byte_vector
+gdb::array_view<const gdb_byte>
 thread_db_target::thread_info_to_thread_handle (struct thread_info *tp)
 {
   thread_db_thread_info *priv = get_thread_db_thread_info (tp);
 
   if (priv == NULL)
-    return gdb::byte_vector ();
+    return {};
 
   int handle_size = sizeof (priv->tid);
-  gdb::byte_vector rv (handle_size);
+  priv->thread_handle.emplace (handle_size);
 
-  memcpy (rv.data (), &priv->tid, handle_size);
+  memcpy (priv->thread_handle->data (), &priv->tid, handle_size);
 
-  return rv;
+  return *priv->thread_handle;
 }
 
 /* Get the address of the thread local variable in load module LM which

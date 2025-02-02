@@ -1,4 +1,4 @@
-# Copyright 2022-2023 Free Software Foundation, Inc.
+# Copyright 2022-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
 # value, can be calculated correctly.
 
 if {[prepare_for_testing_full "failed to prepare" \
-	 [list ${testfile} {debug} \
+	 [list ${testfile} $ldflags \
 	      $srcfile $srcfile_flags $srcfile2 $srcfile2_flags]]} {
     return -1
 }

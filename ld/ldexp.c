@@ -1,5 +1,5 @@
 /* This module handles expression trees.
-   Copyright (C) 1991-2023 Free Software Foundation, Inc.
+   Copyright (C) 1991-2025 Free Software Foundation, Inc.
    Written by Steve Chamberlain of Cygnus Support <sac@cygnus.com>.
 
    This file is part of the GNU Binutils.
@@ -94,6 +94,7 @@ exp_print_token (token_code_type code, int infix_p)
     { RSHIFTEQ, ">>=" },
     { ANDEQ, "&=" },
     { OREQ, "|=" },
+    { XOREQ, "^=" },
     { OROR, "||" },
     { ANDAND, "&&" },
     { EQ, "==" },
@@ -691,6 +692,24 @@ fold_trinary (etree_type *tree)
 		     : tree->trinary.rhs);
 }
 
+static lang_output_section_statement_type *
+output_section_find (const char *name)
+{
+  lang_output_section_statement_type *os = lang_output_section_find (name);
+
+  if (os == NULL && strcmp (name, "NEXT_SECTION") == 0)
+    {
+      os = expld.last_os;
+      if (os != NULL)
+	while ((os = os->next) != NULL)
+	  if (os->constraint >= 0 && os->bfd_section != NULL)
+	    break;
+      if (os == NULL)
+	os = abs_output_section;
+    }
+  return os;
+}
+
 static void
 fold_name (etree_type *tree)
 {
@@ -850,7 +869,7 @@ fold_name (etree_type *tree)
 	{
 	  lang_output_section_statement_type *os;
 
-	  os = lang_output_section_find (tree->name.name);
+	  os = output_section_find (tree->name.name);
 	  if (os == NULL)
 	    {
 	      if (expld.phase == lang_final_phase_enum)
@@ -1270,29 +1289,32 @@ exp_fold_tree_1 (etree_type *tree)
 }
 
 void
-exp_fold_tree (etree_type *tree, asection *current_section, bfd_vma *dotp)
+exp_fold_tree (etree_type *tree, lang_output_section_statement_type *os,
+	       asection *current_section, bfd_vma *dotp)
 {
   expld.rel_from_abs = false;
   expld.dot = *dotp;
   expld.dotp = dotp;
   expld.section = current_section;
+  expld.last_os = os;
   exp_fold_tree_1 (tree);
 }
 
 void
-exp_fold_tree_no_dot (etree_type *tree)
+exp_fold_tree_no_dot (etree_type *tree, lang_output_section_statement_type *os)
 {
   expld.rel_from_abs = false;
   expld.dot = 0;
   expld.dotp = NULL;
   expld.section = bfd_abs_section_ptr;
+  expld.last_os = os;
   exp_fold_tree_1 (tree);
 }
 
 static void
 exp_value_fold (etree_type *tree)
 {
-  exp_fold_tree_no_dot (tree);
+  exp_fold_tree_no_dot (tree, NULL);
   if (expld.result.valid_p)
     {
       tree->type.node_code = INT;
@@ -1547,11 +1569,12 @@ exp_print_tree (etree_type *tree)
 }
 
 bfd_vma
-exp_get_vma (etree_type *tree, bfd_vma def, char *name)
+exp_get_vma (etree_type *tree, lang_output_section_statement_type *os,
+	     bfd_vma def, char *name)
 {
   if (tree != NULL)
     {
-      exp_fold_tree_no_dot (tree);
+      exp_fold_tree_no_dot (tree, os);
       if (expld.result.valid_p)
 	return expld.result.value;
       else if (name != NULL && expld.phase != lang_mark_phase_enum)
@@ -1567,9 +1590,10 @@ exp_get_vma (etree_type *tree, bfd_vma def, char *name)
    NULL or cannot be resolved, return -1.  */
 
 int
-exp_get_power (etree_type *tree, char *name)
+exp_get_power (etree_type *tree, lang_output_section_statement_type *os,
+	       char *name)
 {
-  bfd_vma x = exp_get_vma (tree, -1, name);
+  bfd_vma x = exp_get_vma (tree, os, -1, name);
   bfd_vma p2;
   int n;
 
@@ -1593,7 +1617,7 @@ exp_get_fill (etree_type *tree, fill_type *def, char *name)
   if (tree == NULL)
     return def;
 
-  exp_fold_tree_no_dot (tree);
+  exp_fold_tree_no_dot (tree, NULL);
   if (!expld.result.valid_p)
     {
       if (name != NULL && expld.phase != lang_mark_phase_enum)
@@ -1606,7 +1630,7 @@ exp_get_fill (etree_type *tree, fill_type *def, char *name)
     {
       unsigned char *dst;
       unsigned char *s;
-      fill = (fill_type *) xmalloc ((len + 1) / 2 + sizeof (*fill) - 1);
+      fill = stat_alloc ((len + 1) / 2 + sizeof (*fill) - 1);
       fill->size = (len + 1) / 2;
       dst = fill->data;
       s = (unsigned char *) expld.result.str;
@@ -1631,7 +1655,7 @@ exp_get_fill (etree_type *tree, fill_type *def, char *name)
     }
   else
     {
-      fill = (fill_type *) xmalloc (4 + sizeof (*fill) - 1);
+      fill = stat_alloc (4 + sizeof (*fill) - 1);
       val = expld.result.value;
       fill->data[0] = (val >> 24) & 0xff;
       fill->data[1] = (val >> 16) & 0xff;
@@ -1647,7 +1671,7 @@ exp_get_abs_int (etree_type *tree, int def, char *name)
 {
   if (tree != NULL)
     {
-      exp_fold_tree_no_dot (tree);
+      exp_fold_tree_no_dot (tree, NULL);
 
       if (expld.result.valid_p)
 	{
@@ -1675,14 +1699,15 @@ align_n (bfd_vma value, bfd_vma align)
 }
 
 void
-ldexp_init (void)
+ldexp_init (bool object_only)
 {
   /* The value "13" is ad-hoc, somewhat related to the expected number of
      assignments in a linker script.  */
-  if (!bfd_hash_table_init_n (&definedness_table,
-			      definedness_newfunc,
-			      sizeof (struct definedness_hash_entry),
-			      13))
+  if (!object_only
+      && !bfd_hash_table_init_n (&definedness_table,
+				 definedness_newfunc,
+				 sizeof (struct definedness_hash_entry),
+				 13))
     einfo (_("%F%P: can not create hash table: %E\n"));
 }
 
@@ -1739,7 +1764,8 @@ ldexp_is_final_sym_absolute (const struct bfd_link_hash_entry *h)
 }
 
 void
-ldexp_finish (void)
+ldexp_finish (bool object_only)
 {
-  bfd_hash_table_free (&definedness_table);
+  if (!object_only)
+    bfd_hash_table_free (&definedness_table);
 }

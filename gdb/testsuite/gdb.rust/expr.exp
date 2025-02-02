@@ -1,4 +1,4 @@
-# Copyright (C) 2016-2023 Free Software Foundation, Inc.
+# Copyright (C) 2016-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -169,3 +169,8 @@ gdb_test "with debug expression 1 -- print \"foo\"" \
 	 " Constant: 0" \
 	 "evaluation of this expression requires the target program to be active"] \
     "print a string with expression debug turned on"
+
+# PR rust/31082 - truncating to a pointer would fail.  Depending on
+# the default host architecture, this may or may not print a warning.
+gdb_test "print (0xffffffd00000009a as *mut u64)" \
+    "(warning: value truncated\[\r\n\]+)?.* = \\(\\*mut u64\\) $hex"

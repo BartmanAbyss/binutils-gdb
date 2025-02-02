@@ -1,5 +1,5 @@
 /* tc-sh.c -- Assemble code for the Renesas / SuperH SH
-   Copyright (C) 1993-2023 Free Software Foundation, Inc.
+   Copyright (C) 1993-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -1222,6 +1222,10 @@ static char *
 get_operands (sh_opcode_info *info, char *args, sh_operand_info *operand)
 {
   char *ptr = args;
+
+  operand[0].type = 0;
+  operand[1].type = 0;
+  operand[2].type = 0;
   if (info->arg[0])
     {
       /* The pre-processor will eliminate whitespace in front of '@'
@@ -1234,9 +1238,7 @@ get_operands (sh_opcode_info *info, char *args, sh_operand_info *operand)
       if (info->arg[1])
 	{
 	  if (*ptr == ',')
-	    {
-	      ptr++;
-	    }
+	    ptr++;
 	  get_operand (&ptr, operand + 1);
 	  /* ??? Hack: psha/pshl have a varying operand number depending on
 	     the type of the first operand.  We handle this by having the
@@ -1247,27 +1249,10 @@ get_operands (sh_opcode_info *info, char *args, sh_operand_info *operand)
 	  if (info->arg[2] && operand[0].type != A_IMM)
 	    {
 	      if (*ptr == ',')
-		{
-		  ptr++;
-		}
+		ptr++;
 	      get_operand (&ptr, operand + 2);
 	    }
-	  else
-	    {
-	      operand[2].type = 0;
-	    }
 	}
-      else
-	{
-	  operand[1].type = 0;
-	  operand[2].type = 0;
-	}
-    }
-  else
-    {
-      operand[0].type = 0;
-      operand[1].type = 0;
-      operand[2].type = 0;
     }
   return ptr;
 }
@@ -2723,8 +2708,8 @@ enum options
   OPTION_DUMMY  /* Not used.  This is just here to make it easy to add and subtract options from this enum.  */
 };
 
-const char *md_shortopts = "";
-struct option md_longopts[] =
+const char md_shortopts[] = "";
+const struct option md_longopts[] =
 {
   {"relax", no_argument, NULL, OPTION_RELAX},
   {"big", no_argument, NULL, OPTION_BIG},
@@ -2747,7 +2732,7 @@ struct option md_longopts[] =
 
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c, const char *arg ATTRIBUTE_UNUSED)
@@ -3853,8 +3838,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
   arelent *rel;
   bfd_reloc_code_real_type r_type;
 
-  rel = XNEW (arelent);
-  rel->sym_ptr_ptr = XNEW (asymbol *);
+  rel = notes_alloc (sizeof (arelent));
+  rel->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *rel->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   rel->address = fixp->fx_frag->fr_address + fixp->fx_where;
 
@@ -3948,13 +3933,13 @@ sh_parse_name (char const *name,
       /* If we have an absolute symbol or a reg, then we know its
 	 value now.  */
       segment = S_GET_SEGMENT (exprP->X_add_symbol);
-      if (mode != expr_defer && segment == absolute_section)
+      if (!expr_defer_p (mode) && segment == absolute_section)
 	{
 	  exprP->X_op = O_constant;
 	  exprP->X_add_number = S_GET_VALUE (exprP->X_add_symbol);
 	  exprP->X_add_symbol = NULL;
 	}
-      else if (mode != expr_defer && segment == reg_section)
+      else if (!expr_defer_p (mode) && segment == reg_section)
 	{
 	  exprP->X_op = O_register;
 	  exprP->X_add_number = S_GET_VALUE (exprP->X_add_symbol);

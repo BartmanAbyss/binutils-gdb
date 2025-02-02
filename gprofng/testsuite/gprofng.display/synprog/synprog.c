@@ -1,4 +1,4 @@
-/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2025 Free Software Foundation, Inc.
    Contributed by Oracle.
 
    This file is part of GNU Binutils.
@@ -149,7 +149,7 @@ static int CLONE_FLAGS[] = {
 /* the default script */
 static char DEFAULT_COMMAND[] =
         "icpu.md.cpu.rec.recd.dousl.gpf.fitos.ec.tco.b.nap.uf."
-        "sys.sig.so.sx.so.sched.uwdc";
+        "sys.sig.so.sx.so.sched";
 
 struct scripttab scripttab[] = {
   {"abt",       doabort,        "doabort",      0,  0},
@@ -528,14 +528,14 @@ reapchildren ()
 int
 doabort (int k)
 {
-  char *nullptr = NULL;
+  char *p = NULL;
   char c;
 
   /* Log the event */
   wlog ("start of doabort", NULL);
 
   /* and dereference a NULL */
-  c = *nullptr;
+  c = *p;
 
   /* this should never be reached */
   return (int) c;

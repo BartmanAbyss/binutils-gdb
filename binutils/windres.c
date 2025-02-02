@@ -1,5 +1,5 @@
 /* windres.c -- a program to manipulate Windows resources
-   Copyright (C) 1997-2023 Free Software Foundation, Inc.
+   Copyright (C) 1997-2025 Free Software Foundation, Inc.
    Written by Ian Lance Taylor, Cygnus Support.
    Rewritten by Kai Tietz, Onevision.
 
@@ -885,10 +885,7 @@ main (int argc, char **argv)
 
 	case OPTION_PREPROCESSOR:
 	  if (strchr (optarg, ' '))
-	    {
-	      if (asprintf (& preprocessor, "\"%s\"", optarg) == -1)
-		preprocessor = optarg;
-	    }
+	    preprocessor = xasprintf ("\"%s\"", optarg);
 	  else
 	    preprocessor = optarg;	    
 	  break;

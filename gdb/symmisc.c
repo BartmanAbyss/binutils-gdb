@@ -1,6 +1,6 @@
 /* Do various things to symbol tables (other than lookup), for GDB.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "event-top.h"
+#include "exceptions.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "bfd.h"
@@ -34,7 +35,7 @@
 #include <sys/stat.h>
 #include "dictionary.h"
 #include "typeprint.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "source.h"
 #include "readline/tilde.h"
 #include <cli/cli-style.h>
@@ -286,7 +287,7 @@ dump_symtab_1 (struct symtab *symtab, struct ui_file *outfile)
 	  /* drow/2002-07-10: We could save the total symbols count
 	     even if we're using a hashtable, but nothing else but this message
 	     wants it.  */
-	  gdb_printf (outfile, ", %d syms/buckets in ",
+	  gdb_printf (outfile, ", %d symbols in ",
 		      mdict_size (b->multidict ()));
 	  gdb_puts (paddress (gdbarch, b->start ()), outfile);
 	  gdb_printf (outfile, "..");
@@ -365,8 +366,7 @@ dump_symtab (struct symtab *symtab, struct ui_file *outfile)
      But use only real languages, not placeholders.  */
   if (symtab->language () != language_unknown)
     {
-      scoped_restore_current_language save_lang;
-      set_language (symtab->language ());
+      scoped_restore_current_language save_lang (symtab->language ());
       dump_symtab_1 (symtab, outfile);
     }
   else
@@ -377,7 +377,9 @@ static void
 maintenance_print_symbols (const char *args, int from_tty)
 {
   struct ui_file *outfile = gdb_stdout;
-  char *address_arg = NULL, *source_arg = NULL, *objfile_arg = NULL;
+  const char *address_arg = nullptr;
+  const char *source_arg = nullptr;
+  const char *objfile_arg = nullptr;
   int i, outfile_idx;
 
   dont_repeat ();
@@ -655,7 +657,7 @@ static void
 maintenance_print_msymbols (const char *args, int from_tty)
 {
   struct ui_file *outfile = gdb_stdout;
-  char *objfile_arg = NULL;
+  const char *objfile_arg = nullptr;
   int i, outfile_idx;
 
   dont_repeat ();
@@ -810,8 +812,8 @@ maintenance_info_symtabs (const char *regexp, int from_tty)
 		    gdb_printf ("((struct symtab *) %s)\n",
 				host_address_to_string (symtab));
 		    gdb_printf ("\t  fullname %s\n",
-				symtab->fullname != NULL
-				? symtab->fullname
+				symtab->fullname () != nullptr
+				? symtab->fullname ()
 				: "(null)");
 		    gdb_printf ("\t  "
 				"linetable ((struct linetable *) %s)\n",
@@ -836,7 +838,7 @@ maintenance_info_symtabs (const char *regexp, int from_tty)
    GDB assumes they are always non-NULL.
 
    Note: This does not check for psymtab vs symtab consistency.
-   Use "maint check-psymtabs" for that.  */
+   Use "maint check psymtabs" for that.  */
 
 static void
 maintenance_check_symtabs (const char *ignore, int from_tty)
@@ -887,7 +889,7 @@ maintenance_check_symtabs (const char *ignore, int from_tty)
 static void
 maintenance_expand_symtabs (const char *args, int from_tty)
 {
-  char *regexp = NULL;
+  const char *regexp = nullptr;
 
   /* We use buildargv here so that we handle spaces in the regexp
      in a way that allows adding more arguments later.  */
@@ -903,24 +905,30 @@ maintenance_expand_symtabs (const char *args, int from_tty)
 	}
     }
 
-  if (regexp)
-    re_comp (regexp);
+  if (regexp == nullptr)
+    {
+      for (struct program_space *pspace : program_spaces)
+	for (objfile *objfile : pspace->objfiles ())
+	  objfile->expand_all_symtabs ();
+
+      return;
+    }
+
+  re_comp (regexp);
 
   for (struct program_space *pspace : program_spaces)
     for (objfile *objfile : pspace->objfiles ())
       objfile->expand_symtabs_matching
 	([&] (const char *filename, bool basenames)
-	 {
-	   /* KISS: Only apply the regexp to the complete file name.  */
-	   return (!basenames
-		   && (regexp == NULL || re_exec (filename)));
-	 },
+	   {
+	     /* KISS: Only apply the regexp to the complete file name.  */
+	     return !basenames && re_exec (filename);
+	   },
 	 NULL,
 	 NULL,
 	 NULL,
 	 SEARCH_GLOBAL_BLOCK | SEARCH_STATIC_BLOCK,
-	 UNDEF_DOMAIN,
-	 ALL_DOMAIN);
+	 SEARCH_ALL_DOMAINS);
 }
 
 
@@ -973,13 +981,14 @@ maintenance_print_one_line_table (struct symtab *symtab, void *data)
       /* Leave space for 6 digits of index and line number.  After that the
 	 tables will just not format as well.  */
       struct ui_out *uiout = current_uiout;
-      ui_out_emit_table table_emitter (uiout, 6, -1, "line-table");
+      ui_out_emit_table table_emitter (uiout, 7, -1, "line-table");
       uiout->table_header (6, ui_left, "index", _("INDEX"));
       uiout->table_header (6, ui_left, "line", _("LINE"));
       uiout->table_header (18, ui_left, "rel-address", _("REL-ADDRESS"));
       uiout->table_header (18, ui_left, "unrel-address", _("UNREL-ADDRESS"));
       uiout->table_header (7, ui_left, "is-stmt", _("IS-STMT"));
       uiout->table_header (12, ui_left, "prologue-end", _("PROLOGUE-END"));
+      uiout->table_header (14, ui_left, "epilogue-begin", _("EPILOGUE-BEGIN"));
       uiout->table_body ();
 
       for (int i = 0; i < linetable->nitems; ++i)
@@ -990,15 +999,17 @@ maintenance_print_one_line_table (struct symtab *symtab, void *data)
 	  ui_out_emit_tuple tuple_emitter (uiout, nullptr);
 	  uiout->field_signed ("index", i);
 	  if (item->line > 0)
-	    uiout->field_signed ("line", item->line);
+	    uiout->field_signed ("line", item->line,
+				 line_number_style.style ());
 	  else
 	    uiout->field_string ("line", _("END"));
 	  uiout->field_core_addr ("rel-address", objfile->arch (),
 				  item->pc (objfile));
 	  uiout->field_core_addr ("unrel-address", objfile->arch (),
-				  CORE_ADDR (item->raw_pc ()));
+				  CORE_ADDR (item->unrelocated_pc ()));
 	  uiout->field_string ("is-stmt", item->is_stmt ? "Y" : "");
 	  uiout->field_string ("prologue-end", item->prologue_end ? "Y" : "");
+	  uiout->field_string ("epilogue-begin", item->epilogue_begin ? "Y" : "");
 	  uiout->text ("\n");
 	}
     }
@@ -1050,9 +1061,10 @@ Usage: mt print symbols [-pc ADDRESS] [--] [OUTFILE]\n\
        mt print symbols [-objfile OBJFILE] [-source SOURCE] [--] [OUTFILE]\n\
 Entries in the full symbol table are dumped to file OUTFILE,\n\
 or the terminal if OUTFILE is unspecified.\n\
-If ADDRESS is provided, dump only the file for that address.\n\
+If ADDRESS is provided, dump only the symbols for the file\n\
+with code at that address.\n\
 If SOURCE is provided, dump only that file's symbols.\n\
-If OBJFILE is provided, dump only that file's minimal symbols."),
+If OBJFILE is provided, dump only that object file's symbols."),
 	   &maintenanceprintlist);
 
   add_cmd ("msymbols", class_maintenance, maintenance_print_msymbols, _("\
@@ -1081,10 +1093,10 @@ With an argument REGEXP, list just the line tables for the symbol\n\
 tables with matching names."),
 	   &maintenanceinfolist);
 
-  add_cmd ("check-symtabs", class_maintenance, maintenance_check_symtabs,
+  add_cmd ("symtabs", class_maintenance, maintenance_check_symtabs,
 	   _("\
 Check consistency of currently expanded symtabs."),
-	   &maintenancelist);
+	   &maintenancechecklist);
 
   add_cmd ("expand-symtabs", class_maintenance, maintenance_expand_symtabs,
 	   _("Expand symbol tables.\n\

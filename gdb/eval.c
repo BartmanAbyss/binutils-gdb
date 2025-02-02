@@ -1,6 +1,6 @@
 /* Evaluate expressions for GDB.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "value.h"
@@ -25,7 +24,7 @@
 #include "target.h"
 #include "frame.h"
 #include "gdbthread.h"
-#include "language.h"		/* For CAST_IS_CONVERSION.  */
+#include "language.h"
 #include "cp-abi.h"
 #include "infcall.h"
 #include "objc-lang.h"
@@ -67,9 +66,9 @@ parse_and_eval_long (const char *exp)
 }
 
 struct value *
-parse_and_eval (const char *exp)
+parse_and_eval (const char *exp, parser_flags flags)
 {
-  expression_up expr = parse_expression (exp);
+  expression_up expr = parse_expression (exp, nullptr, flags);
 
   return expr->evaluate ();
 }
@@ -81,7 +80,8 @@ parse_and_eval (const char *exp)
 struct value *
 parse_to_comma_and_eval (const char **expp)
 {
-  expression_up expr = parse_exp_1 (expp, 0, nullptr, 1);
+  expression_up expr = parse_exp_1 (expp, 0, nullptr,
+				    PARSER_COMMA_TERMINATES);
 
   return expr->evaluate ();
 }
@@ -101,7 +101,7 @@ expression::uses_objfile (struct objfile *objfile) const
 struct value *
 expression::evaluate (struct type *expect_type, enum noside noside)
 {
-  gdb::optional<enable_thread_stack_temporaries> stack_temporaries;
+  std::optional<enable_thread_stack_temporaries> stack_temporaries;
   if (target_has_execution () && inferior_ptid != null_ptid
       && language_defn->la_language == language_cplus
       && !thread_stack_temporaries_enabled_p (inferior_thread ()))
@@ -171,7 +171,7 @@ fetch_subexp_value (struct expression *exp,
 	case MEMORY_ERROR:
 	  if (!preserve_errors)
 	    break;
-	  /* Fall through.  */
+	  [[fallthrough]];
 	default:
 	  throw;
 	  break;
@@ -588,21 +588,41 @@ evaluate_subexp_do_call (expression *exp, enum noside noside,
 {
   if (callee == NULL)
     error (_("Cannot evaluate function -- may be inlined"));
+
+  type *ftype = callee->type ();
+
+  /* If the callee is a struct, there might be a user-defined function call
+     operator that should be used instead.  */
+  std::vector<value *> vals;
+  if (overload_resolution
+      && exp->language_defn->la_language == language_cplus
+      && check_typedef (ftype)->code () == TYPE_CODE_STRUCT)
+    {
+      /* Include space for the `this' pointer at the start.  */
+      vals.resize (argvec.size () + 1);
+
+      vals[0] = value_addr (callee);
+      for (int i = 0; i < argvec.size (); ++i)
+	vals[i + 1] = argvec[i];
+
+      int static_memfuncp;
+      find_overload_match (vals, "operator()", METHOD, &vals[0], nullptr,
+			   &callee, nullptr, &static_memfuncp, 0, noside);
+      if (!static_memfuncp)
+	argvec = vals;
+
+      ftype = callee->type ();
+    }
+
   if (noside == EVAL_AVOID_SIDE_EFFECTS)
     {
       /* If the return type doesn't look like a function type,
 	 call an error.  This can happen if somebody tries to turn
 	 a variable into a function call.  */
 
-      type *ftype = callee->type ();
-
       if (ftype->code () == TYPE_CODE_INTERNAL_FUNCTION)
 	{
-	  /* We don't know anything about what the internal
-	     function might return, but we have to return
-	     something.  */
-	  return value::zero (builtin_type (exp->gdbarch)->builtin_int,
-			     not_lval);
+	  /* The call to call_internal_function below handles noside.  */
 	}
       else if (ftype->code () == TYPE_CODE_XMETHOD)
 	{
@@ -642,7 +662,8 @@ evaluate_subexp_do_call (expression *exp, enum noside noside,
     {
     case TYPE_CODE_INTERNAL_FUNCTION:
       return call_internal_function (exp->gdbarch, exp->language_defn,
-				     callee, argvec.size (), argvec.data ());
+				     callee, argvec.size (), argvec.data (),
+				     noside);
     case TYPE_CODE_XMETHOD:
       return callee->call_xmethod (argvec);
     default:
@@ -666,9 +687,13 @@ operation::evaluate_funcall (struct type *expect_type,
   struct type *type = callee->type ();
   if (type->code () == TYPE_CODE_PTR)
     type = type->target_type ();
+  /* If type is a struct, num_fields would refer to the number of
+     members in the type, not the number of arguments.  */
+  bool type_has_arguments
+    = type->code () == TYPE_CODE_FUNC || type->code () == TYPE_CODE_METHOD;
   for (int i = 0; i < args.size (); ++i)
     {
-      if (i < type->num_fields ())
+      if (type_has_arguments && i < type->num_fields ())
 	vals[i] = args[i]->evaluate (type->field (i).type (), exp, noside);
       else
 	vals[i] = args[i]->evaluate_with_coercion (exp, noside);
@@ -729,7 +754,7 @@ scope_operation::evaluate_funcall (struct type *expect_type,
       function = cp_lookup_symbol_namespace (type->name (),
 					     name.c_str (),
 					     get_selected_block (0),
-					     VAR_DOMAIN).symbol;
+					     SEARCH_FUNCTION_DOMAIN).symbol;
       if (function == NULL)
 	error (_("No symbol \"%s\" in namespace \"%s\"."),
 	       name.c_str (), type->name ());
@@ -1069,13 +1094,14 @@ eval_op_var_entry_value (struct type *expect_type, struct expression *exp,
   if (noside == EVAL_AVOID_SIDE_EFFECTS)
     return value::zero (sym->type (), not_lval);
 
-  if (SYMBOL_COMPUTED_OPS (sym) == NULL
-      || SYMBOL_COMPUTED_OPS (sym)->read_variable_at_entry == NULL)
+  const symbol_computed_ops *computed_ops = sym->computed_ops ();
+  if (computed_ops == nullptr
+      || computed_ops->read_variable_at_entry == nullptr)
     error (_("Symbol \"%s\" does not have any specific entry value"),
 	   sym->print_name ());
 
   frame_info_ptr frame = get_selected_frame (NULL);
-  return SYMBOL_COMPUTED_OPS (sym)->read_variable_at_entry (sym, frame);
+  return computed_ops->read_variable_at_entry (sym, frame);
 }
 
 /* Helper function that implements the body of OP_VAR_MSYM_VALUE.  */
@@ -1104,7 +1130,8 @@ eval_op_func_static_var (struct type *expect_type, struct expression *exp,
 {
   CORE_ADDR addr = func->address ();
   const block *blk = block_for_pc (addr);
-  struct block_symbol sym = lookup_symbol (var, blk, VAR_DOMAIN, NULL);
+  struct block_symbol sym = lookup_symbol (var, blk, SEARCH_VAR_DOMAIN,
+					   nullptr);
   if (sym.symbol == NULL)
     error (_("No symbol \"%s\" in specified context."), var);
   return evaluate_var_value (noside, sym.block, sym.symbol);
@@ -1133,7 +1160,8 @@ eval_op_register (struct type *expect_type, struct expression *exp,
       && regno < gdbarch_num_cooked_regs (exp->gdbarch))
     val = value::zero (register_type (exp->gdbarch, regno), not_lval);
   else
-    val = value_of_register (regno, get_selected_frame (NULL));
+    val = value_of_register
+      (regno, get_next_frame_sentinel_okay (get_selected_frame ()));
   if (val == NULL)
     error (_("Value of register %s not available."), name);
   else
@@ -1154,6 +1182,23 @@ string_operation::evaluate (struct type *expect_type,
   return value_string (str.c_str (), str.size (), type);
 }
 
+struct value *
+ternop_slice_operation::evaluate (struct type *expect_type,
+				  struct expression *exp,
+				  enum noside noside)
+{
+  struct value *array
+    = std::get<0> (m_storage)->evaluate (nullptr, exp, noside);
+  struct value *low
+    = std::get<1> (m_storage)->evaluate (nullptr, exp, noside);
+  struct value *upper
+    = std::get<2> (m_storage)->evaluate (nullptr, exp, noside);
+
+  int lowbound = value_as_long (low);
+  int upperbound = value_as_long (upper);
+  return value_slice (array, lowbound, upperbound - lowbound + 1);
+}
+
 } /* namespace expr */
 
 /* Helper function that implements the body of OP_OBJC_SELECTOR.  */
@@ -1166,18 +1211,6 @@ eval_op_objc_selector (struct type *expect_type, struct expression *exp,
   struct type *selector_type = builtin_type (exp->gdbarch)->builtin_data_ptr;
   return value_from_longest (selector_type,
 			     lookup_child_selector (exp->gdbarch, sel));
-}
-
-/* A helper function for TERNOP_SLICE.  */
-
-struct value *
-eval_op_ternop (struct type *expect_type, struct expression *exp,
-		enum noside noside,
-		struct value *array, struct value *low, struct value *upper)
-{
-  int lowbound = value_as_long (low);
-  int upperbound = value_as_long (upper);
-  return value_slice (array, lowbound, upperbound - lowbound + 1);
 }
 
 /* A helper function for STRUCTOP_STRUCT.  */
@@ -1676,7 +1709,7 @@ eval_op_ind (struct type *expect_type, struct expression *exp,
      BUILTIN_TYPE_LONGEST would seem to be a mistake.  */
   if (type->code () == TYPE_CODE_INT)
     return value_at_lazy (builtin_type (exp->gdbarch)->builtin_int,
-			  (CORE_ADDR) value_as_address (arg1));
+			  value_as_address (arg1));
   return value_ind (arg1);
 }
 
@@ -1839,16 +1872,19 @@ eval_op_postdec (struct type *expect_type, struct expression *exp,
     }
 }
 
-/* A helper function for OP_TYPE.  */
+namespace expr
+{
 
 struct value *
-eval_op_type (struct type *expect_type, struct expression *exp,
-	      enum noside noside, struct type *type)
+type_operation::evaluate (struct type *expect_type, struct expression *exp,
+			  enum noside noside)
 {
   if (noside == EVAL_AVOID_SIDE_EFFECTS)
-    return value::allocate (type);
+    return value::allocate (std::get<0> (m_storage));
   else
     error (_("Attempt to use a type name as an expression"));
+}
+
 }
 
 /* A helper function for BINOP_ASSIGN_MODIFY.  */
@@ -1921,7 +1957,8 @@ eval_op_objc_msgcall (struct type *expect_type, struct expression *exp,
   if (value_as_long (target) == 0)
     return value_from_longest (long_type, 0);
 
-  if (lookup_minimal_symbol ("objc_msg_lookup", 0, 0).minsym)
+  if (lookup_minimal_symbol (current_program_space, "objc_msg_lookup").minsym
+      != nullptr)
     gnu_runtime = 1;
 
   /* Find the method dispatch (Apple runtime) or method lookup
@@ -2068,7 +2105,7 @@ eval_op_objc_msgcall (struct type *expect_type, struct expression *exp,
 
   /* Found a function symbol.  Now we will substitute its
      value in place of the message dispatcher (obj_msgSend),
-     so that we call the method directly instead of thru
+     so that we call the method directly instead of through
      the dispatcher.  The main reason for doing this is that
      we can now evaluate the return value and parameter values
      according to their known data types, in case we need to
@@ -2377,7 +2414,7 @@ array_operation::evaluate_struct_tuple (struct value *struct_val,
       if (val->type () != field_type)
 	val = value_cast (field_type, val);
 
-      bitsize = TYPE_FIELD_BITSIZE (struct_type, fieldno);
+      bitsize = struct_type->field (fieldno).bitsize ();
       bitpos = struct_type->field (fieldno).loc_bitpos ();
       addr = struct_val->contents_writeable ().data () + bitpos / 8;
       if (bitsize)
@@ -2396,11 +2433,9 @@ array_operation::evaluate (struct type *expect_type,
 			   struct expression *exp,
 			   enum noside noside)
 {
-  int tem;
-  int tem2 = std::get<0> (m_storage);
-  int tem3 = std::get<1> (m_storage);
+  const int provided_low_bound = std::get<0> (m_storage);
   const std::vector<operation_up> &in_args = std::get<2> (m_storage);
-  int nargs = tem3 - tem2 + 1;
+  const int nargs = std::get<1> (m_storage) - provided_low_bound + 1;
   struct type *type = expect_type ? check_typedef (expect_type) : nullptr;
 
   if (expect_type != nullptr
@@ -2419,31 +2454,26 @@ array_operation::evaluate (struct type *expect_type,
       struct type *element_type = type->target_type ();
       struct value *array = value::allocate (expect_type);
       int element_size = check_typedef (element_type)->length ();
-      LONGEST low_bound, high_bound, index;
+      LONGEST low_bound, high_bound;
 
       if (!get_discrete_bounds (range_type, &low_bound, &high_bound))
 	{
 	  low_bound = 0;
 	  high_bound = (type->length () / element_size) - 1;
 	}
-      index = low_bound;
+      if (low_bound + nargs - 1 > high_bound)
+	error (_("Too many array elements"));
       memset (array->contents_raw ().data (), 0, expect_type->length ());
-      for (tem = nargs; --nargs >= 0;)
+      for (int idx = 0; idx < nargs; ++idx)
 	{
 	  struct value *element;
 
-	  element = in_args[index - low_bound]->evaluate (element_type,
-							  exp, noside);
+	  element = in_args[idx]->evaluate (element_type, exp, noside);
 	  if (element->type () != element_type)
 	    element = value_cast (element_type, element);
-	  if (index > high_bound)
-	    /* To avoid memory corruption.  */
-	    error (_("Too many array elements"));
-	  memcpy (array->contents_raw ().data ()
-		  + (index - low_bound) * element_size,
+	  memcpy (array->contents_raw ().data () + idx * element_size,
 		  element->contents ().data (),
 		  element_size);
-	  index++;
 	}
       return array;
     }
@@ -2465,14 +2495,13 @@ array_operation::evaluate (struct type *expect_type,
       if (!get_discrete_bounds (element_type, &low_bound, &high_bound))
 	error (_("(power)set type with unknown size"));
       memset (valaddr, '\0', type->length ());
-      int idx = 0;
-      for (tem = 0; tem < nargs; tem++)
+      for (int idx = 0; idx < nargs; idx++)
 	{
 	  LONGEST range_low, range_high;
 	  struct type *range_low_type, *range_high_type;
 	  struct value *elem_val;
 
-	  elem_val = in_args[idx++]->evaluate (element_type, exp, noside);
+	  elem_val = in_args[idx]->evaluate (element_type, exp, noside);
 	  range_low_type = range_high_type = elem_val->type ();
 	  range_low = range_high = value_as_long (elem_val);
 
@@ -2514,14 +2543,14 @@ array_operation::evaluate (struct type *expect_type,
       return set;
     }
 
-  value **argvec = XALLOCAVEC (struct value *, nargs);
-  for (tem = 0; tem < nargs; tem++)
+  std::vector<value *> argvec (nargs);
+  for (int tem = 0; tem < nargs; tem++)
     {
       /* Ensure that array expressions are coerced into pointer
 	 objects.  */
       argvec[tem] = in_args[tem]->evaluate_with_coercion (exp, noside);
     }
-  return value_array (tem2, tem3, argvec);
+  return value_array (provided_low_bound, argvec);
 }
 
 value *
@@ -2707,6 +2736,13 @@ evaluate_subexp_for_sizeof_base (struct expression *exp, struct type *type)
   if (exp->language_defn->la_language == language_cplus
       && (TYPE_IS_REFERENCE (type)))
     type = check_typedef (type->target_type ());
+  else if (exp->language_defn->la_language == language_fortran
+	   && type->code () == TYPE_CODE_PTR)
+    {
+      /* Dereference Fortran pointer types to allow them for the Fortran
+	 sizeof intrinsic.  */
+      type = check_typedef (type->target_type ());
+    }
   return value_from_longest (size_type, (LONGEST) type->length ());
 }
 
@@ -2820,7 +2856,7 @@ var_value_operation::evaluate_for_sizeof (struct expression *exp,
 	  if (type_not_allocated (type) || type_not_associated (type))
 	    return value::zero (size_type, not_lval);
 	  else if (is_dynamic_type (type->index_type ())
-		   && type->bounds ()->high.kind () == PROP_UNDEFINED)
+		   && !type->bounds ()->high.is_available ())
 	    return value::allocate_optimized_out (size_type);
 	}
     }

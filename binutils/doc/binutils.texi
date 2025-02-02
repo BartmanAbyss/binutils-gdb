@@ -10,7 +10,7 @@
 
 @copying
 @c man begin COPYRIGHT
-Copyright @copyright{} 1991-2023 Free Software Foundation, Inc.
+Copyright @copyright{} 1991-2025 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU Free Documentation License, Version 1.3
@@ -457,7 +457,7 @@ Specify dependencies of this library.  The dependencies must immediately
 follow this option character, must use the same syntax as the linker
 command line, and must be specified within a single argument.  I.e., if
 multiple items are needed, they must be quoted to form a single command
-line argument.  For example @samp{L "-L/usr/local/lib -lmydep1 -lmydep2"}
+line argument.  For example @samp{l "-L/usr/local/lib -lmydep1 -lmydep2"}
 
 @item N
 Uses the @var{count} parameter.  This is used if there are multiple
@@ -520,6 +520,10 @@ names, use this modifier.  The @samp{u} modifier is allowed only for the
 operation @samp{r} (replace).  In particular, the combination @samp{qu} is
 not allowed, since checking the timestamps would lose any speed
 advantage from the operation @samp{q}.
+
+Note - if an archive has been created in a deterministic manner, eg
+via the use of the @option{D} modifier, then replacement will always
+happen and the @option{u} modifier will be ineffective.
 
 @item U
 @cindex deterministic archives
@@ -1278,6 +1282,7 @@ objcopy [@option{-F} @var{bfdname}|@option{--target=}@var{bfdname}]
         [@option{-R} @var{sectionpattern}|@option{--remove-section=}@var{sectionpattern}]
         [@option{--keep-section=}@var{sectionpattern}]
         [@option{--remove-relocations=}@var{sectionpattern}]
+        [@option{--strip-section-headers}]
         [@option{-p}|@option{--preserve-dates}]
         [@option{-D}|@option{--enable-deterministic-archives}]
         [@option{-U}|@option{--disable-deterministic-archives}]
@@ -1325,10 +1330,10 @@ objcopy [@option{-F} @var{bfdname}|@option{--target=}@var{bfdname}]
         [@option{--pure}]
         [@option{--impure}]
         [@option{--file-alignment=}@var{num}]
-        [@option{--heap=}@var{size}]
+        [@option{--heap=}@var{reserve}[,@var{commit}]]
         [@option{--image-base=}@var{address}]
         [@option{--section-alignment=}@var{num}]
-        [@option{--stack=}@var{size}]
+        [@option{--stack=}@var{reserve}[,@var{commit}]]
         [@option{--subsystem=}@var{which}:@var{major}.@var{minor}]
         [@option{--compress-debug-sections}]
         [@option{--decompress-debug-sections}]
@@ -1494,6 +1499,10 @@ will remove all relocations for sections matching the pattern
 '.text.*', but will not remove relocations for the section
 '.text.foo'.
 
+@item --strip-section-headers
+Strip section header   This option is specific to ELF files.
+Implies @option{--strip-all} and @option{--merge-notes}.
+
 @item -S
 @itemx --strip-all
 Do not copy relocation and symbol information from the source file.
@@ -1621,6 +1630,11 @@ commands.  If the input was '12345678' then the outputs would be
 Set the access and modification dates of the output file to be the same
 as those of the input file.
 
+This option also copies the date stored in a PE format file's header,
+unless the SOURCE_DATE_EPOCH environment variable is defined.  If it
+is defined then this variable will be used as the date stored in the
+header, interpreted as the number of seconds since the Unix epoch.
+
 @item -D
 @itemx --enable-deterministic-archives
 @cindex deterministic archives
@@ -1723,6 +1737,10 @@ above.  If @var{sectionpattern} does not match any sections in the
 input file, a warning will be issued, unless
 @option{--no-change-warnings} is used.
 
+Note - changing the VMA of sections in a fully linked binary can be
+dangerous since there may be code that expects the sections to be
+located at their old address.
+
 @item --change-warnings
 @itemx --adjust-warnings
 If @option{--change-section-address} or @option{--change-section-lma} or
@@ -1740,18 +1758,26 @@ Set the flags for any sections matching @var{sectionpattern}.  The
 @var{flags} argument is a comma separated string of flag names.  The
 recognized names are @samp{alloc}, @samp{contents}, @samp{load},
 @samp{noload}, @samp{readonly}, @samp{code}, @samp{data}, @samp{rom},
-@samp{exclude}, @samp{share}, and @samp{debug}.  You can set the
-@samp{contents} flag for a section which does not have contents, but it
-is not meaningful to clear the @samp{contents} flag of a section which
-does have contents--just remove the section instead.  Not all flags are
-meaningful for all object file formats.  In particular the
-@samp{share} flag is only meaningful for COFF format files and not for
-ELF format files.
+@samp{exclude}, @samp{share}, @samp{debug}, and @samp{large}.
+You can set the @samp{contents} flag for a section which does not have
+contents, but it is not meaningful to clear the @samp{contents} flag of a
+section which does have contents--just remove the section instead.  Not all
+flags are meaningful for all object file formats.  In particular the
+@samp{share} flag is only meaningful for COFF format files and not for ELF
+format files.  The ELF x86-64 specific flag @samp{large} corresponds to
+SHF_X86_64_LARGE.
 
 @item --set-section-alignment @var{sectionpattern}=@var{align}
 Set the alignment for any sections matching @var{sectionpattern}.
 @var{align} specifies the alignment in bytes and must be a power of
-two, i.e. 1, 2, 4, 8@dots{}. 
+two, i.e. 1, 2, 4, 8@dots{}.
+
+Note - setting a section's alignment will not automatically align its
+LMA or VMA addresses.  If those need to be changed as well then the
+@option{--change-section-lma} and/or @option{--change-section-vma}
+options should be used.  Also note that changing VMAs can cause
+problems in fully linked binaries where there may be code that expects
+the contents of the sections to be located at their old address.
 
 @item --add-section @var{sectionname}=@var{filename}
 Add a new section named @var{sectionname} while copying the file.  The
@@ -1803,7 +1829,7 @@ changing the section's flags to @var{flags} in the process.  This has
 the advantage over using a linker script to perform the rename in that
 the output stays as an object file and does not become a linked
 executable.  This option accepts the same set of flags as the
-@option{--sect-section-flags} option.
+@option{--set-section-flags} option.
 
 This option is particularly helpful when the input format is binary,
 since this will always create a section called .data.  If for example,
@@ -2016,7 +2042,7 @@ As long as the debug info file has been installed into one of these
 locations before the debugger is run everything should work
 correctly.
 
-@item --keep-section-symbils
+@item --keep-section-symbols
 When stripping a file, perhaps with @option{--strip-debug} or
 @option{--strip-unneeded}, retain any symbols specifying section names,
 which would otherwise get stripped.
@@ -2114,10 +2140,20 @@ for dlls.
 [This option is specific to PE targets.]
 
 @item --section-alignment @var{num}
-Sets the section alignment field in the PE header.  Sections in memory
-will always begin at addresses which are a multiple of this number.
-Defaults to 0x1000.
 [This option is specific to PE targets.]
+
+Sets the section alignment field in the PE header - if one is present
+in the binary.  Sections in memory will always begin at addresses
+which are a multiple of this number.  Defaults to 0x1000.
+
+Note - this option will also set the alignment field in each section's
+flags.
+
+Note - if a section's LMA or VMA addresses are no longer aligned, and
+those addresses have not been set via the @option{--set-section-lma} or
+@option{--set-section-vma} options, and the file has been fully
+relocated then a warning message will be issued.  It will then be up
+to the user to decide if the LMA and VMA need updating.
 
 @item --stack @var{reserve}
 @itemx --stack @var{reserve},@var{commit}
@@ -2254,6 +2290,7 @@ objdump [@option{-a}|@option{--archive-headers}]
         [@option{-r}|@option{--reloc}]
         [@option{-R}|@option{--dynamic-reloc}]
         [@option{-s}|@option{--full-contents}]
+        [@option{-Z}|@option{--decompress}]
         [@option{-W[lLiaprmfFsoORtUuTgAck]}|
          @option{--dwarf}[=rawline,=decodedline,=info,=abbrev,=pubnames,=aranges,=macro,=frames,=frames-interp,=str,=str-offsets,=loc,=Ranges,=pubtypes,=trace_info,=trace_abbrev,=trace_aranges,=gdb_index,=addr,=cu_index,=links]]
         [@option{-WK}|@option{--dwarf=follow-links}]
@@ -2646,11 +2683,12 @@ rather than @code{li}.  All of the @option{-m} arguments for
 @option{e300}, @option{e500}, @option{e500mc}, @option{e500mc64},
 @option{e500x2}, @option{e5500}, @option{e6500}, @option{efs},
 @option{power4}, @option{power5}, @option{power6}, @option{power7},
-@option{power8}, @option{power9}, @option{power10}, @option{ppc},
-@option{ppc32}, @option{ppc64}, @option{ppc64bridge}, @option{ppcps},
-@option{pwr}, @option{pwr2}, @option{pwr4}, @option{pwr5}, @option{pwr5x},
-@option{pwr6}, @option{pwr7}, @option{pwr8}, @option{pwr9}, @option{pwr10},
-@option{pwrx}, @option{titan}, @option{vle}, and @option{future}.
+@option{power8}, @option{power9}, @option{power10}, @option{power11},
+@option{ppc}, @option{ppc32}, @option{ppc64}, @option{ppc64bridge},
+@option{ppcps}, @option{pwr}, @option{pwr2}, @option{pwr4}, @option{pwr5},
+@option{pwr5x}, @option{pwr6}, @option{pwr7}, @option{pwr8}, @option{pwr9},
+@option{pwr10}, @option{pwr11}, @option{pwrx}, @option{titan}, @option{vle},
+and @option{future}.
 @option{32} and @option{64} modify the default or a prior CPU
 selection, disabling and enabling 64-bit insns respectively.  In
 addition, @option{altivec}, @option{any}, @option{lsp}, @option{htm},
@@ -2754,6 +2792,12 @@ For XCOFF, the available options are:
 @item ldinfo
 @end table
 
+For PE, the available options are:
+@table @code
+@item header
+@item sections
+@end table
+
 Not all object formats support this option.  In particular the ELF
 format does not use it.
 
@@ -2779,7 +2823,10 @@ disassembly.
 @cindex object file sections
 Display the full contents of sections, often used in combination with
 @option{-j} to request specific sections.  By default all non-empty
-non-bss sections are displayed.
+non-bss sections are displayed.  By default any compressed section
+will be displayed in its compressed form.  In order to see the
+contents in a decompressed form add the @option{-Z} option to the
+command line.
 
 @item -S
 @itemx --source
@@ -3035,6 +3082,15 @@ Also do not truncate symbol names when they are displayed.
 Normally the disassembly output will skip blocks of zeroes.  This
 option directs the disassembler to disassemble those blocks, just like
 any other data.
+
+@item -Z
+@itemx --decompress
+@cindex sections, full contents
+@cindex object file sections
+@cindex compressed section contents
+The @option{-Z} option is meant to be used in conunction with the
+@option{-s} option.  It instructs @command{objdump} to decompress any
+compressed sections before displaying their contents.
 @end table
 
 @c man end
@@ -3478,6 +3534,7 @@ strip [@option{-F} @var{bfdname} |@option{--target=}@var{bfdname}]
       [@option{-R} @var{sectionname} |@option{--remove-section=}@var{sectionname}]
       [@option{--keep-section=}@var{sectionpattern}]
       [@option{--remove-relocations=}@var{sectionpattern}]
+      [@option{--strip-section-headers}]
       [@option{-o} @var{file}] [@option{-p}|@option{--preserve-dates}]
       [@option{-D}|@option{--enable-deterministic-archives}]
       [@option{-U}|@option{--disable-deterministic-archives}]
@@ -3579,6 +3636,10 @@ For example:
 will remove all relocations for sections matching the pattern
 '.text.*', but will not remove relocations for the section
 '.text.foo'.
+
+@item --strip-section-headers
+Strip section headers.  This option is specific to ELF files.  Implies
+@option{--strip-all} and @option{--merge-notes}.
 
 @item -s
 @itemx --strip-all
@@ -4939,6 +5000,7 @@ readelf [@option{-a}|@option{--all}]
         [@option{--quiet}]
         [@option{--recurse-limit}|@option{--no-recurse-limit}]
         [@option{-U} @var{method}|@option{--unicode=}@var{method}]
+        [@option{-X}|@option{--extra-sym-info}|@option{--no-extra-sym-info}]
         [@option{-n}|@option{--notes}]
         [@option{-r}|@option{--relocs}]
         [@option{-u}|@option{--unwind}]
@@ -4950,6 +5012,7 @@ readelf [@option{-a}|@option{--all}]
         [@option{-x} <number or name>|@option{--hex-dump=}<number or name>]
         [@option{-p} <number or name>|@option{--string-dump=}<number or name>]
         [@option{-R} <number or name>|@option{--relocated-dump=}<number or name>]
+        [@option{-j} <number or name>|@option{--display-section=}<number or name>]
         [@option{-z}|@option{--decompress}]
         [@option{-c}|@option{--archive-index}]
         [@option{-w[lLiaprmfFsoORtUuTgAck]}|
@@ -5130,6 +5193,20 @@ assuming that colouring is supported by the output device.  The
 colouring is intended to draw attention to the presence of unicode
 sequences when they might not be expected.
 
+@item -X
+@itemx --extra-sym-info
+When displaying details of symbols, include extra information not
+normally presented.  Currently this just adds the name of the section
+referenced by the symbol's index field, if there is one.  In the
+future more information may be displayed when this option is enabled.
+
+Enabling this option effectively enables the @option{--wide} option as
+well, at least when displaying symbol information.
+
+@item --no-extra-sym-info
+Disables the effect of the @option{--extra-sym-info} option.  This
+is the default.
+
 @item -e
 @itemx --headers
 Display all the headers in the file.  Equivalent to @option{-h -l -S}.
@@ -5194,6 +5271,8 @@ displayed.
 Displays the contents of the indicated section as a hexadecimal bytes.
 A number identifies a particular section by index in the section table;
 any other string identifies all sections with that name in the object file.
+This option can be repeated multiple times on the command line in
+order to request multiple hex dumps.
 
 @item -R <number or name>
 @itemx --relocated-dump=<number or name>
@@ -5202,12 +5281,31 @@ bytes.  A number identifies a particular section by index in the
 section table; any other string identifies all sections with that name
 in the object file.  The contents of the section will be relocated
 before they are displayed.
+This option can be repeated multiple times on the command line in
+order to request multiple relocated dumps.
 
 @item -p <number or name>
 @itemx --string-dump=<number or name>
 Displays the contents of the indicated section as printable strings.
 A number identifies a particular section by index in the section table;
 any other string identifies all sections with that name in the object file.
+This option can be repeated multiple times on the command line in
+order to request multiple string dumps.
+
+@item -j <number or name>
+@itemx --display-section
+Displays the contents of the indicated section according to its
+section header type.  Sections containing relocations will be
+displayed as if the @option{--relocations} option had been used,
+sections contains symbols will be displayed as if the @option{--syms}
+option had been used and so on.
+
+A number identifies a particular section by index in the section
+table; any other string identifies all sections with that name in the
+input file(s).
+
+This option can be repeated multiple times on the command line in
+order to request multiple section dumps.
 
 @item -z
 @itemx --decompress

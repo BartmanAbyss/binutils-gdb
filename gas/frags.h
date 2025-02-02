@@ -1,5 +1,5 @@
 /* frags.h - Header file for the frag concept.
-   Copyright (C) 1987-2023 Free Software Foundation, Inc.
+   Copyright (C) 1987-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -124,7 +124,7 @@ extern void frag_append_1_char (int);
 #define FRAG_APPEND_1_CHAR(X) frag_append_1_char (X)
 
 void frag_init (void);
-fragS *frag_alloc (struct obstack *);
+fragS *frag_alloc (struct obstack *, size_t);
 void frag_grow (size_t nchars);
 char *frag_more (size_t nchars);
 void frag_align (int alignment, int fill_character, int max);
@@ -155,7 +155,7 @@ bool frag_offset_fixed_p (const fragS *, const fragS *, offsetT *);
 bool frag_offset_ignore_align_p (const fragS *, const fragS *, offsetT *);
 bool frag_gtoffset_p (valueT, const fragS *, valueT, const fragS *, offsetT *);
 
-int get_frag_count (void);
+unsigned int get_frag_count (void);
 void clear_frag_count (void);
 
 #endif /* FRAGS_H */

@@ -1,5 +1,5 @@
 /* Parse options for the GNU linker.
-   Copyright (C) 1991-2023 Free Software Foundation, Inc.
+   Copyright (C) 1991-2025 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -105,12 +105,12 @@ static const struct ld_option ld_options[] =
     'a', N_("KEYWORD"), N_("Shared library control for HP/UX compatibility"),
     ONE_DASH },
   { {"architecture", required_argument, NULL, 'A'},
-    'A', N_("ARCH"), N_("Set architecture") , TWO_DASHES },
+    'A', N_("ARCH"), N_("Set architecture") , EXACTLY_TWO_DASHES },
   { {"format", required_argument, NULL, 'b'},
     'b', N_("TARGET"), N_("Specify target for following input files"),
-    TWO_DASHES },
+    EXACTLY_TWO_DASHES },
   { {"mri-script", required_argument, NULL, 'c'},
-    'c', N_("FILE"), N_("Read MRI format linker script"), TWO_DASHES },
+    'c', N_("FILE"), N_("Read MRI format linker script"), EXACTLY_TWO_DASHES },
   { {"dc", no_argument, NULL, 'd'},
     'd', NULL, N_("Force common symbols to be defined"), ONE_DASH },
   { {"dp", no_argument, NULL, 'd'},
@@ -187,6 +187,9 @@ static const struct ld_option ld_options[] =
     '\0', N_("PLUGIN"), N_("Load named plugin"), ONE_DASH },
   { {"plugin-opt", required_argument, NULL, OPTION_PLUGIN_OPT},
     '\0', N_("ARG"), N_("Send arg to last-loaded plugin"), ONE_DASH },
+  { {"plugin-save-temps", no_argument, NULL, OPTION_PLUGIN_SAVE_TEMPS},
+    '\0', NULL, N_("Store plugin intermediate files permanently"),
+    ONE_DASH },
   { {"flto", optional_argument, NULL, OPTION_IGNORE},
     '\0', NULL, N_("Ignored for GCC LTO option compatibility"),
     ONE_DASH },
@@ -219,6 +222,12 @@ static const struct ld_option ld_options[] =
   { {"just-symbols", required_argument, NULL, 'R'},
     'R', N_("FILE"), N_("Just link symbols (if directory, same as --rpath)"),
     TWO_DASHES },
+
+  { {"remap-inputs-file", required_argument, NULL, OPTION_REMAP_INPUTS_FILE},
+    '\0', N_("FILE"), "Provide a FILE containing input remapings", TWO_DASHES },
+  { {"remap-inputs", required_argument, NULL, OPTION_REMAP_INPUTS},
+    '\0', N_("PATTERN=FILE"), "Remap input files matching PATTERN to FILE", TWO_DASHES },
+
   { {"strip-all", no_argument, NULL, 's'},
     's', NULL, N_("Strip all symbols"), TWO_DASHES },
   { {"strip-debug", no_argument, NULL, 'S'},
@@ -478,6 +487,9 @@ static const struct ld_option ld_options[] =
   { {"sort-section", required_argument, NULL, OPTION_SORT_SECTION},
     '\0', N_("name|alignment"),
     N_("Sort sections by name or maximum alignment"), TWO_DASHES },
+  { {"section-ordering-file", required_argument, NULL, OPTION_SECTION_ORDERING_FILE},
+    '\0', N_("FILE"),
+    N_("Sort sections by statements in FILE"), TWO_DASHES },
   { {"spare-dynamic-tags", required_argument, NULL, OPTION_SPARE_DYNAMIC_TAGS},
     '\0', N_("COUNT"), N_("How many tags to reserve in .dynamic section"),
     TWO_DASHES },
@@ -498,6 +510,8 @@ static const struct ld_option ld_options[] =
   { {"section-start", required_argument, NULL, OPTION_SECTION_START},
     '\0', N_("SECTION=ADDRESS"), N_("Set address of named section"),
     TWO_DASHES },
+  { {"image-base", required_argument, NULL, OPTION_IMAGE_BASE},
+    '\0', N_("ADDRESS"), N_("Set image base address"), TWO_DASHES },
   { {"Tbss", required_argument, NULL, OPTION_TBSS},
     '\0', N_("ADDRESS"), N_("Set address of .bss section"), ONE_DASH },
   { {"Tdata", required_argument, NULL, OPTION_TDATA},
@@ -545,14 +559,27 @@ static const struct ld_option ld_options[] =
   { {"warn-constructors", no_argument, NULL, OPTION_WARN_CONSTRUCTORS},
     '\0', NULL, N_("Warn if global constructors/destructors are seen"),
     TWO_DASHES },
+
+  { {"error-execstack", no_argument, NULL, OPTION_ERROR_EXECSTACK},
+    '\0', NULL, NULL, TWO_DASHES },
+  { {"no-error-execstack", no_argument, NULL, OPTION_NO_ERROR_EXECSTACK},
+    '\0', NULL, NULL, TWO_DASHES },
+  { {"warn-execstack-objects", no_argument, NULL, OPTION_WARN_EXECSTACK_OBJECTS},
+    '\0', NULL, NULL, TWO_DASHES },
   { {"warn-execstack", no_argument, NULL, OPTION_WARN_EXECSTACK},
-    '\0', NULL, N_("Warn when creating an executable stack"), TWO_DASHES },
+    '\0', NULL, NULL, TWO_DASHES },
   { {"no-warn-execstack", no_argument, NULL, OPTION_NO_WARN_EXECSTACK},
-    '\0', NULL, N_("Do not warn when creating an executable stack"), TWO_DASHES },
+    '\0', NULL, NULL, TWO_DASHES },
+
+  { {"error-rwx-segments", no_argument, NULL, OPTION_ERROR_RWX_SEGMENTS},
+    '\0', NULL, NULL, TWO_DASHES },
+  { {"no-error-rwx-segments", no_argument, NULL, OPTION_NO_ERROR_RWX_SEGMENTS},
+    '\0', NULL, NULL, TWO_DASHES },
   { {"warn-rwx-segments", no_argument, NULL, OPTION_WARN_RWX_SEGMENTS},
-    '\0', NULL, N_("Warn when creating executable segments"), TWO_DASHES },
+    '\0', NULL, NULL, TWO_DASHES },
   { {"no-warn-rwx-segments", no_argument, NULL, OPTION_NO_WARN_RWX_SEGMENTS},
-    '\0', NULL, N_("Do not warn when creating executable segments"), TWO_DASHES },
+    '\0', NULL, NULL, TWO_DASHES },
+
   { {"warn-multiple-gp", no_argument, NULL, OPTION_WARN_MULTIPLE_GP},
     '\0', NULL, N_("Warn if the multiple GP values are used"), TWO_DASHES },
   { {"warn-once", no_argument, NULL, OPTION_WARN_ONCE},
@@ -938,11 +965,28 @@ parse_args (unsigned argc, char **argv)
 	case OPTION_NON_CONTIGUOUS_REGIONS_WARNINGS:
 	  link_info.non_contiguous_regions_warnings = true;
 	  break;
+
+	case OPTION_ERROR_EXECSTACK:
+	  link_info.error_execstack = 1;
+	  break;
+	case OPTION_NO_ERROR_EXECSTACK:
+	  link_info.error_execstack = 0;
+	  break;
+	case OPTION_WARN_EXECSTACK_OBJECTS:
+	  link_info.warn_execstack = 2;
+	  break;
 	case OPTION_WARN_EXECSTACK:
 	  link_info.warn_execstack = 1;
 	  break;
 	case OPTION_NO_WARN_EXECSTACK:
 	  link_info.warn_execstack = 0;
+	  break;
+
+	case OPTION_ERROR_RWX_SEGMENTS:
+	  link_info.warn_is_error_for_rwx_segments = 1;
+	  break;
+	case OPTION_NO_ERROR_RWX_SEGMENTS:
+	  link_info.warn_is_error_for_rwx_segments = 0;
 	  break;
 	case OPTION_WARN_RWX_SEGMENTS:
 	  link_info.no_warn_rwx_segments = 0;
@@ -952,6 +996,7 @@ parse_args (unsigned argc, char **argv)
 	  link_info.no_warn_rwx_segments = 1;
 	  link_info.user_warn_rwx_segments = 1;
 	  break;
+
 	case 'e':
 	  lang_add_entry (optarg, true);
 	  break;
@@ -1174,6 +1219,9 @@ parse_args (unsigned argc, char **argv)
 	  if (plugin_opt_plugin_arg (optarg))
 	    einfo (_("%F%P: bad -plugin-opt option\n"));
 	  break;
+	case OPTION_PLUGIN_SAVE_TEMPS:
+	  config.plugin_save_temps = true;
+	  break;
 #endif /* BFD_SUPPORTS_PLUGINS */
 	case 'q':
 	  link_info.emitrelocations = true;
@@ -1357,6 +1405,12 @@ parse_args (unsigned argc, char **argv)
 	    einfo (_("%F%P: invalid section sorting option: %s\n"),
 		   optarg);
 	  break;
+	case OPTION_SECTION_ORDERING_FILE:
+	  if (command_line.section_ordering_file != NULL
+	      && strcmp (optarg, command_line.section_ordering_file) != 0)
+	    einfo (_("%P: warning: section ordering file changed.  Ignoring earlier definition\n"));
+	  command_line.section_ordering_file = optarg;
+	  break;
 	case OPTION_STATS:
 	  config.stats = true;
 	  break;
@@ -1425,6 +1479,9 @@ parse_args (unsigned argc, char **argv)
 	case OPTION_TTEXT:
 	  set_segment_start (".text", optarg);
 	  break;
+	case OPTION_IMAGE_BASE:
+	  /* Unless PE, --image-base and -Ttext-segment behavior is the same
+	     PE-specific functionality is implemented in emultempl/{pe, pep, beos}.em  */
 	case OPTION_TTEXT_SEGMENT:
 	  set_segment_start (".text-segment", optarg);
 	  break;
@@ -1682,6 +1739,27 @@ parse_args (unsigned argc, char **argv)
 	  link_info.fini_function = optarg;
 	  break;
 
+	case OPTION_REMAP_INPUTS_FILE:
+	  if (! ldfile_add_remap_file (optarg))
+	    einfo (_("%F%P: failed to add remap file %s\n"), optarg);
+	  break;
+
+	case OPTION_REMAP_INPUTS:
+	  {
+	    char *optarg2 = strchr (optarg, '=');
+	    if (optarg2 == NULL)
+	      /* FIXME: Should we allow --remap-inputs=@myfile as a synonym
+		 for --remap-inputs-file=myfile ?  */
+	      einfo (_("%F%P: invalid argument to option --remap-inputs\n"));
+	    size_t len = optarg2 - optarg;
+	    char * pattern = xmalloc (len + 1);
+	    memcpy (pattern, optarg, len);
+	    pattern[len] = 0;
+	    ldfile_add_remap (pattern, optarg2 + 1);
+	    free (pattern);
+	  }
+	  break;
+
 	case OPTION_REDUCE_MEMORY_OVERHEADS:
 	  link_info.reduce_memory_overheads = true;
 	  if (config.hash_table_size == 0)
@@ -1794,7 +1872,6 @@ parse_args (unsigned argc, char **argv)
     {
       char * new_name = NULL;
       char * percent;
-      int    res = 0;
 
       if (config.map_filename[0] == 0)
 	{
@@ -1811,9 +1888,9 @@ parse_args (unsigned argc, char **argv)
 	     output filename.  If the % character was the last character in
 	     the original map filename then add a .map extension.  */
 	  percent[0] = 0;
-	  res = asprintf (&new_name, "%s%s%s", config.map_filename,
-			  output_filename,
-			  percent[1] ? percent + 1 : ".map");
+	  new_name = xasprintf ("%s%s%s", config.map_filename,
+				output_filename,
+				percent[1] ? percent + 1 : ".map");
 
 	  /* FIXME: Should we ensure that any directory components in new_name exist ?  */
 	}
@@ -1831,10 +1908,9 @@ parse_args (unsigned argc, char **argv)
 	  else if (S_ISDIR (s.st_mode))
 	    {
 	      char lastc = config.map_filename[strlen (config.map_filename) - 1];
-	      res = asprintf (&new_name, "%s%s%s.map",
-			      config.map_filename,
-			      IS_DIR_SEPARATOR (lastc) ? "" : "/",
-			      lbasename (output_filename));
+	      new_name = xasprintf ("%s%s%s.map", config.map_filename,
+				    IS_DIR_SEPARATOR (lastc) ? "" : "/",
+				    lbasename (output_filename));
 	    }
 	  else if (! S_ISREG (s.st_mode))
 	    {
@@ -1844,14 +1920,7 @@ parse_args (unsigned argc, char **argv)
 	  /* else FIXME: Check write permission ?  */
 	}
 
-      if (res < 0)
-	{
-	  /* If the asprintf failed then something is probably very
-	     wrong.  Better to halt now rather than continue on
-	     into more problems.  */
-	  einfo (_("%P%F: cannot create name for linker map file: %E\n"));
-	}
-      else if (new_name != NULL)
+      if (new_name != NULL)
 	{
 	  /* This is a trivial memory leak.  */
 	  config.map_filename = new_name;
@@ -1920,16 +1989,6 @@ parse_args (unsigned argc, char **argv)
 	  if (opt_dynamic_list != dynamic_list_data)
 	    opt_dynamic_list = dynamic_list;
 	}
-      else
-	{
-	  /* Free the export list.  */
-	  for (; head->next != NULL; head = next)
-	    {
-	      next = head->next;
-	      free (head);
-	    }
-	  free (export_list);
-	}
     }
 
   switch (opt_dynamic_list)
@@ -1953,23 +2012,22 @@ parse_args (unsigned argc, char **argv)
 	break;
       case symbolic:
 	link_info.symbolic = true;
-	if (link_info.dynamic_list)
-	  {
-	    struct bfd_elf_version_expr *ent, *next;
-	    for (ent = link_info.dynamic_list->head.list; ent; ent = next)
-	      {
-		next = ent->next;
-		free (ent);
-	      }
-	    free (link_info.dynamic_list);
-	    link_info.dynamic_list = NULL;
-	  }
+	link_info.dynamic_list = NULL;
 	break;
       case symbolic_functions:
 	link_info.dynamic = true;
 	link_info.dynamic_data = true;
 	break;
       }
+
+  /* -z nosectionheader implies --strip-all.  */
+  if (config.no_section_header)
+    {
+      if (bfd_link_relocatable (&link_info))
+	einfo (_("%F%P: -r and -z nosectionheader may not be used together\n"));
+
+      link_info.strip = strip_all;
+    }
 
   if (!bfd_link_dll (&link_info))
     {
@@ -2152,6 +2210,17 @@ elf_shlib_list_options (FILE *file)
   fprintf (file, _("\
   -z noseparate-code          Don't create separate code program header (default)\n"));
 #endif
+#if DEFAULT_LD_ROSEGMENT
+  fprintf (file, _("\
+  --rosegment                 With -z separate-code, create a single read-only segment (default)\n"));
+  fprintf (file, _("\
+  --no-rosegment              With -z separate-code, creste two read-only segments\n"));
+#else
+  fprintf (file, _("\
+  --rosegment                 With -z separate-code, create a single read-only segment\n"));
+  fprintf (file, _("\
+  --no-rosegment              With -z separate-code, creste two read-only segments (default)\n"));
+#endif
   fprintf (file, _("\
   -z common                   Generate common symbols with STT_COMMON type\n"));
   fprintf (file, _("\
@@ -2176,6 +2245,17 @@ elf_shlib_list_options (FILE *file)
       fprintf (file, _("\
   -z textoff                  Don't treat DT_TEXTREL in output as error\n"));
     }
+#if DEFAULT_LD_Z_MEMORY_SEAL
+  fprintf (file, _("\
+  -z memory-seal              Mark object be memory sealed (default)\n"));
+  fprintf (file, _("\
+  -z nomemory-seal            Don't mark oject to be memory sealed\n"));
+#else
+  fprintf (file, _("\
+  -z memory-seal              Mark object be memory sealed\n"));
+  fprintf (file, _("\
+  -z nomemory-seal            Don't mark oject to be memory sealed (default)\n"));
+#endif
 }
 
 static void
@@ -2183,6 +2263,15 @@ elf_static_list_options (FILE *file)
 {
   fprintf (file, _("\
   --build-id[=STYLE]          Generate build ID note\n"));
+  /* DEFAULT_BUILD_ID_STYLE n/a here */
+#ifdef WITH_XXHASH
+  fprintf (file, _("\
+                                Styles: none,md5,sha1,xx,uuid,0xHEX\n"));
+  /* NB: testsuite/ld-elf/build-id.exp depends on this syntax */
+#else
+  fprintf (file, _("\
+                                Styles: none,md5,sha1,uuid,0xHEX\n"));
+#endif
   fprintf (file, _("\
   --package-metadata[=JSON]   Generate package metadata note\n"));
   fprintf (file, _("\
@@ -2203,24 +2292,32 @@ elf_static_list_options (FILE *file)
   -z muldefs                  Allow multiple definitions\n"));
   fprintf (file, _("\
   -z stack-size=SIZE          Set size of stack segment\n"));
+
   fprintf (file, _("\
   -z execstack                Mark executable as requiring executable stack\n"));
   fprintf (file, _("\
-  -z noexecstack              Mark executable as not requiring executable stack\n"));
-#if DEFAULT_LD_WARN_EXECSTACK == 1
+  -z noexecstack              Mark executable as not requiring executable stack\n"));  
   fprintf (file, _("\
-  --warn-execstack            Generate a warning if the stack is executable (default)\n"));
+  --warn-execstack-objects    Generate a warning if an object file requests an executable stack\n"));
+#if DEFAULT_LD_WARN_EXECSTACK == 0
+  fprintf (file, _("\
+  --warn-execstack            Generate a warning if creating an executable stack\n"));
 #else
   fprintf (file, _("\
-  --warn-execstack            Generate a warning if the stack is executable\n"));
+  --warn-execstack            Generate a warning if creating an executable stack (default)\n"));
 #endif
 #if DEFAULT_LD_WARN_EXECSTACK == 0
   fprintf (file, _("\
-  --no-warn-execstack         Do not generate a warning if the stack is executable (default)\n"));
+  --no-warn-execstack         Do not generate a warning if creating an executable stack (default)\n"));
 #else
   fprintf (file, _("\
-  --no-warn-execstack         Do not generate a warning if the stack is executable\n"));
+  --no-warn-execstack         Do not generate a warning if creating an executable stack\n"));
 #endif
+  fprintf (file, _("\
+  --error-execstack           Turn warnings about executable stacks into errors\n"));
+  fprintf (file, _("\
+  --no-error-execstack        Do not turn warnings about executable stacks into errors\n"));
+  
 #if DEFAULT_LD_WARN_RWX_SEGMENTS
   fprintf (file, _("\
   --warn-rwx-segments         Generate a warning if a LOAD segment has RWX permissions (default)\n"));
@@ -2232,6 +2329,11 @@ elf_static_list_options (FILE *file)
   fprintf (file, _("\
   --no-warn-rwx-segments      Do not generate a warning if a LOAD segments has RWX permissions (default)\n"));
 #endif
+  fprintf (file, _("\
+  --error-rwx-segments        Turn warnings about loadable RWX segments into errors\n"));
+  fprintf (file, _("\
+  --no-error-rwx-segments     Do not turn warnings about loadable RWX segments into errors\n"));
+
   fprintf (file, _("\
   -z unique-symbol            Avoid duplicated local symbol names\n"));
   fprintf (file, _("\
@@ -2245,6 +2347,10 @@ elf_static_list_options (FILE *file)
   fprintf (file, _("\
   -z start-stop-visibility=V  Set visibility of built-in __start/__stop symbols\n\
                                 to DEFAULT, PROTECTED, HIDDEN or INTERNAL\n"));
+  fprintf (file, _("\
+  -z sectionheader            Generate section header (default)\n"));
+  fprintf (file, _("\
+  -z nosectionheader          Do not generate section header\n"));
 }
 
 static void

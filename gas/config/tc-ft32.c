@@ -1,5 +1,5 @@
 /* tc-ft32.c -- Assemble code for ft32
-   Copyright (C) 2008-2023 Free Software Foundation, Inc.
+   Copyright (C) 2008-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -487,16 +487,16 @@ md_atof (int type, char *litP, int *sizeP)
   return NULL;
 }
 
-const char *md_shortopts = "";
+const char md_shortopts[] = "";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #define OPTION_NORELAX (OPTION_MD_BASE)
   {"norelax", no_argument, NULL, OPTION_NORELAX},
   {"no-relax", no_argument, NULL, OPTION_NORELAX},
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* We have no target specific options yet, so these next
    two functions are empty.  */
@@ -690,9 +690,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
       return NULL;
     }
 
-  relP = XNEW (arelent);
-  gas_assert (relP != 0);
-  relP->sym_ptr_ptr = XNEW (asymbol *);
+  relP = notes_alloc (sizeof (arelent));
+  relP->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *relP->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   relP->address = fixP->fx_frag->fr_address + fixP->fx_where;
 

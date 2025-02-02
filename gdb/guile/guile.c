@@ -1,6 +1,6 @@
 /* General GDB/Guile code.
 
-   Copyright (C) 2014-2023 Free Software Foundation, Inc.
+   Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,13 +20,11 @@
 /* See README file in this directory for implementation notes, coding
    conventions, et.al.  */
 
-#include "defs.h"
 #include "breakpoint.h"
 #include "cli/cli-cmds.h"
 #include "cli/cli-script.h"
 #include "cli/cli-utils.h"
 #include "command.h"
-#include "gdbcmd.h"
 #include "top.h"
 #include "ui.h"
 #include "extension-priv.h"
@@ -115,6 +113,7 @@ static const struct extension_language_ops guile_extension_ops =
 {
   gdbscm_initialize,
   gdbscm_initialized,
+  nullptr,
 
   gdbscm_eval_from_control_command,
 
@@ -125,6 +124,7 @@ static const struct extension_language_ops guile_extension_ops =
   gdbscm_apply_val_pretty_printer,
 
   NULL, /* gdbscm_apply_frame_filter, */
+  NULL, /* gdbscm_load_ptwrite_filter, */
 
   gdbscm_preserve_values,
 
@@ -594,6 +594,7 @@ initialize_gdb_module (void *data)
   gdbscm_initialize_auto_load ();
   gdbscm_initialize_blocks ();
   gdbscm_initialize_breakpoints ();
+  gdbscm_initialize_colors ();
   gdbscm_initialize_commands ();
   gdbscm_initialize_disasm ();
   gdbscm_initialize_frames ();

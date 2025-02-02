@@ -1,5 +1,5 @@
 /* aarch64-asm.c -- AArch64 assembler support.
-   Copyright (C) 2012-2023 Free Software Foundation, Inc.
+   Copyright (C) 2012-2025 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of the GNU opcodes library.
@@ -153,9 +153,14 @@ aarch64_ins_reglane (const aarch64_operand *self, const aarch64_opnd_info *info,
 	{
 	case AARCH64_OPND_QLF_S_4B:
 	case AARCH64_OPND_QLF_S_2H:
-	  /* L:H */
+	  /* H:L */
 	  assert (reglane_index < 4);
 	  insert_fields (code, reglane_index, 0, 2, FLD_L, FLD_H);
+	  break;
+	case AARCH64_OPND_QLF_S_2B:
+	  /* H:L:M */
+	  assert (reglane_index < 8);
+	  insert_fields (code, reglane_index, 0, 3, FLD_M, FLD_L, FLD_H);
 	  break;
 	default:
 	  return false;
@@ -180,6 +185,11 @@ aarch64_ins_reglane (const aarch64_operand *self, const aarch64_opnd_info *info,
 
       switch (info->qualifier)
 	{
+	case AARCH64_OPND_QLF_S_B:
+	  /* H:imm3 */
+	  assert (reglane_index < 16);
+	  insert_fields (code, reglane_index, 0, 2, FLD_imm3_19, FLD_H);
+	  break;
 	case AARCH64_OPND_QLF_S_H:
 	  /* H:L:M */
 	  assert (reglane_index < 8);
@@ -283,6 +293,17 @@ aarch64_ins_ldst_reglist_r (const aarch64_operand *self ATTRIBUTE_UNUSED,
     value = (aarch64_insn) 1;
   insert_field (FLD_S, code, value, 0);
 
+  return true;
+}
+
+/* Insert regnos of register list operand for AdvSIMD lut instructions.  */
+bool
+aarch64_ins_lut_reglist (const aarch64_operand *self, const aarch64_opnd_info *info,
+		     aarch64_insn *code,
+		     const aarch64_inst *inst ATTRIBUTE_UNUSED,
+		     aarch64_operand_error *errors ATTRIBUTE_UNUSED)
+{
+  insert_field (self->fields[0], code, info->reglist.first_regno, 0);
   return true;
 }
 
@@ -702,6 +723,24 @@ aarch64_ins_addr_offset (const aarch64_operand *self ATTRIBUTE_UNUSED,
   return true;
 }
 
+/* Encode the address operand for e.g.
+     stlur <Xt>, [<Xn|SP>{, <amount>}].  */
+bool
+aarch64_ins_rcpc3_addr_offset (const aarch64_operand *self ATTRIBUTE_UNUSED,
+			       const aarch64_opnd_info *info, aarch64_insn *code,
+			       const aarch64_inst *inst ATTRIBUTE_UNUSED,
+			       aarch64_operand_error *errors ATTRIBUTE_UNUSED)
+{
+  /* Rn */
+  insert_field (self->fields[0], code, info->addr.base_regno, 0);
+
+  /* simm9 */
+  int imm = info->addr.offset.imm;
+  insert_field (self->fields[1], code, imm, 0);
+
+  return true;
+}
+
 /* Encode the address operand for e.g. LDRSW <Xt>, [<Xn|SP>, #<simm>]!.  */
 bool
 aarch64_ins_addr_simm (const aarch64_operand *self,
@@ -732,6 +771,28 @@ aarch64_ins_addr_simm (const aarch64_operand *self,
       if (info->addr.preind)
 	insert_field (self->fields[1], code, 1, 0);
     }
+
+  return true;
+}
+
+/* Encode the address operand, potentially offset by the load/store ammount,
+   e.g. LDIAPP <Xt>, <Xt2> [<Xn|SP>, #<simm>]
+   and  STILP  <Xt>, <Xt2> [<Xn|SP>], #<simm>.*/
+bool
+aarch64_ins_rcpc3_addr_opt_offset (const aarch64_operand *self ATTRIBUTE_UNUSED,
+				   const aarch64_opnd_info *info,
+				   aarch64_insn *code,
+				   const aarch64_inst *inst ATTRIBUTE_UNUSED,
+				   aarch64_operand_error *errors ATTRIBUTE_UNUSED)
+{
+  int imm;
+
+  /* Rn */
+  insert_field (FLD_Rn, code, info->addr.base_regno, 0);
+  /* simm */
+  imm = info->addr.offset.imm;
+  if (!imm)
+    insert_field (FLD_opc2, code, 1, 0);
 
   return true;
 }
@@ -980,6 +1041,21 @@ aarch64_ins_reg_shifted (const aarch64_operand *self ATTRIBUTE_UNUSED,
   return true;
 }
 
+/* Encode the LSL-shifted register operand for e.g.
+     ADDPT <Xd|SP>, <Xn|SP>, <Xm>{, LSL #<amount>}.  */
+bool
+aarch64_ins_reg_lsl_shifted (const aarch64_operand *self ATTRIBUTE_UNUSED,
+			     const aarch64_opnd_info *info, aarch64_insn *code,
+			     const aarch64_inst *inst ATTRIBUTE_UNUSED,
+			     aarch64_operand_error *errors ATTRIBUTE_UNUSED)
+{
+  /* Rm */
+  insert_field (FLD_Rm, code, info->reg.regno, 0);
+  /* imm3 */
+  insert_field (FLD_imm3_10, code, info->shifter.amount, 0);
+  return true;
+}
+
 /* Encode an SVE address [<base>, #<simm4>*<factor>, MUL VL],
    where <simm4> is a 4-bit signed value and where <factor> is 1 plus
    SELF's operand-dependent value.  fields[0] specifies the field that
@@ -1215,8 +1291,8 @@ aarch64_ins_sve_index (const aarch64_operand *self,
 {
   unsigned int esize = aarch64_get_qualifier_esize (info->qualifier);
   insert_field (self->fields[0], code, info->reglane.regno, 0);
-  insert_fields (code, (info->reglane.index * 2 + 1) * esize, 0,
-		 2, FLD_imm5, FLD_SVE_tszh);
+  insert_all_fields_after (self, 1, code,
+			   (info->reglane.index * 2 + 1) * esize);
   return true;
 }
 
@@ -1270,7 +1346,7 @@ aarch64_ins_sve_strided_reglist (const aarch64_operand *self,
 				   ATTRIBUTE_UNUSED)
 {
   unsigned int num_regs = get_operand_specific_data (self);
-  unsigned int mask = 16 | (16 / num_regs - 1);
+  unsigned int mask ATTRIBUTE_UNUSED = 16 | (16 / num_regs - 1);
   unsigned int val = info->reglist.first_regno;
   assert ((val & mask) == val);
   insert_field (self->fields[0], code, val >> 4, 0);
@@ -1372,6 +1448,119 @@ aarch64_ins_sve_float_zero_one (const aarch64_operand *self,
     insert_field (self->fields[0], code, 0, 0);
   else
     insert_field (self->fields[0], code, 1, 0);
+  return true;
+}
+
+bool
+aarch64_ins_sme_za_vrs1 (const aarch64_operand *self,
+			     const aarch64_opnd_info *info,
+			     aarch64_insn *code,
+			     const aarch64_inst *inst ATTRIBUTE_UNUSED,
+			     aarch64_operand_error *errors ATTRIBUTE_UNUSED)
+{
+  int za_reg = info->indexed_za.regno;
+  int regno = info->indexed_za.index.regno & 3;
+  int imm = info->indexed_za.index.imm;
+  int v =  info->indexed_za.v;
+  int countm1 = info->indexed_za.index.countm1;
+
+  insert_field (self->fields[0], code, v, 0);
+  insert_field (self->fields[1], code, regno, 0);
+  switch (info->qualifier)
+    {
+    case AARCH64_OPND_QLF_S_B:
+      insert_field (self->fields[2], code, imm / (countm1 + 1), 0);
+      break;
+    case AARCH64_OPND_QLF_S_H:
+    case AARCH64_OPND_QLF_S_S:
+      insert_field (self->fields[2], code, za_reg, 0);
+      insert_field (self->fields[3], code, imm / (countm1 + 1), 0);
+      break;
+    case AARCH64_OPND_QLF_S_D:
+      insert_field (self->fields[2], code, za_reg, 0);
+      break;
+    default:
+      return false;
+    }
+
+  return true;
+}
+
+bool
+aarch64_ins_sme_za_vrs2 (const aarch64_operand *self,
+			     const aarch64_opnd_info *info,
+			     aarch64_insn *code,
+			     const aarch64_inst *inst ATTRIBUTE_UNUSED,
+			     aarch64_operand_error *errors ATTRIBUTE_UNUSED)
+{
+  int za_reg = info->indexed_za.regno;
+  int regno = info->indexed_za.index.regno & 3;
+  int imm = info->indexed_za.index.imm;
+  int v =  info->indexed_za.v;
+  int countm1 = info->indexed_za.index.countm1;
+
+  insert_field (self->fields[0], code, v, 0);
+  insert_field (self->fields[1], code, regno, 0);
+  switch (info->qualifier)
+    {
+    case AARCH64_OPND_QLF_S_B:
+      insert_field (self->fields[2], code, imm / (countm1 + 1), 0);
+      break;
+    case AARCH64_OPND_QLF_S_H:
+      insert_field (self->fields[2], code, za_reg, 0);
+      insert_field (self->fields[3], code, imm / (countm1 + 1), 0);
+      break;
+    case AARCH64_OPND_QLF_S_S:
+    case AARCH64_OPND_QLF_S_D:
+      insert_field (self->fields[2], code, za_reg, 0);
+      break;
+    default:
+      return false;
+    }
+
+  return true;
+}
+
+/* Encode in SME instruction such as MOVZA ZA tile slice to vector.  */
+bool
+aarch64_ins_sme_za_tile_to_vec (const aarch64_operand *self,
+				const aarch64_opnd_info *info,
+				aarch64_insn *code,
+				const aarch64_inst *inst ATTRIBUTE_UNUSED,
+				aarch64_operand_error *errors ATTRIBUTE_UNUSED)
+{
+  int fld_v = info->indexed_za.v;
+  int fld_rv = info->indexed_za.index.regno - 12;
+  int fld_zan_imm = info->indexed_za.index.imm;
+  int regno = info->indexed_za.regno;
+
+  switch (info->qualifier)
+    {
+    case AARCH64_OPND_QLF_S_B:
+      insert_field (FLD_imm4_5, code, fld_zan_imm, 0);
+      break;
+    case AARCH64_OPND_QLF_S_H:
+      insert_field (FLD_ZA8_1, code, regno, 0);
+      insert_field (FLD_imm3_5, code, fld_zan_imm, 0);
+      break;
+    case AARCH64_OPND_QLF_S_S:
+      insert_field (FLD_ZA7_2, code, regno, 0);
+      insert_field (FLD_off2, code, fld_zan_imm, 0);
+      break;
+    case AARCH64_OPND_QLF_S_D:
+      insert_field (FLD_ZA6_3, code, regno, 0);
+      insert_field (FLD_ol, code, fld_zan_imm, 0);
+      break;
+    case AARCH64_OPND_QLF_S_Q:
+      insert_field (FLD_ZA5_4, code, regno, 0);
+      break;
+    default:
+      return false;
+    }
+
+  insert_field (self->fields[0], code, fld_v, 0);
+  insert_field (self->fields[1], code, fld_rv, 0);
+
   return true;
 }
 
@@ -1858,6 +2047,22 @@ do_special_encoding (struct aarch64_inst *inst)
 	? 1 : 0;
       insert_field (FLD_lse_sz, &inst->value, value, 0);
     }
+  if (inst->opcode->flags & F_RCPC3_SIZE)
+    {
+      switch (inst->operands[0].qualifier)
+	{
+	case AARCH64_OPND_QLF_W: value = 2; break;
+	case AARCH64_OPND_QLF_X: value = 3; break;
+	case AARCH64_OPND_QLF_S_B: value = 0; break;
+	case AARCH64_OPND_QLF_S_H: value = 1; break;
+	case AARCH64_OPND_QLF_S_S: value = 2; break;
+	case AARCH64_OPND_QLF_S_D: value = 3; break;
+	case AARCH64_OPND_QLF_S_Q: value = 0; break;
+	default: return;
+	}
+      insert_field (FLD_rcpc3_size, &inst->value, value, 0);
+    }
+
   if (inst->opcode->flags & F_SIZEQ)
     encode_sizeq (inst);
   if (inst->opcode->flags & F_FPTYPE)
@@ -1911,6 +2116,20 @@ do_special_encoding (struct aarch64_inst *inst)
       gen_sub_field (FLD_imm5, 0, num + 1, &field);
       insert_field_2 (&field, &inst->value, 1 << num, inst->opcode->mask);
     }
+
+  if ((inst->opcode->flags & F_OPD_SIZE) && inst->opcode->iclass == sve2_urqvs)
+    {
+      enum aarch64_opnd_qualifier qualifier[2];
+      aarch64_insn value1 = 0;
+      idx = 0;
+      qualifier[0] = inst->operands[idx].qualifier;
+      qualifier[1] = inst->operands[idx+2].qualifier;
+      value = aarch64_get_qualifier_standard_value (qualifier[0]);
+      value1 = aarch64_get_qualifier_standard_value (qualifier[1]);
+      assert ((value >> 1) == value1);
+      insert_field (FLD_size, &inst->value, value1, inst->opcode->mask);
+    }
+
   if (inst->opcode->flags & F_GPRSIZE_IN_Q)
     {
       /* Use Rt to encode in the case of e.g.
@@ -1963,7 +2182,12 @@ aarch64_encode_variant_using_iclass (struct aarch64_inst *inst)
       /* The variant is encoded as part of the immediate.  */
       break;
 
+    case sme_size_12_bh:
+      insert_field (FLD_S, &inst->value, aarch64_get_variant (inst), 0);
+      break;
+
     case sme_size_12_bhs:
+    case sme_size_12_b:
       insert_field (FLD_SME_size_12, &inst->value,
 		    aarch64_get_variant (inst), 0);
       break;
@@ -1995,6 +2219,7 @@ aarch64_encode_variant_using_iclass (struct aarch64_inst *inst)
 
     case sme_shift:
     case sve_index:
+    case sve_index1:
     case sve_shift_pred:
     case sve_shift_unpred:
     case sve_shift_tsz_hsd:
@@ -2011,6 +2236,7 @@ aarch64_encode_variant_using_iclass (struct aarch64_inst *inst)
       break;
 
     case sme_misc:
+    case sme2_movaz:
     case sve_misc:
       /* These instructions have only a single variant.  */
       break;

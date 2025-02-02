@@ -1,6 +1,6 @@
 // aarch64.cc -- aarch64 target support for gold.
 
-// Copyright (C) 2014-2023 Free Software Foundation, Inc.
+// Copyright (C) 2014-2025 Free Software Foundation, Inc.
 // Written by Jing Yu <jingyu@google.com> and Han Shen <shenhan@google.com>.
 
 // This file is part of gold.
@@ -2892,7 +2892,7 @@ AArch64_reloc_property_table* aarch64_reloc_property_table = NULL;
 
 // The aarch64 target class.
 // See the ABI at
-// http://infocenter.arm.com/help/topic/com.arm.doc.ihi0056b/IHI0056B_aaelf64.pdf
+// https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst
 template<int size, bool big_endian>
 class Target_aarch64 : public Sized_target<size, big_endian>
 {
@@ -2916,6 +2916,7 @@ class Target_aarch64 : public Sized_target<size, big_endian>
 			Section_id_hash> AArch64_input_section_map;
   typedef AArch64_insn_utilities<big_endian> Insn_utilities;
   const static int TCB_SIZE = size / 8 * 2;
+  static const Address invalid_address = static_cast<Address>(-1);
 
   Target_aarch64(const Target::Target_info* info = &aarch64_info)
     : Sized_target<size, big_endian>(info),
@@ -6951,7 +6952,7 @@ Target_aarch64<size, big_endian>::do_finalize_sections(
 				  ? NULL
 				  : this->plt_->rela_plt());
   layout->add_target_dynamic_tags(false, this->got_plt_, rel_plt,
-				  this->rela_dyn_, true, false);
+				  this->rela_dyn_, true, false, false);
 
   // Emit any relocs we saved in an attempt to avoid generating COPY
   // relocs.
@@ -8285,6 +8286,27 @@ Target_aarch64<size, big_endian>::relocate_relocs(
       Classify_reloc;
 
   gold_assert(sh_type == elfcpp::SHT_RELA);
+
+  if (offset_in_output_section == this->invalid_address)
+    {
+      const Output_relaxed_input_section *poris
+	= output_section->find_relaxed_input_section(relinfo->object,
+						     relinfo->data_shndx);
+      if (poris != NULL)
+	{
+	  Address section_address = poris->address();
+	  section_size_type section_size = poris->data_size();
+
+	  gold_assert(section_address >= view_address
+		      && (section_address + section_size
+			  <= view_address + view_size));
+
+	  off_t offset = section_address - view_address;
+	  view += offset;
+	  view_address += offset;
+	  view_size = section_size;
+	}
+    }
 
   gold::relocate_relocs<size, big_endian, Classify_reloc>(
     relinfo,

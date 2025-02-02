@@ -1,4 +1,4 @@
-# Copyright 2018-2023 Free Software Foundation, Inc.
+# Copyright 2018-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -69,9 +69,9 @@ proc run_style_tests { } {
     global testfile srcfile hex binfile
     global currently_disabled_style decimal hex
 
-    save_vars { env(TERM) } {
-	# We need an ANSI-capable terminal to get the output.
-	setenv TERM ansi
+    with_ansi_styling_terminal {
+	setenv TERM xterm-256color
+	setenv COLORTERM truecolor
 
 	# Restart GDB with the correct TERM variable setting, this
 	# means that GDB will enable styling.
@@ -92,7 +92,7 @@ proc run_style_tests { } {
 
 	set argv ""
 	gdb_test_multiple "frame" "frame without styling" {
-	    -re -wrap "main \\(argc=.*, (argv=$hex)\\).*style\\.c:\[0-9\].*" {
+	    -re -wrap "main \\(argc=.*, (argv=$hex.*)\\).*style\\.c:\[0-9\].*" {
 		set argv $expect_out(1,string)
 		pass $gdb_test_name
 	    }
@@ -102,18 +102,24 @@ proc run_style_tests { } {
 
 	set main_expr [limited_style main function]
 	set base_file_expr [limited_style ".*style\\.c" file]
-	set file_expr "$base_file_expr:\[0-9\]+"
+	set line_expr [limited_style $decimal line-number]
+	set file_expr "$base_file_expr:$line_expr"
 	set arg_expr [limited_style "arg." variable]
 
+	# On some embedded targets that don't fully support argc/argv,
+	# argv may print as "0x0" or as an address with a symbol name
+	# following, so use a regexp general enough to match that and
+	# do not make assumptions about how long the address string is.
 	gdb_test "frame" \
 	    [multi_line \
-		 "#0\\s+$main_expr\\s+\\($arg_expr=$decimal,\\s+$arg_expr=$hex\\)\\s+at\\s+$file_expr" \
-		 "\[0-9\]+\\s+.*return.* break here .*"]
-	gdb_test "info breakpoints" "$main_expr at $file_expr.*"
+		 "#0\\s+$main_expr\\s+\\($arg_expr=$decimal,\\s+$arg_expr=$hex.*\\)\\s+at\\s+$file_expr" \
+		 "$line_expr\\s+.*return.* break here .*"]
+	gdb_test "info breakpoints" \
+	    ".*[limited_style What title].*$main_expr at $file_expr.*"
 
 	gdb_test_no_output "set style sources off"
 	gdb_test "frame" \
-	    "\r\n\[^\033\]*break here.*" \
+	    "\r\n$line_expr\[^\033\]*break here.*" \
 	    "frame without sources styling"
 	gdb_test_no_output "set style sources on"
 
@@ -134,17 +140,22 @@ proc run_style_tests { } {
 	    # the line listing; this is why the words from the source
 	    # code are spelled out in the final result line of the
 	    # test.
+	    set re0_styled \
+		[multi_line \
+		     "#0\\s+$main_expr\\s+\\($arg_expr=$decimal,\\s+$arg_expr=$hex\\)" \
+		     "\\s+at\\s+$file_expr" \
+		     "$line_expr\\s+.*return.* break here .*"]
 	    set re1_styled \
 		[multi_line \
 		     "#0\\s+$main_expr\\s+\\($arg_expr=$decimal,\\s+" \
-		     "\\s+$arg_expr=$hex\\)" \
+		     "\\s+$arg_expr=$hex.*\\)" \
 		     "\\s+at\\s+$file_expr" \
-		     "\[0-9\]+\\s+.*return.* break here .*"]
+		     "$line_expr\\s+.*return.* break here .*"]
 	    set re2_styled \
 		[multi_line \
 		     "#0\\s+$main_expr\\s+\\($arg_expr=.*" \
-		     "\\s+$arg_expr=$hex\\)\\s+at\\s+$file_expr" \
-		     "\[0-9\]+\\s+.*return.* break here .*"]
+		     "\\s+$arg_expr=$hex.*\\)\\s+at\\s+$file_expr" \
+		     "$line_expr\\s+.*return.* break here .*"]
 
 	    # The length of the line containing argv containing:
 	    # - 4 leading spaces
@@ -152,7 +163,11 @@ proc run_style_tests { } {
 	    # - closing parenthesis
 	    set line_len [expr 4 + $argv_len + 1]
 
-	    if { $line_len > $width } {
+	    if { $argv == "argv=0x0" && $width >= 27 } {
+		# Embedded target with no argv support.
+		# #0  main (argc=0, argv=0x0)
+		set re_styled $re0_styled
+	    } elseif { $line_len > $width } {
 		# At on the next line.
 		set re_styled $re1_styled
 	    } else {
@@ -196,8 +211,9 @@ proc run_style_tests { } {
 	set sfield [limited_style string_field variable]
 	set efield [limited_style e_field variable]
 	set evalue [limited_style VALUE_TWO variable]
+	set lhs [limited_style "\\\$$decimal" variable]
 	gdb_test "print struct_value" \
-	    "\{$ifield = 23,.*$sfield = .*,.*$efield = $evalue.*"
+	    "$lhs = \{$ifield = 23,.*$sfield = .*,.*$efield = $evalue.*"
 
 	set ffield [limited_style field variable]
 	set cstart [string_to_regexp "/* XXX "]
@@ -226,8 +242,8 @@ proc run_style_tests { } {
 	    "The ${address_style_expr} foreground color is: ${color}" \
 	    "style name and style word styled using its own style in show style"
 
-	set aliases_expr [limited_style ".*aliases.*" title]
-	set breakpoints_expr [limited_style ".*breakpoints.*" title]
+	set aliases_expr [limited_style ".*aliases.*" command]
+	set breakpoints_expr [limited_style ".*breakpoints.*" command]
 	gdb_test "help" \
 	    [multi_line \
 		 "List of classes of commands:" \
@@ -236,10 +252,10 @@ proc run_style_tests { } {
 		 "${breakpoints_expr} -- Making program stop at certain points\." \
 		 ".*" \
 		] \
-	    "help classes of commands styled with title"
+	    "help classes of commands styled with command"
 
-	set taas_expr  [limited_style ".*taas.*" title]
-	set tfaas_expr  [limited_style ".*tfaas.*" title]
+	set taas_expr  [limited_style ".*taas.*" command]
+	set tfaas_expr  [limited_style ".*tfaas.*" command]
 	set cut_for_thre_expr [limited_style "cut for 'thre" highlight]
 	gdb_test "apropos -v cut for 'thre" \
 	    [multi_line \
@@ -289,7 +305,7 @@ proc run_style_tests { } {
 	gdb_test_no_output "maintenance deprecate p \"new_p\"" \
 	    "maintenance deprecate p \"new_p\" /1/"
 	gdb_test "p 5" \
-	    "Warning: '[limited_style p title]', an alias for the command '[limited_style print title]', is deprecated.*Use '[limited_style new_p title]'.*" \
+	    "Warning: '[limited_style p command]', an alias for the command '[limited_style print command]', is deprecated.*Use '[limited_style new_p command]'.*" \
 	    "p deprecated warning, with replacement"
 
 	# Check that the version string is styled in the output of 'show
@@ -298,6 +314,21 @@ proc run_style_tests { } {
 	set url [limited_style "http:.*html" file]
 	gdb_test "show version" "${vers}.*<$url>.*" \
 	    "'show version' is styled"
+
+	if { $currently_disabled_style != "version" } {
+	    # Check that colors in styling can be set as integer and as RGB hex
+	    # triplet.  Check that the version string is styled in the output of
+	    # 'show version' according to the set colors.
+	    gdb_test_no_output "set style version intensity normal"
+	    gdb_test_no_output "set style version background 255"
+	    gdb_test_no_output "set style version foreground #FED210"
+	    gdb_test "show style version background" \
+		"The \033\\\[38;2;254;210;16;48;5;255;22;27m.*\".*version.*\".*style.*\033\\\[m background color is: 255" \
+		"Version's 256-color background style"
+	    gdb_test "show style version foreground" \
+		"The \033\\\[38;2;254;210;16;48;5;255;22;27m.*\".*version.*\".*style.*\033\\\[m foreground color is: #FED210" \
+		"Version's TrueColor foreground style"
+	}
     }
 }
 
@@ -306,9 +337,10 @@ proc run_style_tests { } {
 # Python pygments module is not available, so, when we disable
 # disassembler styling, we should always see a change in output.
 proc test_disable_disassembler_styling { } {
-    save_vars { env(TERM) } {
+    save_vars { env(TERM) env(NO_COLOR) } {
 	# We need an ANSI-capable terminal to get the output.
 	setenv TERM ansi
+	setenv NO_COLOR ""
 
 	# Restart GDB with the correct TERM variable setting, this
 	# means that GDB will enable styling.
@@ -414,9 +446,10 @@ proc test_disassembler_error_handling { } {
 	return
     }
 
-    save_vars { env(TERM) } {
+    save_vars { env(TERM) env(NO_COLOR) } {
 	# We need an ANSI-capable terminal to get the output.
 	setenv TERM ansi
+	setenv NO_COLOR ""
 
 	# Restart GDB with the correct TERM variable setting, this
 	# means that GDB will enable styling.
@@ -472,6 +505,179 @@ proc test_startup_version_string { } {
     gdb_test "" "${vers}.*" "version is styled at startup"
 }
 
+# Color support is disabled when TERM=dumb and COLORTERM="".
+# All colors are approximated to none when set.
+proc test_colorsupport_monochrome { } {
+    with_test_prefix "colorsupport_monochrome" {
+	with_ansi_styling_terminal {
+	    setenv TERM dumb
+	    gdb_exit
+	    gdb_start
+	    gdb_test "print \$_colorsupport" \
+		"\\\$1 = \"monochrome\"" \
+		"color support is monochrome"
+	    gdb_test_no_output "set style enabled off"
+	    gdb_test_no_output "set style filename foreground none"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: none" \
+	      "none without approximation"
+	    gdb_test_no_output "set style filename foreground blue"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: none" \
+	      "blue approximated to none"
+	}
+    }
+}
+
+# Color support is limited by 8 colors when TERM=ansi and COLORTERM="".
+# All colors are approximated to basic colors when set.
+proc test_colorsupport_8color { } {
+    with_test_prefix "colorsupport_8color" {
+	with_ansi_styling_terminal {
+	    gdb_exit
+	    gdb_start
+	    gdb_test "print \$_colorsupport" \
+		"\033\\\[.*m\\\$1\033\\\[m = \"monochrome,ansi_8color\"" \
+		"color support is 8 color"
+	    gdb_test_no_output "set style enabled off"
+	    gdb_test_no_output "set style filename foreground none"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: none" \
+	      "none without approximation"
+	    gdb_test_no_output "set style filename foreground yellow"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: yellow" \
+	      "yellow without approximation"
+	    gdb_test_no_output "set style filename foreground 9"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: red" \
+	      "9 approximated to red"
+	    gdb_test_no_output "set style filename foreground 118"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: green" \
+	      "118 approximated to green"
+	    gdb_test_no_output "set style filename foreground #000ABC"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: blue" \
+	      "#000ABC approximated to blue"
+	}
+    }
+}
+
+# Color support is limited by 256 colors when TERM=xterm-256color and
+# COLORTERM="".  All colors are approximated by 256 color palette when set.
+proc test_colorsupport_256color { } {
+    with_test_prefix "colorsupport_256color" {
+	with_ansi_styling_terminal {
+	    setenv TERM xterm-256color
+	    gdb_exit
+	    gdb_start
+	    gdb_test "print \$_colorsupport" \
+		"\033\\\[.*m\\\$1\033\\\[m = \"monochrome,ansi_8color,aixterm_16color,xterm_256color\"" \
+		"color support is 256 color"
+	    gdb_test_no_output "set style enabled off"
+	    gdb_test_no_output "set style filename foreground none"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: none" \
+	      "none without approximation"
+	    gdb_test_no_output "set style filename foreground red"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: red" \
+	      "red without approximation"
+	    gdb_test_no_output "set style filename foreground 9"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: 9" \
+	      "9 without approximation"
+	    gdb_test_no_output "set style filename foreground 118"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: 118" \
+	      "118 without approximation"
+	    gdb_test_no_output "set style filename foreground #CD00CD"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: 5" \
+	      "#CD00CD approximated to 5"
+	    gdb_test_no_output "set style filename foreground #FFAF12"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: 214" \
+	      "#FFAF12 approximated to 214"
+	}
+    }
+}
+
+# Color support is limited by 16777216 colors when TERM=xterm-256color and
+# COLORTERM="truecolor".  No approximation needed.
+proc test_colorsupport_truecolor { } {
+    with_test_prefix "colorsupport_truecolor" {
+	with_ansi_styling_terminal {
+	    setenv TERM xterm-256color
+	    setenv COLORTERM truecolor
+	    gdb_exit
+	    gdb_start
+	    gdb_test "print \$_colorsupport" \
+		"\033\\\[.*m\\\$1\033\\\[m = \"monochrome,ansi_8color,aixterm_16color,xterm_256color,rgb_24bit\"" \
+		"color support is truecolor"
+	    gdb_test_no_output "set style enabled off"
+	    gdb_test_no_output "set style filename foreground none"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: none" \
+	      "none without approximation"
+	    gdb_test_no_output "set style filename foreground red"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: red" \
+	      "red without approximation"
+	    gdb_test_no_output "set style filename foreground 9"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: 9" \
+	      "9 without approximation"
+	    gdb_test_no_output "set style filename foreground 118"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: 118" \
+	      "118 without approximation"
+	    gdb_test_no_output "set style filename foreground #CD00CD"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: #CD00CD" \
+	      "#CD00CD without approximation"
+	}
+    }
+}
+
+# Color support is limited by 16777216 colors when TERM=dumb and
+# COLORTERM=24bit.  No approximation needed.  Basic colors replaced with RGB.
+proc test_colorsupport_truecolor_only { } {
+    with_test_prefix "colorsupport_truecolor_only" {
+	with_ansi_styling_terminal {
+	    setenv TERM dumb
+	    setenv COLORTERM truecolor
+	    gdb_exit
+	    gdb_start
+	    gdb_test "print \$_colorsupport" \
+		"\\\$1 = \"monochrome,rgb_24bit\"" \
+		"color support is truecolor only"
+	    gdb_test_no_output "set style enabled off"
+	    gdb_test_no_output "set style filename foreground none"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: none" \
+	      "none without approximation"
+	    gdb_test_no_output "set style filename foreground red"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: #DE382B" \
+	      "red replaced by #DE382B"
+	    gdb_test_no_output "set style filename foreground 9"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: #FF0000" \
+	      "9 replaced by #FF0000"
+	    gdb_test_no_output "set style filename foreground 118"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: #87FF00" \
+	      "118 replaced by #87FF00"
+	    gdb_test_no_output "set style filename foreground #CD00CD"
+	    gdb_test "show style filename foreground" \
+	      "The \"filename\" style foreground color is: #CD00CD" \
+	      "#CD00CD without approximation"
+	}
+    }
+}
+
 # Check to see if the Python styling of disassembler output is
 # expected or not, this styling requires Python support in GDB, and
 # the Python pygments module to be available.
@@ -489,7 +695,7 @@ with_test_prefix "all styles enabled" {
 
 # Now, for each style in turn.  Disable that style only and run the
 # test again.  Things in that style should NOT now be styled.
-foreach style { title file function highlight variable \
+foreach style { command title file function highlight variable \
 		    address metadata } {
     set currently_disabled_style $style
     with_test_prefix "disable style $style" {
@@ -506,3 +712,9 @@ test_disassembler_error_handling
 
 # Finally, check the styling of the version string during startup.
 test_startup_version_string
+
+test_colorsupport_monochrome
+test_colorsupport_8color
+test_colorsupport_256color
+test_colorsupport_truecolor
+test_colorsupport_truecolor_only

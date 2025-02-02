@@ -1,5 +1,5 @@
 /* tc-crx.c -- Assembler code for the CRX CPU core.
-   Copyright (C) 2004-2023 Free Software Foundation, Inc.
+   Copyright (C) 2004-2025 Free Software Foundation, Inc.
 
    Contributed by Tomer Levi, NSC, Israel.
    Originally written for GAS 2.12 by Tomer Levi, NSC, Israel.
@@ -102,12 +102,12 @@ const char EXP_CHARS[] = "eE";
 const char FLT_CHARS[] = "f'";
 
 /* Target-specific multicharacter options, not const-declared at usage.  */
-const char *md_shortopts = "";
-struct option md_longopts[] =
+const char md_shortopts[] = "";
+const struct option md_longopts[] =
 {
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* This table describes all the machine specific pseudo-ops
    the assembler has to support.  The fields are:
@@ -284,8 +284,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS * fixP)
 {
   arelent * reloc;
 
-  reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr  = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   reloc->address = fixP->fx_frag->fr_address + fixP->fx_where;
   reloc->addend = fixP->fx_offset;
@@ -318,8 +318,6 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS * fixP)
 	{
 	  /* We only resolve difference expressions in the same section.  */
 	  as_bad_subtract (fixP);
-	  free (reloc->sym_ptr_ptr);
-	  free (reloc);
 	  return NULL;
 	}
     }

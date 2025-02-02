@@ -1,4 +1,4 @@
-/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2025 Free Software Foundation, Inc.
    Contributed by Oracle.
 
    This file is part of GNU Binutils.
@@ -21,7 +21,9 @@
 #if defined(__i386__) || defined(__x86_64)
 #include <cpuid.h>  /* GCC-provided */
 #elif defined(__aarch64__)
+#if !defined(ATTRIBUTE_UNUSED)
 #define ATTRIBUTE_UNUSED __attribute__((unused))
+#endif
 
 static inline uint_t __attribute_const__
 __get_cpuid (unsigned int op ATTRIBUTE_UNUSED, unsigned int *eax,
@@ -42,6 +44,11 @@ __get_cpuid (unsigned int op ATTRIBUTE_UNUSED, unsigned int *eax,
   Tprintf (DBG_LT0, "cpuid.c:%d read_cpuid_id() MIDR_EL1=0x%016x\n", __LINE__, *eax);
   return res;
 }
+#elif defined(__riscv)
+#include <sched.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <asm/hwprobe.h>
 #endif
 
 /*
@@ -180,6 +187,28 @@ get_cpuid_info ()
 	cpi->cpi_model += CPI_MODEL_XTD (regs.eax) << 4;
       break;
     }
+#elif defined(__riscv)
+  #ifndef __riscv_hwprobe
+	  cpi->cpi_vendor = 0;
+	  cpi->cpi_family = 0;
+	  cpi->cpi_model = 0;
+  #else
+		struct riscv_hwprobe res;
+		res.key = RISCV_HWPROBE_KEY_MVENDORID;
+		cpu_set_t cpu_set;
+		int __riscv_hwprobe (struct riscv_hwprobe *pairs, 			\
+					long pair_count, long cpu_count, 		\
+					unsigned long *cpus, unsigned long flags)	\
+	{
+		return syscall(__NR_riscv_hwprobe, pairs, pair_count, cpu_count, cpus, flags);
+	}
+	CPU_ZERO(&cpu_set);
+	CPU_SET(0, &cpu_set);
+	long ret = __riscv_hwprobe(&res, 1, 1, &cpu_set, 0);
+	cpi->cpi_vendor = res.value;
+	cpi->cpi_family = 0;
+	cpi->cpi_model = 0;
+	#endif
 #endif
   return cpi;
 }

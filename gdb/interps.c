@@ -1,6 +1,6 @@
 /* Manages interpreters for GDB, the GNU debugger.
 
-   Copyright (C) 2000-2023 Free Software Foundation, Inc.
+   Copyright (C) 2000-2024 Free Software Foundation, Inc.
 
    Written by Jim Ingham <jingham@apple.com> of Apple Computer, Inc.
 
@@ -29,8 +29,7 @@
    the readline command interface, and it is probably simpler to just let
    them take over the input in their resume proc.  */
 
-#include "defs.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "ui-out.h"
 #include "gdbsupport/event-loop.h"
 #include "event-top.h"
@@ -132,16 +131,11 @@ interp_set (struct interp *interp, bool top_level)
   if (interpreter_p != interp->name ())
     interpreter_p = interp->name ();
 
-  bool warn_about_mi1 = false;
-
   /* Run the init proc.  */
   if (!interp->inited)
     {
       interp->init (top_level);
       interp->inited = true;
-
-      if (streq (interp->name (), "mi1"))
-	warn_about_mi1 = true;
     }
 
   /* Do this only after the interpreter is initialized.  */
@@ -151,11 +145,6 @@ interp_set (struct interp *interp, bool top_level)
   clear_interpreter_hooks ();
 
   interp->resume ();
-
-  if (warn_about_mi1)
-    warning (_("MI version 1 is deprecated in GDB 13 and "
-	       "will be removed in GDB 14.  Please upgrade "
-	       "to a newer version of MI."));
 }
 
 /* Look up the interpreter for NAME.  If no such interpreter exists,
@@ -198,13 +187,16 @@ interp_lookup (struct ui *ui, const char *name)
 /* See interps.h.  */
 
 void
-set_top_level_interpreter (const char *name)
+set_top_level_interpreter (const char *name, bool for_new_ui)
 {
   /* Find it.  */
   struct interp *interp = interp_lookup (current_ui, name);
 
   if (interp == NULL)
     error (_("Interpreter `%s' unrecognized"), name);
+  if (for_new_ui && !interp->supports_new_ui ())
+    error (_("interpreter '%s' cannot be used with a new UI"), name);
+
   /* Install it.  */
   interp_set (interp, true);
 }
@@ -262,24 +254,6 @@ command_interp (void)
     return current_ui->current_interpreter;
 }
 
-/* See interps.h.  */
-
-void
-interp_pre_command_loop (struct interp *interp)
-{
-  gdb_assert (interp != NULL);
-
-  interp->pre_command_loop ();
-}
-
-/* See interp.h  */
-
-int
-interp_supports_command_editing (struct interp *interp)
-{
-  return interp->supports_command_editing ();
-}
-
 /* interp_exec - This executes COMMAND_STR in the current 
    interpreter.  */
 
@@ -301,7 +275,6 @@ clear_interpreter_hooks (void)
   deprecated_print_frame_info_listing_hook = 0;
   /*print_frame_more_info_hook = 0; */
   deprecated_query_hook = 0;
-  deprecated_warning_hook = 0;
   deprecated_readline_begin_hook = 0;
   deprecated_readline_hook = 0;
   deprecated_readline_end_hook = 0;
@@ -323,7 +296,6 @@ interpreter_exec_cmd (const char *args, int from_tty)
   scoped_restore save_stderr = make_scoped_restore (&gdb_stderr);
   scoped_restore save_stdlog = make_scoped_restore (&gdb_stdlog);
   scoped_restore save_stdtarg = make_scoped_restore (&gdb_stdtarg);
-  scoped_restore save_stdtargerr = make_scoped_restore (&gdb_stdtargerr);
 
   if (args == NULL)
     error_no_arg (_("interpreter-exec command"));
@@ -381,6 +353,225 @@ struct interp *
 current_interpreter (void)
 {
   return current_ui->current_interpreter;
+}
+
+/* Helper interps_notify_* functions.  Call METHOD on the top-level interpreter
+   of all UIs.  */
+
+template <typename MethodType, typename ...Args>
+void
+interps_notify (MethodType method, Args&&... args)
+{
+  SWITCH_THRU_ALL_UIS ()
+    {
+      interp *tli = top_level_interpreter ();
+      if (tli != nullptr)
+	(tli->*method) (std::forward<Args> (args)...);
+    }
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_signal_received (gdb_signal sig)
+{
+  interps_notify (&interp::on_signal_received, sig);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_signal_exited (gdb_signal sig)
+{
+  interps_notify (&interp::on_signal_exited, sig);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_no_history ()
+{
+  interps_notify (&interp::on_no_history);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_normal_stop (bpstat *bs, int print_frame)
+{
+  interps_notify (&interp::on_normal_stop, bs, print_frame);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_exited (int status)
+{
+  interps_notify (&interp::on_exited, status);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_user_selected_context_changed (user_selected_what selection)
+{
+  interps_notify (&interp::on_user_selected_context_changed, selection);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_new_thread (thread_info *t)
+{
+  interps_notify (&interp::on_new_thread, t);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_thread_exited (thread_info *t,
+			      std::optional<ULONGEST> exit_code,
+			      int silent)
+{
+  interps_notify (&interp::on_thread_exited, t, exit_code, silent);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_inferior_added (inferior *inf)
+{
+  interps_notify (&interp::on_inferior_added, inf);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_inferior_appeared (inferior *inf)
+{
+  interps_notify (&interp::on_inferior_appeared, inf);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_inferior_disappeared (inferior *inf)
+{
+  interps_notify (&interp::on_inferior_disappeared, inf);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_inferior_removed (inferior *inf)
+{
+  interps_notify (&interp::on_inferior_removed, inf);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_record_changed (inferior *inf, int started, const char *method,
+			       const char *format)
+{
+  interps_notify (&interp::on_record_changed, inf, started, method, format);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_target_resumed (ptid_t ptid)
+{
+  interps_notify (&interp::on_target_resumed, ptid);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_solib_loaded (const solib &so)
+{
+  interps_notify (&interp::on_solib_loaded, so);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_solib_unloaded (const solib &so)
+{
+  interps_notify (&interp::on_solib_unloaded, so);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_traceframe_changed (int tfnum, int tpnum)
+{
+  interps_notify (&interp::on_traceframe_changed, tfnum, tpnum);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_tsv_created (const trace_state_variable *tsv)
+{
+  interps_notify (&interp::on_tsv_created, tsv);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_tsv_deleted (const trace_state_variable *tsv)
+{
+  interps_notify (&interp::on_tsv_deleted, tsv);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_tsv_modified (const trace_state_variable *tsv)
+{
+  interps_notify (&interp::on_tsv_modified, tsv);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_breakpoint_created (breakpoint *b)
+{
+  interps_notify (&interp::on_breakpoint_created, b);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_breakpoint_deleted (breakpoint *b)
+{
+  interps_notify (&interp::on_breakpoint_deleted, b);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_breakpoint_modified (breakpoint *b)
+{
+  interps_notify (&interp::on_breakpoint_modified, b);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_param_changed (const char *param, const char *value)
+{
+  interps_notify (&interp::on_param_changed, param, value);
+}
+
+/* See interps.h.  */
+
+void
+interps_notify_memory_changed (inferior *inf, CORE_ADDR addr, ssize_t len,
+			       const bfd_byte *data)
+{
+  interps_notify (&interp::on_memory_changed, inf, addr, len, data);
 }
 
 /* This just adds the "interpreter-exec" command.  */

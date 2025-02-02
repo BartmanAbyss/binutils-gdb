@@ -1,4 +1,4 @@
-# Copyright 2013-2023 Free Software Foundation, Inc.
+# Copyright 2013-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -95,7 +95,13 @@ proc local_add_gdb_index { program } {
 # building an index from a program already using one.
 
 set test "check if index present"
-gdb_test_multiple "mt print objfiles ${testfile}" $test {
+set filter "gdb_index|debug_names|Psymtabs|Cooked"
+set cmd "pipe mt print objfiles ${testfile} | grep -E \"$filter\""
+set cmd_re [string_to_regexp $cmd]
+gdb_test_multiple $cmd $test {
+    -re ^$cmd_re {
+	exp_continue
+    }
     -re "gdb_index.*${gdb_prompt} $" {
 	set binfile_with_index $binfile
 	set host_binfile_with_index [gdb_remote_download host $binfile]

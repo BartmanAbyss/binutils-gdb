@@ -1,5 +1,5 @@
 /* This file is tc-arm.h
-   Copyright (C) 1994-2023 Free Software Foundation, Inc.
+   Copyright (C) 1994-2025 Free Software Foundation, Inc.
    Contributed by Richard Earnshaw (rwe@pegasus.esprit.ec.org)
 	Modified by David Taylor (dtaylor@armltd.co.uk)
 
@@ -28,7 +28,6 @@
 
 #define WORKING_DOT_WORD
 
-#define COFF_MAGIC 	ARMMAGIC
 #define TARGET_ARCH 	bfd_arch_arm
 
 #define DIFF_EXPR_OK
@@ -231,7 +230,7 @@ arm_min (int am_p1, int am_p2)
 #define TC_FRAG_TYPE		struct arm_frag_type
 #define TC_FRAG_INIT(fragp, max_bytes) arm_init_frag (fragp, max_bytes)
 #define TC_ALIGN_ZERO_IS_DEFAULT 1
-#define HANDLE_ALIGN(fragp)	arm_handle_align (fragp)
+#define HANDLE_ALIGN(sec, fragp) arm_handle_align (fragp)
 /* PR gas/19276: COFF/PE segment alignment is already handled in coff_frob_section().  */
 #ifndef TE_PE
 #define SUB_SEGMENT_ALIGN(SEG, FRCHAIN)				\

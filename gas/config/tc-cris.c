@@ -1,5 +1,5 @@
 /* tc-cris.c -- Assembler code for the CRIS CPU core.
-   Copyright (C) 2000-2023 Free Software Foundation, Inc.
+   Copyright (C) 2000-2025 Free Software Foundation, Inc.
 
    Contributed by Axis Communications AB, Lund, Sweden.
    Originally written for GAS 1.38.1 by Mikael Asker.
@@ -211,7 +211,7 @@ static int warn_for_branch_expansion = 0;
 static int err_for_dangerous_mul_placement
  = (XCONCAT2 (arch_,DEFAULT_CRIS_ARCH) != arch_crisv32);
 
-const char cris_comment_chars[] = ";";
+const char comment_chars[] = ";";
 
 /* This array holds the chars that only start a comment at the beginning of
    a line.  If the line seems to have the form '# 123 filename'
@@ -414,7 +414,7 @@ const relax_typeS md_cris_relax_table[] =
 #undef BDAP_WB
 
 /* Target-specific multicharacter options, not const-declared.  */
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #define OPTION_NO_US (OPTION_MD_BASE + 0)
   {"no-underscore", no_argument, NULL, OPTION_NO_US},
@@ -432,8 +432,8 @@ struct option md_longopts[] =
 };
 
 /* Not const-declared.  */
-size_t md_longopts_size = sizeof (md_longopts);
-const char *md_shortopts = "hHN";
+const size_t md_longopts_size = sizeof (md_longopts);
+const char md_shortopts[] = "hHN";
 
 /* At first glance, this may seems wrong and should be 4 (ba + nop); but
    since a short_jump must skip a *number* of long jumps, it must also be
@@ -3953,9 +3953,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixP)
       return 0;
     }
 
-  relP = XNEW (arelent);
-  gas_assert (relP != 0);
-  relP->sym_ptr_ptr = XNEW (asymbol *);
+  relP = notes_alloc (sizeof (arelent));
+  relP->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *relP->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   relP->address = fixP->fx_frag->fr_address + fixP->fx_where;
 

@@ -1,5 +1,5 @@
 /* tc-aarch64.h -- Header file for tc-aarch64.c.
-   Copyright (C) 2009-2023 Free Software Foundation, Inc.
+   Copyright (C) 2009-2025 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GAS.
@@ -182,7 +182,7 @@ struct aarch64_frag_type
 
 #define TC_FRAG_TYPE		struct aarch64_frag_type
 #define TC_FRAG_INIT(fragp, max_bytes) aarch64_init_frag (fragp, max_bytes)
-#define HANDLE_ALIGN(fragp)	aarch64_handle_align (fragp)
+#define HANDLE_ALIGN(sec, fragp) aarch64_handle_align (fragp)
 
 #define md_do_align(N, FILL, LEN, MAX, LABEL)					\
   if (FILL == NULL && (N) != 0 && ! need_pass_2 && subseg_text_p (now_seg))	\
@@ -263,28 +263,49 @@ extern void aarch64_after_parse_args (void);
 
 #ifdef OBJ_ELF
 
+#define TARGET_USE_GINSN 1
+/* Allow GAS to synthesize DWARF CFI for hand-written asm.
+   PS: TARGET_USE_CFIPOP is a pre-condition.  */
+#define TARGET_USE_SCFI 1
+/* Identify the maximum DWARF register number of all the registers being
+   tracked for SCFI.  This is the last DWARF register number of the set
+   of SP, FP, and all callee-saved registers.  For Aarch64, this means 79
+   because FP/Advanced SIMD v8-v15 are also callee-saved registers.  */
+# define SCFI_MAX_REG_ID 79
+/* Identify the DWARF register number of the frame-pointer register.  */
+# define REG_FP 29
+/* Identify the DWARF register number of the link register.  */
+# define REG_LR 30
+/* Identify the DWARF register number of the stack-pointer register.  */
+# define REG_SP 31
+
+#define SCFI_INIT_CFA_OFFSET 0
+
+#define SCFI_CALLEE_SAVED_REG_P(dw2reg)  aarch64_scfi_callee_saved_p (dw2reg)
+extern bool aarch64_scfi_callee_saved_p (uint32_t dw2reg_num);
+
 /* Whether SFrame stack trace info is supported.  */
 extern bool aarch64_support_sframe_p (void);
 #define support_sframe_p aarch64_support_sframe_p
 
-/* The stack-pointer register number for SFrame stack trace info.  */
+/* The stack pointer DWARF register number for SFrame CFA tracking.  */
 extern unsigned int aarch64_sframe_cfa_sp_reg;
 #define SFRAME_CFA_SP_REG aarch64_sframe_cfa_sp_reg
 
-/* The base-pointer register number for CFA stack trace info.  */
+/* The frame pointer DWARF register number for SFrame CFA and FP tracking.  */
 extern unsigned int aarch64_sframe_cfa_fp_reg;
 #define SFRAME_CFA_FP_REG aarch64_sframe_cfa_fp_reg
 
-/* The return address register number for CFA stack trace info.  */
+/* The return address DWARF register number for SFrame RA tracking.  */
 extern unsigned int aarch64_sframe_cfa_ra_reg;
 #define SFRAME_CFA_RA_REG aarch64_sframe_cfa_ra_reg
 
-/* Specify if RA tracking is needed.  */
+/* Whether SFrame return address tracking is needed.  */
 extern bool aarch64_sframe_ra_tracking_p (void);
 #define sframe_ra_tracking_p aarch64_sframe_ra_tracking_p
 
-/* Specify the fixed offset to recover RA from CFA.
-   (useful only when RA tracking is not needed).  */
+/* The fixed offset from CFA for SFrame to recover the return address.
+   (useful only when SFrame RA tracking is not needed).  */
 extern offsetT aarch64_sframe_cfa_ra_offset (void);
 #define sframe_cfa_ra_offset aarch64_sframe_cfa_ra_offset
 

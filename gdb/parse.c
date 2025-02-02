@@ -1,6 +1,6 @@
 /* Parse expressions for GDB.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    Modified from expread.y by the Department of Computer Science at the
    State University of New York at Buffalo, 1991.
@@ -29,7 +29,6 @@
    during the process of parsing; the lower levels of the tree always
    come first in the result.  */
 
-#include "defs.h"
 #include <ctype.h>
 #include "arch-utils.h"
 #include "symtab.h"
@@ -40,8 +39,8 @@
 #include "command.h"
 #include "language.h"
 #include "parser-defs.h"
-#include "gdbcmd.h"
-#include "symfile.h"		/* for overlay functions */
+#include "cli/cli-cmds.h"
+#include "symfile.h"
 #include "inferior.h"
 #include "target-float.h"
 #include "block.h"
@@ -49,7 +48,7 @@
 #include "objfiles.h"
 #include "user-regs.h"
 #include <algorithm>
-#include "gdbsupport/gdb_optional.h"
+#include <optional>
 #include "c-exp.h"
 
 static unsigned int expressiondebug = 0;
@@ -62,7 +61,7 @@ show_expressiondebug (struct ui_file *file, int from_tty,
 
 
 /* True if an expression parser should set yydebug.  */
-bool parser_debug;
+static bool parser_debug;
 
 static void
 show_parserdebug (struct ui_file *file, int from_tty,
@@ -71,12 +70,6 @@ show_parserdebug (struct ui_file *file, int from_tty,
   gdb_printf (file, _("Parser debugging is %s.\n"), value);
 }
 
-
-static expression_up parse_exp_in_context
-     (const char **, CORE_ADDR,
-      const struct block *, int,
-      bool, innermost_block_tracker *,
-      std::unique_ptr<expr_completion_base> *);
 
 /* Documented at it's declaration.  */
 
@@ -107,7 +100,7 @@ void
 parser_state::mark_struct_expression (expr::structop_base_operation *op)
 {
   gdb_assert (parse_completion && m_completion_state == nullptr);
-  m_completion_state.reset (new expr_complete_structop (op));
+  m_completion_state = std::make_unique<expr_complete_structop> (op);
 }
 
 /* Indicate that the current parser invocation is completing a tag.
@@ -152,10 +145,12 @@ parser_state::push_symbol (const char *name, block_symbol sym)
     }
   else
     {
-      struct bound_minimal_symbol msymbol = lookup_bound_minimal_symbol (name);
+      bound_minimal_symbol msymbol
+	= lookup_minimal_symbol (current_program_space, name);
       if (msymbol.minsym != NULL)
 	push_new<expr::var_msym_value_operation> (msymbol);
-      else if (!have_full_symbols () && !have_partial_symbols ())
+      else if (!have_full_symbols (current_program_space)
+	       && !have_partial_symbols (current_program_space))
 	error (_("No symbol table is loaded.  Use the \"file\" command."));
       else
 	error (_("No symbol \"%s\" in current context."), name);
@@ -168,7 +163,6 @@ void
 parser_state::push_dollar (struct stoken str)
 {
   struct block_symbol sym;
-  struct bound_minimal_symbol msym;
   struct internalvar *isym = NULL;
   std::string copy;
 
@@ -231,13 +225,15 @@ parser_state::push_dollar (struct stoken str)
   /* On some systems, such as HP-UX and hppa-linux, certain system routines
      have names beginning with $ or $$.  Check for those, first.  */
 
-  sym = lookup_symbol (copy.c_str (), NULL, VAR_DOMAIN, NULL);
+  sym = lookup_symbol (copy.c_str (), nullptr,
+		       SEARCH_VAR_DOMAIN | SEARCH_FUNCTION_DOMAIN, nullptr);
   if (sym.symbol)
     {
       push_new<expr::var_value_operation> (sym);
       return;
     }
-  msym = lookup_bound_minimal_symbol (copy.c_str ());
+  bound_minimal_symbol msym
+    = lookup_minimal_symbol (current_program_space, copy.c_str ());
   if (msym.minsym)
     {
       push_new<expr::var_msym_value_operation> (msym);
@@ -248,6 +244,21 @@ parser_state::push_dollar (struct stoken str)
 
   push_new<expr::internalvar_operation>
     (create_internalvar (copy.c_str () + 1));
+}
+
+/* See parser-defs.h.  */
+
+void
+parser_state::parse_error (const char *msg)
+{
+  if (this->prev_lexptr)
+    this->lexptr = this->prev_lexptr;
+
+  if (*this->lexptr == '\0')
+    error (_("A %s in expression, near the end of `%s'."),
+	   msg, this->start_of_input);
+  else
+    error (_("A %s in expression, near `%s'."), msg, this->lexptr);
 }
 
 
@@ -328,31 +339,13 @@ copy_name (struct stoken token)
 }
 
 
-/* Read an expression from the string *STRINGPTR points to,
-   parse it, and return a pointer to a struct expression that we malloc.
-   Use block BLOCK as the lexical context for variable names;
-   if BLOCK is zero, use the block of the selected stack frame.
-   Meanwhile, advance *STRINGPTR to point after the expression,
-   at the first nonwhite character that is not part of the expression
-   (possibly a null character).
-
-   If COMMA is nonzero, stop if a comma is reached.  */
-
-expression_up
-parse_exp_1 (const char **stringptr, CORE_ADDR pc, const struct block *block,
-	     int comma, innermost_block_tracker *tracker)
-{
-  return parse_exp_in_context (stringptr, pc, block, comma, false,
-			       tracker, nullptr);
-}
-
 /* As for parse_exp_1, except that if VOID_CONTEXT_P, then
    no value is expected from the expression.  */
 
 static expression_up
 parse_exp_in_context (const char **stringptr, CORE_ADDR pc,
 		      const struct block *block,
-		      int comma, bool void_context_p,
+		      parser_flags flags,
 		      innermost_block_tracker *tracker,
 		      std::unique_ptr<expr_completion_base> *completer)
 {
@@ -368,26 +361,31 @@ parse_exp_in_context (const char **stringptr, CORE_ADDR pc,
   if (tracker == nullptr)
     tracker = &local_tracker;
 
-  /* If no context specified, try using the current frame, if any.  */
-  if (!expression_context_block)
-    expression_context_block = get_selected_block (&expression_context_pc);
-  else if (pc == 0)
-    expression_context_pc = expression_context_block->entry_pc ();
-  else
-    expression_context_pc = pc;
-
-  /* Fall back to using the current source static context, if any.  */
-
-  if (!expression_context_block)
+  if ((flags & PARSER_LEAVE_BLOCK_ALONE) == 0)
     {
-      struct symtab_and_line cursal = get_current_source_symtab_and_line ();
-
-      if (cursal.symtab)
+      /* If no context specified, try using the current frame, if any.  */
+      if (!expression_context_block)
 	expression_context_block
-	  = cursal.symtab->compunit ()->blockvector ()->static_block ();
-
-      if (expression_context_block)
+	  = get_selected_block (&expression_context_pc);
+      else if (pc == 0)
 	expression_context_pc = expression_context_block->entry_pc ();
+      else
+	expression_context_pc = pc;
+
+      /* Fall back to using the current source static context, if any.  */
+
+      if (!expression_context_block)
+	{
+	  symtab_and_line cursal
+	    = get_current_source_symtab_and_line (current_program_space);
+
+	  if (cursal.symtab)
+	    expression_context_block
+	      = cursal.symtab->compunit ()->blockvector ()->static_block ();
+
+	  if (expression_context_block)
+	    expression_context_pc = expression_context_block->entry_pc ();
+	}
     }
 
   if (language_mode == language_mode_auto && block != NULL)
@@ -422,11 +420,10 @@ parse_exp_in_context (const char **stringptr, CORE_ADDR pc,
      to the value matching SELECTED_FRAME as set by get_current_arch.  */
 
   parser_state ps (lang, get_current_arch (), expression_context_block,
-		   expression_context_pc, comma, *stringptr,
-		   completer != nullptr, tracker, void_context_p);
+		   expression_context_pc, flags, *stringptr,
+		   completer != nullptr, tracker);
 
-  scoped_restore_current_language lang_saver;
-  set_language (lang->la_language);
+  scoped_restore_current_language lang_saver (lang->la_language);
 
   try
     {
@@ -453,19 +450,31 @@ parse_exp_in_context (const char **stringptr, CORE_ADDR pc,
   return result;
 }
 
+/* Read an expression from the string *STRINGPTR points to,
+   parse it, and return a pointer to a struct expression that we malloc.
+   Use block BLOCK as the lexical context for variable names;
+   if BLOCK is zero, use the block of the selected stack frame.
+   Meanwhile, advance *STRINGPTR to point after the expression,
+   at the first nonwhite character that is not part of the expression
+   (possibly a null character).  FLAGS are passed to the parser.  */
+
+expression_up
+parse_exp_1 (const char **stringptr, CORE_ADDR pc, const struct block *block,
+	     parser_flags flags, innermost_block_tracker *tracker)
+{
+  return parse_exp_in_context (stringptr, pc, block, flags,
+			       tracker, nullptr);
+}
+
 /* Parse STRING as an expression, and complain if this fails to use up
    all of the contents of STRING.  TRACKER, if non-null, will be
-   updated by the parser.  VOID_CONTEXT_P should be true to indicate
-   that the expression may be expected to return a value with void
-   type.  Parsers are free to ignore this, or to use it to help with
-   overload resolution decisions.  */
+   updated by the parser.  FLAGS are passed to the parser.  */
 
 expression_up
 parse_expression (const char *string, innermost_block_tracker *tracker,
-		  bool void_context_p)
+		  parser_flags flags)
 {
-  expression_up exp = parse_exp_in_context (&string, 0, nullptr, 0,
-					    void_context_p,
+  expression_up exp = parse_exp_in_context (&string, 0, nullptr, flags,
 					    tracker, nullptr);
   if (*string)
     error (_("Junk after end of expression."));
@@ -478,12 +487,9 @@ parse_expression (const char *string, innermost_block_tracker *tracker,
 expression_up
 parse_expression_with_language (const char *string, enum language lang)
 {
-  gdb::optional<scoped_restore_current_language> lang_saver;
+  std::optional<scoped_restore_current_language> lang_saver;
   if (current_language->la_language != lang)
-    {
-      lang_saver.emplace ();
-      set_language (lang);
-    }
+    lang_saver.emplace (lang);
 
   return parse_expression (string);
 }
@@ -501,7 +507,7 @@ parse_expression_for_completion
 
   try
     {
-      exp = parse_exp_in_context (&string, 0, 0, 0, false, nullptr, completer);
+      exp = parse_exp_in_context (&string, 0, 0, 0, nullptr, completer);
     }
   catch (const gdb_exception_error &except)
     {

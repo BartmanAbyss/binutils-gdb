@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2021-2023 Free Software Foundation, Inc.
+   Copyright (C) 2021-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -132,7 +132,11 @@ reloc (const char *op_c_str, const char *id_c_str, offsetT addend)
   if (0 == strcmp (op_c_str, "plt"))
     btype = BFD_RELOC_LARCH_B26;
   else
-    btype = loongarch_larch_reloc_name_lookup (NULL, op_c_str);
+    {
+      btype = loongarch_larch_reloc_name_lookup (NULL, op_c_str);
+      if (btype == BFD_RELOC_NONE)
+	as_fatal (_("unsupported modifier %s"), op_c_str);
+    }
 
   if (id_c_str)
   {
@@ -364,24 +368,24 @@ multiplicative_expression
 	| multiplicative_expression '%' unary_expression {emit_bin ('%');}
 	;
 
-additive_expression
+shift_expression
 	: multiplicative_expression
-	| additive_expression '+' multiplicative_expression {emit_bin ('+');}
-	| additive_expression '-' multiplicative_expression {emit_bin ('-');}
+	| shift_expression LEFT_OP multiplicative_expression {emit_bin (LEFT_OP);}
+	| shift_expression RIGHT_OP multiplicative_expression {emit_bin (RIGHT_OP);}
 	;
 
-shift_expression
-	: additive_expression
-	| shift_expression LEFT_OP additive_expression {emit_bin (LEFT_OP);}
-	| shift_expression RIGHT_OP additive_expression {emit_bin (RIGHT_OP);}
+additive_expression
+	: shift_expression
+	| additive_expression '+' shift_expression {emit_bin ('+');}
+	| additive_expression '-' shift_expression {emit_bin ('-');}
 	;
 
 relational_expression
-	: shift_expression
-	| relational_expression '<' shift_expression {emit_bin ('<');}
-	| relational_expression '>' shift_expression {emit_bin ('>');}
-	| relational_expression LE_OP shift_expression {emit_bin (LE_OP);}
-	| relational_expression GE_OP shift_expression {emit_bin (GE_OP);}
+	: additive_expression
+	| relational_expression '<' additive_expression {emit_bin ('<');}
+	| relational_expression '>' additive_expression {emit_bin ('>');}
+	| relational_expression LE_OP additive_expression {emit_bin (LE_OP);}
+	| relational_expression GE_OP additive_expression {emit_bin (GE_OP);}
 	;
 
 equality_expression

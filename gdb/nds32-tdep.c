@@ -1,6 +1,6 @@
 /* Target-dependent code for the NDS32 architecture, for GDB.
 
-   Copyright (C) 2013-2023 Free Software Foundation, Inc.
+   Copyright (C) 2013-2024 Free Software Foundation, Inc.
    Contributed by Andes Technology Corporation.
 
    This file is part of GDB.
@@ -18,7 +18,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "frame-unwind.h"
 #include "frame-base.h"
@@ -265,11 +265,12 @@ static const struct
    register.  */
 
 static struct value *
-value_of_nds32_reg (frame_info_ptr frame, const void *baton)
+value_of_nds32_reg (const frame_info_ptr &frame, const void *baton)
 {
-  return value_of_register ((int) (intptr_t) baton, frame);
+  return value_of_register ((int) (intptr_t) baton,
+			    get_next_frame_sentinel_okay (frame));
 }
-
+
 /* Implement the "frame_align" gdbarch method.  */
 
 static CORE_ADDR
@@ -901,7 +902,7 @@ nds32_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
    a pointer to the current nds32_frame_cache in *THIS_CACHE.  */
 
 static struct nds32_frame_cache *
-nds32_frame_cache (frame_info_ptr this_frame, void **this_cache)
+nds32_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   struct nds32_frame_cache *cache;
@@ -952,7 +953,7 @@ nds32_frame_cache (frame_info_ptr this_frame, void **this_cache)
    PC and the caller's SP when we were called.  */
 
 static void
-nds32_frame_this_id (frame_info_ptr this_frame,
+nds32_frame_this_id (const frame_info_ptr &this_frame,
 		     void **this_cache, struct frame_id *this_id)
 {
   struct nds32_frame_cache *cache = nds32_frame_cache (this_frame, this_cache);
@@ -967,7 +968,7 @@ nds32_frame_this_id (frame_info_ptr this_frame,
 /* Implement the "prev_register" frame_unwind method.  */
 
 static struct value *
-nds32_frame_prev_register (frame_info_ptr this_frame, void **this_cache,
+nds32_frame_prev_register (const frame_info_ptr &this_frame, void **this_cache,
 			   int regnum)
 {
   struct nds32_frame_cache *cache = nds32_frame_cache (this_frame, this_cache);
@@ -987,21 +988,21 @@ nds32_frame_prev_register (frame_info_ptr this_frame, void **this_cache,
   return frame_unwind_got_register (this_frame, regnum, regnum);
 }
 
-static const struct frame_unwind nds32_frame_unwind =
-{
+static const struct frame_unwind_legacy nds32_frame_unwind (
   "nds32 prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   nds32_frame_this_id,
   nds32_frame_prev_register,
   NULL,
-  default_frame_sniffer,
-};
+  default_frame_sniffer
+);
 
 /* Return the frame base address of *THIS_FRAME.  */
 
 static CORE_ADDR
-nds32_frame_base_address (frame_info_ptr this_frame, void **this_cache)
+nds32_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct nds32_frame_cache *cache = nds32_frame_cache (this_frame, this_cache);
 
@@ -1287,7 +1288,7 @@ nds32_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR addr)
 
 static int
 nds32_epilogue_frame_sniffer (const struct frame_unwind *self,
-			      frame_info_ptr this_frame, void **this_cache)
+			      const frame_info_ptr &this_frame, void **this_cache)
 {
   if (frame_relative_level (this_frame) == 0)
     return nds32_stack_frame_destroyed_p (get_frame_arch (this_frame),
@@ -1302,7 +1303,7 @@ nds32_epilogue_frame_sniffer (const struct frame_unwind *self,
    *THIS_CACHE.  */
 
 static struct nds32_frame_cache *
-nds32_epilogue_frame_cache (frame_info_ptr this_frame, void **this_cache)
+nds32_epilogue_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   struct nds32_frame_cache *cache;
@@ -1334,7 +1335,7 @@ nds32_epilogue_frame_cache (frame_info_ptr this_frame, void **this_cache)
 /* Implement the "this_id" frame_unwind method.  */
 
 static void
-nds32_epilogue_frame_this_id (frame_info_ptr this_frame,
+nds32_epilogue_frame_this_id (const frame_info_ptr &this_frame,
 			      void **this_cache, struct frame_id *this_id)
 {
   struct nds32_frame_cache *cache
@@ -1350,7 +1351,7 @@ nds32_epilogue_frame_this_id (frame_info_ptr this_frame,
 /* Implement the "prev_register" frame_unwind method.  */
 
 static struct value *
-nds32_epilogue_frame_prev_register (frame_info_ptr this_frame,
+nds32_epilogue_frame_prev_register (const frame_info_ptr &this_frame,
 				    void **this_cache, int regnum)
 {
   struct nds32_frame_cache *cache
@@ -1371,16 +1372,16 @@ nds32_epilogue_frame_prev_register (frame_info_ptr this_frame,
   return frame_unwind_got_register (this_frame, regnum, regnum);
 }
 
-static const struct frame_unwind nds32_epilogue_frame_unwind =
-{
+static const struct frame_unwind_legacy nds32_epilogue_frame_unwind (
   "nds32 epilogue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   nds32_epilogue_frame_this_id,
   nds32_epilogue_frame_prev_register,
   NULL,
   nds32_epilogue_frame_sniffer
-};
+);
 
 
 /* Floating type and struct type that has only one floating type member
@@ -1824,7 +1825,7 @@ nds32_return_value (struct gdbarch *gdbarch, struct value *func_type,
 /* Implement the "get_longjmp_target" gdbarch method.  */
 
 static int
-nds32_get_longjmp_target (frame_info_ptr frame, CORE_ADDR *pc)
+nds32_get_longjmp_target (const frame_info_ptr &frame, CORE_ADDR *pc)
 {
   gdb_byte buf[4];
   CORE_ADDR jb_addr;
@@ -2000,7 +2001,8 @@ nds32_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   else if (use_pseudo_fsrs == 1)
     {
       set_gdbarch_pseudo_register_read (gdbarch, nds32_pseudo_register_read);
-      set_gdbarch_pseudo_register_write (gdbarch, nds32_pseudo_register_write);
+      set_gdbarch_deprecated_pseudo_register_write
+	(gdbarch, nds32_pseudo_register_write);
       set_tdesc_pseudo_register_name (gdbarch, nds32_pseudo_register_name);
       set_tdesc_pseudo_register_type (gdbarch, nds32_pseudo_register_type);
       set_gdbarch_num_pseudo_regs (gdbarch, num_fsr_map[fpu_freg]);

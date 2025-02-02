@@ -1,5 +1,5 @@
 /* this is tc-z80.h
-   Copyright (C) 2005-2023 Free Software Foundation, Inc.
+   Copyright (C) 2005-2025 Free Software Foundation, Inc.
 
    Contributed by Arnold Metselaar <arnold_m@operamail.com>
 
@@ -28,7 +28,6 @@
 #define TARGET_FORMAT "elf32-z80"
 #endif
 #define BFD_ARCH      TARGET_ARCH
-#define COFF_MAGIC    0x5A80
 #define TARGET_BYTES_BIG_ENDIAN  0
 
 /* If you define this macro, GAS will warn about the

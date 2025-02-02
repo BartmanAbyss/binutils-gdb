@@ -1,6 +1,6 @@
 /* Implementation of the GDB variable objects API.
 
-   Copyright (C) 1999-2023 Free Software Foundation, Inc.
+   Copyright (C) 1999-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,12 +15,11 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "value.h"
 #include "expression.h"
 #include "frame.h"
 #include "language.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "block.h"
 #include "valprint.h"
 #include "gdbsupport/gdb_regex.h"
@@ -164,8 +163,6 @@ create_child_with_value (struct varobj *parent, int index,
 
 /* Utility routines */
 
-static enum varobj_display_formats variable_default_display (struct varobj *);
-
 static bool update_type_if_necessary (struct varobj *var,
 				      struct value *new_value);
 
@@ -261,7 +258,7 @@ varobj_create (const char *objname,
 	       const char *expression, CORE_ADDR frame, enum varobj_type type)
 {
   /* Fill out a varobj structure for the (root) variable being constructed.  */
-  std::unique_ptr<varobj> var (new varobj (new varobj_root));
+  auto var = std::make_unique<varobj> (new varobj_root);
 
   if (expression != NULL)
     {
@@ -326,17 +323,14 @@ varobj_create (const char *objname,
 	}
 
       /* Don't allow variables to be created for types.  */
-      enum exp_opcode opcode = var->root->exp->first_opcode ();
-      if (opcode == OP_TYPE
-	  || opcode == OP_TYPEOF
-	  || opcode == OP_DECLTYPE)
+      if (var->root->exp->type_p ())
 	{
 	  gdb_printf (gdb_stderr, "Attempt to use a type name"
 		      " as an expression.\n");
 	  return NULL;
 	}
 
-      var->format = variable_default_display (var.get ());
+      var->format = FORMAT_NATURAL;
       var->root->valid_block =
 	var->root->floating ? NULL : tracker.block ();
       var->root->global
@@ -488,20 +482,7 @@ enum varobj_display_formats
 varobj_set_display_format (struct varobj *var,
 			   enum varobj_display_formats format)
 {
-  switch (format)
-    {
-    case FORMAT_NATURAL:
-    case FORMAT_BINARY:
-    case FORMAT_DECIMAL:
-    case FORMAT_HEXADECIMAL:
-    case FORMAT_OCTAL:
-    case FORMAT_ZHEXADECIMAL:
-      var->format = format;
-      break;
-
-    default:
-      var->format = variable_default_display (var);
-    }
+  var->format = format;
 
   if (varobj_value_is_changeable_p (var) 
       && var->value != nullptr && !var->value->lazy ())
@@ -1202,7 +1183,7 @@ install_new_value (struct varobj *var, struct value *value, bool initial)
   changeable = varobj_value_is_changeable_p (var);
 
   /* If the type has custom visualizer, we consider it to be always
-     changeable.  FIXME: need to make sure this behaviour will not
+     changeable.  FIXME: need to make sure this behavior will not
      mess up read-sensitive values.  */
   if (var->dynamic->pretty_printer != NULL)
     changeable = true;
@@ -1408,6 +1389,9 @@ varobj_set_visualizer (struct varobj *var, const char *visualizer)
   /* If there are any children now, wipe them.  */
   varobj_delete (var, 1 /* children only */);
   var->num_children = -1;
+
+  /* Also be sure to reset the print value.  */
+  varobj_set_display_format (var, var->format);
 #else
   error (_("Python support required"));
 #endif
@@ -1884,14 +1868,6 @@ varobj_get_value_type (const struct varobj *var)
   return type;
 }
 
-/* What is the default display for this variable? We assume that
-   everything is "natural".  Any exceptions?  */
-static enum varobj_display_formats
-variable_default_display (struct varobj *var)
-{
-  return FORMAT_NATURAL;
-}
-
 /*
  * Language-dependencies
  */
@@ -2117,6 +2093,9 @@ my_value_of_variable (struct varobj *var, enum varobj_display_formats format)
       if (var->dynamic->pretty_printer != NULL)
 	return varobj_value_get_print_value (var->value.get (), var->format,
 					     var);
+      else if (var->parent != nullptr && varobj_is_dynamic_p (var->parent))
+	return var->print_value;
+
       return (*var->root->lang_ops->value_of_variable) (var, format);
     }
   else
@@ -2231,6 +2210,12 @@ varobj_value_get_print_value (struct value *value,
 	      if (PyObject_HasAttr (value_formatter, gdbpy_children_cst))
 		return "{...}";
 	    }
+	}
+      else
+	{
+	  /* If we've made it here, we don't want a pretty-printer --
+	     if we had one, it would already have been used.  */
+	  opts.raw = true;
 	}
     }
 #endif
@@ -2391,7 +2376,7 @@ varobj_invalidate_if_uses_objfile (struct objfile *objfile)
 	    {
 	      /* The varobj is tied to a block which is going away.  There is
 		 no way to reconstruct something later, so invalidate the
-		 varobj completly and drop the reference to the block which is
+		 varobj completely and drop the reference to the block which is
 		 being freed.  */
 	      var->root->is_valid = false;
 	      var->root->valid_block = nullptr;
@@ -2414,7 +2399,7 @@ varobj_invalidate_if_uses_objfile (struct objfile *objfile)
 
       /* var->value->type and var->type might also reference the objfile.
 	 This is taken care of in value.c:preserve_values which deals with
-	 making sure that objfile-owend types are replaced with
+	 making sure that objfile-owned types are replaced with
 	 gdbarch-owned equivalents.  */
     });
 }

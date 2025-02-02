@@ -1,5 +1,5 @@
 /* TI PRU assembler.
-   Copyright (C) 2014-2023 Free Software Foundation, Inc.
+   Copyright (C) 2014-2025 Free Software Foundation, Inc.
    Contributed by Dimitar Dimitrov <dimitar@dinux.eu>
    Based on tc-nios2.c
 
@@ -75,7 +75,7 @@ struct pru_opt_s
 
 static struct pru_opt_s pru_opt = { true, true };
 
-const char *md_shortopts = "r";
+const char md_shortopts[] = "r";
 
 enum options
 {
@@ -84,7 +84,7 @@ enum options
   OPTION_NO_WARN_REGNAME_LABEL,
 };
 
-struct option md_longopts[] = {
+const struct option md_longopts[] = {
   { "mlink-relax",  no_argument, NULL, OPTION_LINK_RELAX  },
   { "mno-link-relax",  no_argument, NULL, OPTION_NO_LINK_RELAX  },
   { "mno-warn-regname-label",  no_argument, NULL,
@@ -92,7 +92,7 @@ struct option md_longopts[] = {
   { NULL, no_argument, NULL, 0 }
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 typedef struct pru_insn_reloc
 {
@@ -368,7 +368,7 @@ s_pru_align (int ignore ATTRIBUTE_UNUSED)
 static void
 s_pru_text (int i)
 {
-  s_text (i);
+  obj_elf_text (i);
   pru_last_label = NULL;
   pru_current_align = 0;
   pru_current_align_seg = now_seg;
@@ -379,7 +379,7 @@ s_pru_text (int i)
 static void
 s_pru_data (int i)
 {
-  s_data (i);
+  obj_elf_data (i);
   pru_last_label = NULL;
   pru_current_align = 0;
   pru_current_align_seg = now_seg;
@@ -1401,6 +1401,7 @@ pru_parse_args (pru_insn_infoS *insn ATTRIBUTE_UNUSED, char *argstr,
   char *p;
   char *end = NULL;
   int i;
+  size_t len;
   p = argstr;
   i = 0;
   bool terminate = false;
@@ -1436,6 +1437,13 @@ pru_parse_args (pru_insn_infoS *insn ATTRIBUTE_UNUSED, char *argstr,
 	  if (end != NULL)
 	    as_bad (_("too many arguments"));
 	}
+
+      /* Strip trailing whitespace.  */
+      len = strlen (parsed_args[i]);
+      for (char *temp = parsed_args[i] + len - 1;
+	   len && ISSPACE (*temp);
+	   temp--, len--)
+	*temp = '\0';
 
       if (*parsestr == '\0' || (p != NULL && *p == '\0'))
 	terminate = true;
@@ -1758,10 +1766,11 @@ pru_fix_adjustable (fixS *fixp)
 arelent *
 tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
 {
-  arelent *reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
-  *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
+  arelent *reloc;
 
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
+  *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   reloc->addend = fixp->fx_offset;  /* fixp->fx_addnumber; */
 

@@ -1,5 +1,5 @@
 /* Generic target-file-type support for the BFD library.
-   Copyright (C) 1990-2023 Free Software Foundation, Inc.
+   Copyright (C) 1990-2025 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -266,8 +266,7 @@ BFD_JUMP_TABLE macros.
 .  NAME##_close_and_cleanup, \
 .  NAME##_bfd_free_cached_info, \
 .  NAME##_new_section_hook, \
-.  NAME##_get_section_contents, \
-.  NAME##_get_section_contents_in_window
+.  NAME##_get_section_contents
 .
 .  {* Called when the BFD is being closed to do any necessary cleanup.  *}
 .  bool (*_close_and_cleanup) (bfd *);
@@ -278,14 +277,12 @@ BFD_JUMP_TABLE macros.
 .  {* Read the contents of a section.  *}
 .  bool (*_bfd_get_section_contents) (bfd *, sec_ptr, void *, file_ptr,
 .				      bfd_size_type);
-.  bool (*_bfd_get_section_contents_in_window) (bfd *, sec_ptr, bfd_window *,
-.						file_ptr, bfd_size_type);
 .
 .  {* Entry points to copy private data.  *}
 .#define BFD_JUMP_TABLE_COPY(NAME) \
 .  NAME##_bfd_copy_private_bfd_data, \
 .  NAME##_bfd_merge_private_bfd_data, \
-.  _bfd_generic_init_private_section_data, \
+.  NAME##_init_private_section_data, \
 .  NAME##_bfd_copy_private_section_data, \
 .  NAME##_bfd_copy_private_symbol_data, \
 .  NAME##_bfd_copy_private_header_data, \
@@ -670,6 +667,13 @@ to find an alternative output format that is suitable.
 .  return abfd->xvec->keep_unused_section_symbols;
 .}
 .
+.static inline bool
+.bfd_target_supports_archives (const bfd *abfd)
+.{
+.  return (abfd->xvec->_bfd_check_format[bfd_archive]
+.	   != abfd->xvec->_bfd_check_format[bfd_unknown]);
+.}
+.
 */
 
 /* All known xvecs (even those that don't compile on all systems).
@@ -769,6 +773,8 @@ extern const bfd_target ia64_elf64_vms_vec;
 extern const bfd_target ia64_pei_vec;
 extern const bfd_target ip2k_elf32_vec;
 extern const bfd_target iq2000_elf32_vec;
+extern const bfd_target kvx_elf32_vec;
+extern const bfd_target kvx_elf64_vec;
 extern const bfd_target lm32_elf32_vec;
 extern const bfd_target lm32_elf32_fdpic_vec;
 extern const bfd_target loongarch_elf64_vec;
@@ -834,8 +840,6 @@ extern const bfd_target nds32_elf32_le_vec;
 extern const bfd_target nds32_elf32_linux_be_vec;
 extern const bfd_target nds32_elf32_linux_le_vec;
 extern const bfd_target nfp_elf64_vec;
-extern const bfd_target nios2_elf32_be_vec;
-extern const bfd_target nios2_elf32_le_vec;
 extern const bfd_target ns32k_aout_pc532mach_vec;
 extern const bfd_target ns32k_aout_pc532nbsd_vec;
 extern const bfd_target or1k_elf32_vec;
@@ -861,6 +865,7 @@ extern const bfd_target riscv_elf32_vec;
 extern const bfd_target riscv_elf64_vec;
 extern const bfd_target riscv_elf32_be_vec;
 extern const bfd_target riscv_elf64_be_vec;
+extern const bfd_target riscv64_pei_vec;
 extern const bfd_target rl78_elf32_vec;
 extern const bfd_target rs6000_xcoff64_vec;
 extern const bfd_target rs6000_xcoff64_aix_vec;
@@ -1128,6 +1133,11 @@ static const bfd_target * const _bfd_target_vector[] =
 	&ip2k_elf32_vec,
 	&iq2000_elf32_vec,
 
+#ifdef BFD64
+	&kvx_elf32_vec,
+	&kvx_elf64_vec,
+#endif
+
 	&lm32_elf32_vec,
 
 	&m32c_elf32_vec,
@@ -1212,9 +1222,6 @@ static const bfd_target * const _bfd_target_vector[] =
 	&nfp_elf64_vec,
 #endif
 
-	&nios2_elf32_be_vec,
-	&nios2_elf32_le_vec,
-
 	&ns32k_aout_pc532mach_vec,
 	&ns32k_aout_pc532nbsd_vec,
 
@@ -1253,6 +1260,7 @@ static const bfd_target * const _bfd_target_vector[] =
 	&riscv_elf64_vec,
 	&riscv_elf32_be_vec,
 	&riscv_elf64_be_vec,
+	&riscv64_pei_vec,
 #endif
 	&rl78_elf32_vec,
 
@@ -1448,9 +1456,6 @@ const bfd_target *const *const bfd_associated_vector = _bfd_associated_vector;
    number of entries that the array could possibly need.  */
 const size_t _bfd_target_vector_entries = ARRAY_SIZE (_bfd_target_vector);
 
-/* A place to stash a warning from _bfd_check_format.  */
-static struct per_xvec_message *per_xvec_warn[ARRAY_SIZE (_bfd_target_vector)
-					      + 1];
 
 /* This array maps configuration triplets onto BFD vectors.  */
 
@@ -1469,61 +1474,6 @@ static const struct targmatch bfd_target_match[] = {
 #include "targmatch.h"
   { NULL, NULL }
 };
-
-/*
-INTERNAL
-.{* Cached _bfd_check_format messages are put in this.  *}
-.struct per_xvec_message
-.{
-.  struct per_xvec_message *next;
-.  char message[];
-.};
-.
-INTERNAL_FUNCTION
-	_bfd_per_xvec_warn
-
-SYNOPSIS
-	struct per_xvec_message **_bfd_per_xvec_warn (const bfd_target *, size_t);
-
-DESCRIPTION
-	Return a location for the given target xvec to use for
-	warnings specific to that target.  If TARG is NULL, returns
-	the array of per_xvec_message pointers, otherwise if ALLOC is
-	zero, returns a pointer to a pointer to the list of messages
-	for TARG, otherwise (both TARG and ALLOC non-zero), allocates
-	a new 	per_xvec_message with space for a string of ALLOC
-	bytes and returns a pointer to a pointer to it.  May return a
-	pointer to a NULL pointer on allocation failure.
-*/
-
-struct per_xvec_message **
-_bfd_per_xvec_warn (const bfd_target *targ, size_t alloc)
-{
-  size_t idx;
-
-  if (!targ)
-    return per_xvec_warn;
-  for (idx = 0; idx < ARRAY_SIZE (_bfd_target_vector); idx++)
-    if (_bfd_target_vector[idx] == targ)
-      break;
-  struct per_xvec_message **m = per_xvec_warn + idx;
-  if (!alloc)
-    return m;
-  int count = 0;
-  while (*m)
-    {
-      m = &(*m)->next;
-      count++;
-    }
-  /* Anti-fuzzer measure.  Don't cache more than 5 messages.  */
-  if (count < 5)
-    {
-      *m = bfd_malloc (sizeof (**m) + alloc);
-      if (*m != NULL)
-	(*m)->next = NULL;
-    }
-  return m;
-}
 
 /* Find a target vector, given a name or configuration triplet.  */
 

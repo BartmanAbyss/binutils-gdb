@@ -1,6 +1,6 @@
 /* Routines for name->symbol lookups in GDB.
    
-   Copyright (C) 2003-2023 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    Contributed by David Carlton <carlton@bactrian.org> and by Kealia,
    Inc.
@@ -20,8 +20,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef DICTIONARY_H
-#define DICTIONARY_H
+#ifndef GDB_DICTIONARY_H
+#define GDB_DICTIONARY_H
 
 #include "symfile.h"
 
@@ -113,7 +113,7 @@ struct dict_iterator
 
 struct mdict_iterator
 {
-  /* The multidictionary with whcih this iterator is associated.  */
+  /* The multidictionary with which this iterator is associated.  */
   const struct multidictionary *mdict;
 
   /* The iterator used to iterate through individual dictionaries.  */
@@ -159,8 +159,7 @@ extern struct symbol *
 extern struct symbol *mdict_iter_match_next (const lookup_name_info &name,
 					     struct mdict_iterator *miterator);
 
-/* Return some notion of the size of the multidictionary: the number of
-   symbols if we have that, the number of hash buckets otherwise.  */
+/* Return the number of symbols in multidictionary MDICT.  */
 
 extern int mdict_size (const struct multidictionary *mdict);
 
@@ -209,4 +208,4 @@ private:
   struct mdict_iterator m_iter;
 };
 
-#endif /* DICTIONARY_H */
+#endif /* GDB_DICTIONARY_H */

@@ -1,6 +1,6 @@
 /* Support for printing C values for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "expression.h"
@@ -176,8 +176,7 @@ print_unpacked_pointer (struct type *type, struct type *elttype,
     {
       /* Print vtbl's nicely.  */
       CORE_ADDR vt_address = unpack_pointer (type, valaddr + embedded_offset);
-      struct bound_minimal_symbol msymbol =
-	lookup_minimal_symbol_by_pc (vt_address);
+      bound_minimal_symbol msymbol = lookup_minimal_symbol_by_pc (vt_address);
 
       /* If 'symbol_print' is set, we did the work above.  */
       if (!options->symbol_print
@@ -205,7 +204,7 @@ print_unpacked_pointer (struct type *type, struct type *elttype,
 	    {
 	      const char *search_name = msymbol.minsym->search_name ();
 	      wsym = lookup_symbol_search_name (search_name, NULL,
-						VAR_DOMAIN).symbol;
+						SEARCH_VAR_DOMAIN).symbol;
 	    }
 
 	  if (wsym)

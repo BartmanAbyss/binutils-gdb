@@ -1,4 +1,4 @@
-# Copyright 2023 Free Software Foundation, Inc.
+# Copyright 2023-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -73,7 +73,7 @@ foreach_mi_ui_mode mode {
     # UI.
     if {$mode eq "separate"} {
 	with_spawn_id $gdb_main_spawn_id {
-	    gdb_test_multiple "" "drain CLI output upto breakpoint" {
+	    gdb_test_multiple "" "drain CLI output up to breakpoint" {
 		-re "Thread 1 \[^\r\n\]+ hit Breakpoint $decimal,\
 		      breakpt \\(\\) at\
 		      \[^\r\n\]+\r\n$decimal\\s+\[^\r\n\]+\r\n" {
@@ -235,17 +235,9 @@ foreach_mi_ui_mode mode {
 
 	    # The output has arrived!  Check how we did.  There are other bugs
 	    # that come into play here which change what output we'll see.
-	    if { $saw_mi_thread_exited && $saw_mi_bp_deleted \
-		     && $saw_cli_thread_exited \
-		     && $saw_cli_bp_deleted } {
-		kpass "gdb/30129" $gdb_test_name
-	    } elseif { $saw_mi_thread_exited && $saw_mi_bp_deleted \
-			   && !$saw_cli_thread_exited \
-			   && $saw_cli_bp_deleted } {
-		kfail "gdb/30129" $gdb_test_name
-	    } else {
-		fail "$gdb_test_name"
-	    }
+	    gdb_assert { $saw_mi_thread_exited && $saw_mi_bp_deleted \
+			     && $saw_cli_thread_exited \
+			     && $saw_cli_bp_deleted } $gdb_test_name
 	}
     }
 

@@ -1,6 +1,6 @@
 /* General utility routines for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,9 +17,9 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include <ctype.h>
 #include "gdbsupport/gdb_wait.h"
+#include "gdbsupport/scoped_signal_handler.h"
 #include "event-top.h"
 #include "gdbthread.h"
 #include "fnmatch.h"
@@ -38,7 +38,7 @@
 #endif
 
 #include <signal.h>
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "serial.h"
 #include "bfd.h"
 #include "target.h"
@@ -56,7 +56,7 @@
 #include "main.h"
 #include "solist.h"
 
-#include "inferior.h"		/* for signed_pointer_to_address */
+#include "inferior.h"
 
 #include "gdb_curses.h"
 
@@ -68,7 +68,7 @@
 #include "gdbsupport/gdb_regex.h"
 #include "gdbsupport/job-control.h"
 #include "gdbsupport/selftest.h"
-#include "gdbsupport/gdb_optional.h"
+#include <optional>
 #include "cp-support.h"
 #include <algorithm>
 #include "gdbsupport/pathstuff.h"
@@ -81,6 +81,8 @@
 #include "gdbsupport/buildargv.h"
 #include "pager.h"
 #include "run-on-main-thread.h"
+#include "gdbsupport/gdb_tilde_expand.h"
+#include "gdbsupport/eintr.h"
 
 void (*deprecated_error_begin_hook) (void);
 
@@ -128,7 +130,32 @@ show_pagination_enabled (struct ui_file *file, int from_tty,
 }
 
 
+/* Warning hook pointer.  This has to be 'static' to avoid link
+   problems with thread-locals on AIX.  */
 
+static thread_local warning_hook_handler warning_hook;
+
+/* See utils.h.  */
+
+warning_hook_handler
+get_warning_hook_handler ()
+{
+  return warning_hook;
+}
+
+/* See utils.h.  */
+
+scoped_restore_warning_hook::scoped_restore_warning_hook
+     (warning_hook_handler new_handler)
+       : m_save (warning_hook)
+{
+  warning_hook = new_handler;
+}
+
+scoped_restore_warning_hook::~scoped_restore_warning_hook ()
+{
+  warning_hook = m_save;
+}
 
 /* Print a warning message.  The first argument STRING is the warning
    message, used as an fprintf format string, the second is the
@@ -139,11 +166,11 @@ show_pagination_enabled (struct ui_file *file, int from_tty,
 void
 vwarning (const char *string, va_list args)
 {
-  if (deprecated_warning_hook)
-    (*deprecated_warning_hook) (string, args);
+  if (warning_hook != nullptr)
+    warning_hook->warn (string, args);
   else
     {
-      gdb::optional<target_terminal::scoped_restore_terminal_state> term_state;
+      std::optional<target_terminal::scoped_restore_terminal_state> term_state;
       if (target_supports_terminal_ours ())
 	{
 	  term_state.emplace ();
@@ -168,7 +195,7 @@ verror (const char *string, va_list args)
 
 /* Emit a message and abort.  */
 
-static void ATTRIBUTE_NORETURN
+[[noreturn]] static void
 abort_with_message (const char *msg)
 {
   if (current_ui == NULL)
@@ -218,7 +245,7 @@ can_dump_core (enum resource_limit_kind limit_kind)
     case LIMIT_CUR:
       if (rlim.rlim_cur == 0)
 	return 0;
-      /* Fall through.  */
+      [[fallthrough]];
 
     case LIMIT_MAX:
       if (rlim.rlim_max == 0)
@@ -375,7 +402,7 @@ internal_vproblem (struct internal_problem *problem,
     }
 
   /* Try to get the message out and at the start of a new line.  */
-  gdb::optional<target_terminal::scoped_restore_terminal_state> term_state;
+  std::optional<target_terminal::scoped_restore_terminal_state> term_state;
   if (target_supports_terminal_ours ())
     {
       term_state.emplace ();
@@ -572,11 +599,11 @@ add_internal_problem_command (struct internal_problem *problem)
   if (problem->user_settable_should_dump_core)
     {
       std::string set_core_doc
-	= string_printf (_("Set whether GDB should create a core file of "
-			   "GDB when %s is detected."), problem->name);
+	= string_printf (_("Set whether GDB should dump core "
+			   "when %s is detected."), problem->name);
       std::string show_core_doc
-	= string_printf (_("Show whether GDB will create a core file of "
-			   "GDB when %s is detected."), problem->name);
+	= string_printf (_("Show whether GDB should dump core "
+			   "when %s is detected."), problem->name);
       add_setshow_enum_cmd ("corefile", class_maintenance,
 			    internal_problem_modes,
 			    &problem->should_dump_core,
@@ -592,11 +619,11 @@ add_internal_problem_command (struct internal_problem *problem)
   if (problem->user_settable_should_print_backtrace)
     {
       std::string set_bt_doc
-	= string_printf (_("Set whether GDB should print a backtrace of "
-			   "GDB when %s is detected."), problem->name);
+	= string_printf (_("Set whether GDB should show backtrace "
+			   "when %s is detected."), problem->name);
       std::string show_bt_doc
-	= string_printf (_("Show whether GDB will print a backtrace of "
-			   "GDB when %s is detected."), problem->name);
+	= string_printf (_("Show whether GDB should show backtrace "
+			   "when %s is detected."), problem->name);
       add_setshow_boolean_cmd ("backtrace", class_maintenance,
 			       &problem->should_print_backtrace,
 			       set_bt_doc.c_str (),
@@ -619,57 +646,15 @@ perror_warning_with_name (const char *string)
   warning (_("%s"), combined.c_str ());
 }
 
-/* Print the system error message for ERRCODE, and also mention STRING
-   as the file name for which the error was encountered.  */
+/* See utils.h.  */
 
 void
-print_sys_errmsg (const char *string, int errcode)
+warning_filename_and_errno (const char *filename, int saved_errno)
 {
-  const char *err = safe_strerror (errcode);
-  gdb_printf (gdb_stderr, "%s: %s.\n", string, err);
+  warning (_("%ps: %s"), styled_string (file_name_style.style (), filename),
+	   safe_strerror (saved_errno));
 }
 
-/* Control C eventually causes this to be called, at a convenient time.  */
-
-void
-quit (void)
-{
-  if (sync_quit_force_run)
-    {
-      sync_quit_force_run = false;
-      throw_forced_quit ("SIGTERM");
-    }
-
-#ifdef __MSDOS__
-  /* No steenking SIGINT will ever be coming our way when the
-     program is resumed.  Don't lie.  */
-  throw_quit ("Quit");
-#else
-  if (job_control
-      /* If there is no terminal switching for this target, then we can't
-	 possibly get screwed by the lack of job control.  */
-      || !target_supports_terminal_ours ())
-    throw_quit ("Quit");
-  else
-    throw_quit ("Quit (expect signal SIGINT when the program is resumed)");
-#endif
-}
-
-/* See defs.h.  */
-
-void
-maybe_quit (void)
-{
-  if (!is_main_thread ())
-    return;
-
-  if (sync_quit_force_run)
-    quit ();
-
-  quit_handler ();
-}
-
-
 /* Called when a memory allocation fails, with the number of bytes of
    memory requested in SIZE.  */
 
@@ -836,7 +821,9 @@ defaulted_query (const char *ctlstr, const char defchar, va_list args)
     }
 
   /* Format the question outside of the loop, to avoid reusing args.  */
-  std::string question = string_vprintf (ctlstr, args);
+  string_file tem (gdb_stdout->can_emit_style_escape ());
+  gdb_vprintf (&tem, ctlstr, args);
+  std::string question = tem.release ();
   std::string prompt
     = string_printf (_("%s%s(%s or %s) %s"),
 		     annotation_level > 1 ? "\n\032\032pre-query\n" : "",
@@ -1111,10 +1098,6 @@ static bool filter_initialized = false;
 
 
 
-/* See readline's rlprivate.h.  */
-
-EXTERN_C int _rl_term_autowrap;
-
 /* See utils.h.  */
 
 int readline_hidden_cols = 0;
@@ -1155,13 +1138,20 @@ init_page_info (void)
 	   (because rl_change_environment defaults to 1)
 	 - may report one less than the detected screen width in
 	   rl_get_screen_size (when _rl_term_autowrap == 0).
-	 We could set readline_hidden_cols by comparing COLUMNS to cols as
-	 returned by rl_get_screen_size, but instead simply use
-	 _rl_term_autowrap.  */
-      readline_hidden_cols = _rl_term_autowrap ? 0 : 1;
+	 We could use _rl_term_autowrap, but we want to avoid introducing
+	 another dependency on readline private variables, so set
+	 readline_hidden_cols by comparing COLUMNS to cols as returned by
+	 rl_get_screen_size.  */
+      const char *columns_env_str = getenv ("COLUMNS");
+      gdb_assert (columns_env_str != nullptr);
+      int columns_env_val = atoi (columns_env_str);
+      gdb_assert (columns_env_val != 0);
+      readline_hidden_cols = columns_env_val - cols;
+      gdb_assert (readline_hidden_cols >= 0);
+      gdb_assert (readline_hidden_cols <= 1);
 
       lines_per_page = rows;
-      chars_per_line = cols;
+      chars_per_line = cols + readline_hidden_cols;
 
       /* Readline should have fetched the termcap entry for us.
 	 Only try to use tgetnum function if rl_get_screen_size
@@ -1296,6 +1286,14 @@ set_screen_width_and_height (int width, int height)
   set_width ();
 }
 
+/* Import termcap variable UP (instead of readline private variable
+   _rl_term_up, which we're trying to avoid, see PR build/10723).  The UP
+   variable doesn't seem be part of the regular termcap interface, but rather
+   curses-specific.  But if it's missing in the termcap library, then readline
+   provides a fallback version.  Let's assume the fallback is not part of the
+   private readline interface.  */
+extern "C" char *UP;
+
 /* Implement "maint info screen".  */
 
 static void
@@ -1354,6 +1352,46 @@ maintenance_info_screen (const char *args, int from_tty)
 	      _("Number of lines environment thinks "
 		"are in a page is %s (LINES).\n"),
 	      getenv ("LINES"));
+
+  bool have_up = UP != nullptr && *UP != '\0';
+
+  /* Fetch value of readline variable horizontal-scroll-mode.  */
+  const char *horizontal_scroll_mode_value
+    = rl_variable_value ("horizontal-scroll-mode");
+  bool force_horizontal_scroll_mode
+    = (horizontal_scroll_mode_value != nullptr
+       && strcmp (horizontal_scroll_mode_value, "on") == 0);
+
+  const char *mode = nullptr;
+  const char *reason = nullptr;
+  if (batch_flag)
+    {
+      mode = "unsupported";
+      reason = "gdb batch mode";
+    }
+  else if (!have_up)
+    {
+      mode = "unsupported";
+      reason = "terminal is not Cursor Up capable";
+    }
+  else if (force_horizontal_scroll_mode)
+    {
+      mode = "disabled";
+      reason = "horizontal-scroll-mode";
+    }
+  else if (readline_hidden_cols)
+    {
+      mode = "readline";
+      reason = "terminal is not auto wrap capable, last column reserved";
+    }
+  else
+    {
+      mode = "terminal";
+      reason = "terminal is auto wrap capable";
+    }
+
+  gdb_printf (gdb_stdout, _("Readline wrapping mode: %s (%s).\n"), mode,
+	      reason);
 }
 
 void
@@ -1810,6 +1848,12 @@ void
 gdb_puts (const char *linebuffer, struct ui_file *stream)
 {
   stream->puts (linebuffer);
+}
+
+void
+gdb_puts (const std::string &s, ui_file *stream)
+{
+  gdb_puts (s.c_str (), stream);
 }
 
 /* See utils.h.  */
@@ -3346,6 +3390,51 @@ parse_pid_to_attach (const char *args)
   return pid;
 }
 
+/* Substitute all occurrences of string FROM by string TO in *STRINGP.  *STRINGP
+   must come from xrealloc-compatible allocator and it may be updated.  FROM
+   needs to be delimited by IS_DIR_SEPARATOR or DIRNAME_SEPARATOR (or be
+   located at the start or end of *STRINGP.  */
+
+void
+substitute_path_component (char **stringp, const char *from, const char *to)
+{
+  char *string = *stringp, *s;
+  const size_t from_len = strlen (from);
+  const size_t to_len = strlen (to);
+
+  for (s = string;;)
+    {
+      s = strstr (s, from);
+      if (s == NULL)
+	break;
+
+      if ((s == string || IS_DIR_SEPARATOR (s[-1])
+	   || s[-1] == DIRNAME_SEPARATOR)
+	  && (s[from_len] == '\0' || IS_DIR_SEPARATOR (s[from_len])
+	      || s[from_len] == DIRNAME_SEPARATOR))
+	{
+	  char *string_new;
+
+	  string_new
+	    = (char *) xrealloc (string, (strlen (string) + to_len + 1));
+
+	  /* Relocate the current S pointer.  */
+	  s = s - string + string_new;
+	  string = string_new;
+
+	  /* Replace from by to.  */
+	  memmove (&s[to_len], &s[from_len], strlen (&s[from_len]) + 1);
+	  memcpy (s, to, to_len);
+
+	  s += to_len;
+	}
+      else
+	s++;
+    }
+
+  *stringp = string;
+}
+
 #ifdef HAVE_WAITPID
 
 #ifdef SIGALRM
@@ -3380,35 +3469,19 @@ wait_to_die_with_timeout (pid_t pid, int *status, int timeout)
   if (timeout > 0)
     {
 #ifdef SIGALRM
-#if defined (HAVE_SIGACTION) && defined (SA_RESTART)
-      struct sigaction sa, old_sa;
-
-      sa.sa_handler = sigalrm_handler;
-      sigemptyset (&sa.sa_mask);
-      sa.sa_flags = 0;
-      sigaction (SIGALRM, &sa, &old_sa);
-#else
-      sighandler_t ofunc;
-
-      ofunc = signal (SIGALRM, sigalrm_handler);
-#endif
+      scoped_signal_handler<SIGALRM> alarm_restore (sigalrm_handler);
 
       alarm (timeout);
 #endif
 
-      waitpid_result = waitpid (pid, status, 0);
+      waitpid_result = gdb::waitpid (pid, status, 0);
 
 #ifdef SIGALRM
       alarm (0);
-#if defined (HAVE_SIGACTION) && defined (SA_RESTART)
-      sigaction (SIGALRM, &old_sa, NULL);
-#else
-      signal (SIGALRM, ofunc);
-#endif
 #endif
     }
   else
-    waitpid_result = waitpid (pid, status, WNOHANG);
+    waitpid_result = gdb::waitpid (pid, status, WNOHANG);
 
   if (waitpid_result == pid)
     return pid;
@@ -3418,8 +3491,8 @@ wait_to_die_with_timeout (pid_t pid, int *status, int timeout)
 
 #endif /* HAVE_WAITPID */
 
-/* Provide fnmatch compatible function for FNM_FILE_NAME matching of host files.
-   Both FNM_FILE_NAME and FNM_NOESCAPE must be set in FLAGS.
+/* Provide fnmatch compatible function for matching of host files.
+   FNM_NOESCAPE must be set in FLAGS.
 
    It handles correctly HAVE_DOS_BASED_FILE_SYSTEM and
    HAVE_CASE_INSENSITIVE_FILE_SYSTEM.  */
@@ -3427,8 +3500,6 @@ wait_to_die_with_timeout (pid_t pid, int *status, int timeout)
 int
 gdb_filename_fnmatch (const char *pattern, const char *string, int flags)
 {
-  gdb_assert ((flags & FNM_FILE_NAME) != 0);
-
   /* It is unclear how '\' escaping vs. directory separator should coexist.  */
   gdb_assert ((flags & FNM_NOESCAPE) != 0);
 
@@ -3631,6 +3702,60 @@ copy_bitwise (gdb_byte *dest, ULONGEST dest_offset,
     }
 }
 
+/* See utils.h.  */
+
+std::string
+extract_single_filename_arg (const char *args)
+{
+  if (args == nullptr)
+    return {};
+
+  std::string filename = extract_string_maybe_quoted (&args);
+  args = skip_spaces (args);
+  if (*args != '\0')
+    error (_("Junk after filename \"%s\": %s"), filename.c_str (), args);
+  if (!filename.empty ())
+    filename = gdb_tilde_expand (filename.c_str ());
+  return filename;
+}
+
+#if GDB_SELF_TEST
+static void
+test_assign_set_return_if_changed ()
+{
+  bool changed;
+  int a;
+
+  for (bool initial : { false, true })
+    {
+      changed = initial;
+      a = 1;
+      assign_set_if_changed (a, 1, changed);
+      SELF_CHECK (a == 1);
+      SELF_CHECK (changed == initial);
+    }
+
+  for (bool initial : { false, true })
+    {
+      changed = initial;
+      a = 1;
+      assign_set_if_changed (a, 2, changed);
+      SELF_CHECK (a == 2);
+      SELF_CHECK (changed == true);
+    }
+
+  a = 1;
+  changed = assign_return_if_changed (a, 1);
+  SELF_CHECK (a == 1);
+  SELF_CHECK (changed == false);
+
+  a = 1;
+  assign_set_if_changed (a, 2, changed);
+  SELF_CHECK (a == 2);
+  SELF_CHECK (changed == true);
+}
+#endif
+
 void _initialize_utils ();
 void
 _initialize_utils ()
@@ -3695,5 +3820,7 @@ When set, debugging messages will be marked with seconds and microseconds."),
   selftests::register_test ("strncmp_iw_with_mode",
 			    strncmp_iw_with_mode_tests);
   selftests::register_test ("pager", test_pager);
+  selftests::register_test ("assign_set_return_if_changed",
+			    test_assign_set_return_if_changed);
 #endif
 }

@@ -1,6 +1,6 @@
 /* Target-dependent code for Renesas Super-H, for GDB.
 
-   Copyright (C) 1993-2023 Free Software Foundation, Inc.
+   Copyright (C) 1993-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,14 +20,14 @@
 /* Contributed by Steve Chamberlain
    sac@cygnus.com.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "frame-base.h"
 #include "frame-unwind.h"
 #include "dwarf2/frame.h"
 #include "symtab.h"
 #include "gdbtypes.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "gdbcore.h"
 #include "value.h"
 #include "dis-asm.h"
@@ -1057,7 +1057,7 @@ sh_push_dummy_call_fpu (struct gdbarch *gdbarch,
 
   /* Now load as many as possible of the first arguments into
      registers, and push the rest onto the stack.  There are 16 bytes
-     in four registers available.  Loop thru args from first to last.  */
+     in four registers available.  Loop through args from first to last.  */
   for (argnum = 0; argnum < nargs; argnum++)
     {
       type = args[argnum]->type ();
@@ -1195,7 +1195,7 @@ sh_push_dummy_call_nofpu (struct gdbarch *gdbarch,
 
   /* Now load as many as possible of the first arguments into
      registers, and push the rest onto the stack.  There are 16 bytes
-     in four registers available.  Loop thru args from first to last.  */
+     in four registers available.  Loop through args from first to last.  */
   for (argnum = 0; argnum < nargs; argnum++)
     {
       type = args[argnum]->type ();
@@ -1401,6 +1401,11 @@ sh_sh2a_register_type (struct gdbarch *gdbarch, int reg_nr)
     return builtin_type (gdbarch)->builtin_float;
   else if (reg_nr >= DR0_REGNUM && reg_nr <= DR_LAST_REGNUM)
     return builtin_type (gdbarch)->builtin_double;
+  else if (reg_nr == PC_REGNUM || reg_nr == PR_REGNUM || reg_nr == VBR_REGNUM
+	   || reg_nr == SPC_REGNUM)
+    return builtin_type (gdbarch)->builtin_func_ptr;
+  else if (reg_nr == R0_REGNUM + 15 || reg_nr == GBR_REGNUM)
+    return builtin_type (gdbarch)->builtin_data_ptr;
   else
     return builtin_type (gdbarch)->builtin_int;
 }
@@ -1413,6 +1418,11 @@ sh_sh3e_register_type (struct gdbarch *gdbarch, int reg_nr)
   if ((reg_nr >= gdbarch_fp0_regnum (gdbarch)
        && (reg_nr <= FP_LAST_REGNUM)) || (reg_nr == FPUL_REGNUM))
     return builtin_type (gdbarch)->builtin_float;
+  else if (reg_nr == PC_REGNUM || reg_nr == PR_REGNUM || reg_nr == VBR_REGNUM
+	   || reg_nr == SPC_REGNUM)
+    return builtin_type (gdbarch)->builtin_func_ptr;
+  else if (reg_nr == R0_REGNUM + 15 || reg_nr == GBR_REGNUM)
+    return builtin_type (gdbarch)->builtin_data_ptr;
   else
     return builtin_type (gdbarch)->builtin_int;
 }
@@ -1434,6 +1444,11 @@ sh_sh4_register_type (struct gdbarch *gdbarch, int reg_nr)
     return builtin_type (gdbarch)->builtin_double;
   else if (reg_nr >= FV0_REGNUM && reg_nr <= FV_LAST_REGNUM)
     return sh_sh4_build_float_register_type (gdbarch, 3);
+  else if (reg_nr == PC_REGNUM || reg_nr == PR_REGNUM || reg_nr == VBR_REGNUM
+	   || reg_nr == SPC_REGNUM)
+    return builtin_type (gdbarch)->builtin_func_ptr;
+  else if (reg_nr == R0_REGNUM + 15 || reg_nr == GBR_REGNUM)
+    return builtin_type (gdbarch)->builtin_data_ptr;
   else
     return builtin_type (gdbarch)->builtin_int;
 }
@@ -1441,7 +1456,13 @@ sh_sh4_register_type (struct gdbarch *gdbarch, int reg_nr)
 static struct type *
 sh_default_register_type (struct gdbarch *gdbarch, int reg_nr)
 {
-  return builtin_type (gdbarch)->builtin_int;
+  if (reg_nr == PC_REGNUM || reg_nr == PR_REGNUM || reg_nr == VBR_REGNUM
+      || reg_nr == SPC_REGNUM)
+    return builtin_type (gdbarch)->builtin_func_ptr;
+  else if (reg_nr == R0_REGNUM + 15 || reg_nr == GBR_REGNUM)
+    return builtin_type (gdbarch)->builtin_data_ptr;
+  else
+    return builtin_type (gdbarch)->builtin_int;
 }
 
 /* Is a register in a reggroup?
@@ -1755,7 +1776,7 @@ sh_sh2a_register_sim_regno (struct gdbarch *gdbarch, int nr)
 static void
 sh_dwarf2_frame_init_reg (struct gdbarch *gdbarch, int regnum,
 			  struct dwarf2_frame_state_reg *reg,
-			  frame_info_ptr this_frame)
+			  const frame_info_ptr &this_frame)
 {
   /* Mark the PC as the destination for the return address.  */
   if (regnum == gdbarch_pc_regnum (gdbarch))
@@ -1825,7 +1846,7 @@ sh_alloc_frame_cache (void)
 }
 
 static struct sh_frame_cache *
-sh_frame_cache (frame_info_ptr this_frame, void **this_cache)
+sh_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   struct sh_frame_cache *cache;
@@ -1892,7 +1913,7 @@ sh_frame_cache (frame_info_ptr this_frame, void **this_cache)
 }
 
 static struct value *
-sh_frame_prev_register (frame_info_ptr this_frame,
+sh_frame_prev_register (const frame_info_ptr &this_frame,
 			void **this_cache, int regnum)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
@@ -1917,7 +1938,7 @@ sh_frame_prev_register (frame_info_ptr this_frame,
 }
 
 static void
-sh_frame_this_id (frame_info_ptr this_frame, void **this_cache,
+sh_frame_this_id (const frame_info_ptr &this_frame, void **this_cache,
 		  struct frame_id *this_id)
 {
   struct sh_frame_cache *cache = sh_frame_cache (this_frame, this_cache);
@@ -1929,18 +1950,19 @@ sh_frame_this_id (frame_info_ptr this_frame, void **this_cache,
   *this_id = frame_id_build (cache->saved_sp, cache->pc);
 }
 
-static const struct frame_unwind sh_frame_unwind = {
+static const struct frame_unwind_legacy sh_frame_unwind (
   "sh prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   sh_frame_this_id,
   sh_frame_prev_register,
   NULL,
   default_frame_sniffer
-};
+);
 
 static CORE_ADDR
-sh_frame_base_address (frame_info_ptr this_frame, void **this_cache)
+sh_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct sh_frame_cache *cache = sh_frame_cache (this_frame, this_cache);
 
@@ -1955,7 +1977,7 @@ static const struct frame_base sh_frame_base = {
 };
 
 static struct sh_frame_cache *
-sh_make_stub_cache (frame_info_ptr this_frame)
+sh_make_stub_cache (const frame_info_ptr &this_frame)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   struct sh_frame_cache *cache;
@@ -1969,7 +1991,7 @@ sh_make_stub_cache (frame_info_ptr this_frame)
 }
 
 static void
-sh_stub_this_id (frame_info_ptr this_frame, void **this_cache,
+sh_stub_this_id (const frame_info_ptr &this_frame, void **this_cache,
 		 struct frame_id *this_id)
 {
   struct sh_frame_cache *cache;
@@ -1983,7 +2005,7 @@ sh_stub_this_id (frame_info_ptr this_frame, void **this_cache,
 
 static int
 sh_stub_unwind_sniffer (const struct frame_unwind *self,
-			frame_info_ptr this_frame,
+			const frame_info_ptr &this_frame,
 			void **this_prologue_cache)
 {
   CORE_ADDR addr_in_block;
@@ -1995,16 +2017,16 @@ sh_stub_unwind_sniffer (const struct frame_unwind *self,
   return 0;
 }
 
-static const struct frame_unwind sh_stub_unwind =
-{
+static const struct frame_unwind_legacy sh_stub_unwind (
   "sh stub",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   sh_stub_this_id,
   sh_frame_prev_register,
   NULL,
   sh_stub_unwind_sniffer
-};
+);
 
 /* Implement the stack_frame_destroyed_p gdbarch method.
 
@@ -2150,7 +2172,7 @@ sh_corefile_collect_regset (const struct regset *regset,
 }
 
 /* The following two regsets have the same contents, so it is tempting to
-   unify them, but they are distiguished by their address, so don't.  */
+   unify them, but they are distinguished by their address, so don't.  */
 
 const struct regset sh_corefile_gregset =
 {
@@ -2286,7 +2308,8 @@ sh_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
       set_gdbarch_fp0_regnum (gdbarch, 25);
       set_gdbarch_num_pseudo_regs (gdbarch, 9);
       set_gdbarch_pseudo_register_read (gdbarch, sh_pseudo_register_read);
-      set_gdbarch_pseudo_register_write (gdbarch, sh_pseudo_register_write);
+      set_gdbarch_deprecated_pseudo_register_write (gdbarch,
+						    sh_pseudo_register_write);
       set_gdbarch_return_value (gdbarch, sh_return_value_fpu);
       set_gdbarch_push_dummy_call (gdbarch, sh_push_dummy_call_fpu);
       break;
@@ -2297,7 +2320,8 @@ sh_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
       set_gdbarch_num_pseudo_regs (gdbarch, 1);
       set_gdbarch_pseudo_register_read (gdbarch, sh_pseudo_register_read);
-      set_gdbarch_pseudo_register_write (gdbarch, sh_pseudo_register_write);
+      set_gdbarch_deprecated_pseudo_register_write (gdbarch,
+						    sh_pseudo_register_write);
       break;
 
     case bfd_mach_sh_dsp:
@@ -2337,7 +2361,8 @@ sh_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
       set_gdbarch_fp0_regnum (gdbarch, 25);
       set_gdbarch_num_pseudo_regs (gdbarch, 13);
       set_gdbarch_pseudo_register_read (gdbarch, sh_pseudo_register_read);
-      set_gdbarch_pseudo_register_write (gdbarch, sh_pseudo_register_write);
+      set_gdbarch_deprecated_pseudo_register_write (gdbarch,
+						    sh_pseudo_register_write);
       set_gdbarch_return_value (gdbarch, sh_return_value_fpu);
       set_gdbarch_push_dummy_call (gdbarch, sh_push_dummy_call_fpu);
       break;

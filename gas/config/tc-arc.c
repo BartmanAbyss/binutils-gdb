@@ -1,5 +1,5 @@
 /* tc-arc.c -- Assembler for the ARC
-   Copyright (C) 1994-2023 Free Software Foundation, Inc.
+   Copyright (C) 1994-2025 Free Software Foundation, Inc.
 
    Contributor: Claudiu Zissulescu <claziss@synopsys.com>
 
@@ -49,7 +49,7 @@
 			  && (SUB_OPCODE (x) == 0x28))
 
 #ifndef TARGET_WITH_CPU
-#define TARGET_WITH_CPU "arc700"
+#define TARGET_WITH_CPU "hs38_linux"
 #endif /* TARGET_WITH_CPU */
 
 #define ARC_GET_FLAG(s)   	(*symbol_get_tc (s))
@@ -109,6 +109,7 @@ enum arc_rlx_types
 				  || (op)->insn_class == BBIT0		\
 				  || (op)->insn_class == BBIT1		\
 				  || (op)->insn_class == BI		\
+				  || (op)->insn_class == DBNZ		\
 				  || (op)->insn_class == EI		\
 				  || (op)->insn_class == ENTER		\
 				  || (op)->insn_class == JLI		\
@@ -182,7 +183,7 @@ const pseudo_typeS md_pseudo_table[] =
   { NULL, NULL, 0 }
 };
 
-const char *md_shortopts = "";
+const char md_shortopts[] = "";
 
 enum options
 {
@@ -228,7 +229,7 @@ enum options
   OPTION_RTSC
 };
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   { "EB",		no_argument,	   NULL, OPTION_EB },
   { "EL",		no_argument,	   NULL, OPTION_EL },
@@ -291,7 +292,7 @@ struct option md_longopts[] =
   { NULL,		no_argument, NULL, 0 }
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* Local data and data types.  */
 
@@ -1151,8 +1152,8 @@ parse_reloc_symbol (expressionS *resultP)
       return;
     }
 
-  *input_line_pointer = c;
-  SKIP_WHITESPACE_AFTER_NAME ();
+  restore_line_pointer (c);
+  SKIP_WHITESPACE ();
   /* Extra check for TLS: base.  */
   if (*input_line_pointer == '@')
     {
@@ -1312,6 +1313,8 @@ tokenize_arguments (char *str,
 	     relocation type as well.  */
 	  if (*input_line_pointer == '@')
 	    parse_reloc_symbol (tok);
+	  else
+	    resolve_register (tok);
 
 	  debug_exp (tok);
 
@@ -3248,8 +3251,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED,
   arelent *reloc;
   bfd_reloc_code_real_type code;
 
-  reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   reloc->address = fixP->fx_frag->fr_address + fixP->fx_where;
 
@@ -4939,7 +4942,9 @@ arc_set_attribute_int (int tag, int value)
   if (tag < 1
       || tag >= NUM_KNOWN_OBJ_ATTRIBUTES
       || !attributes_set_explicitly[tag])
-    bfd_elf_add_proc_attr_int (stdoutput, tag, value);
+    if (!bfd_elf_add_proc_attr_int (stdoutput, tag, value))
+      as_fatal (_("error adding attribute: %s"),
+		bfd_errmsg (bfd_get_error ()));
 }
 
 static void
@@ -4948,7 +4953,9 @@ arc_set_attribute_string (int tag, const char *value)
   if (tag < 1
       || tag >= NUM_KNOWN_OBJ_ATTRIBUTES
       || !attributes_set_explicitly[tag])
-    bfd_elf_add_proc_attr_string (stdoutput, tag, value);
+    if (!bfd_elf_add_proc_attr_string (stdoutput, tag, value))
+      as_fatal (_("error adding attribute: %s"),
+		bfd_errmsg (bfd_get_error ()));
 }
 
 /* Allocate and concatenate two strings.  s1 can be NULL but not
@@ -5018,7 +5025,9 @@ arc_set_public_attributes (void)
       && (base != bfd_elf_get_obj_attr_int (stdoutput, OBJ_ATTR_PROC,
 					    Tag_ARC_CPU_base)))
     as_warn (_("Overwrite explicitly set Tag_ARC_CPU_base"));
-  bfd_elf_add_proc_attr_int (stdoutput, Tag_ARC_CPU_base, base);
+  if (!bfd_elf_add_proc_attr_int (stdoutput, Tag_ARC_CPU_base, base))
+    as_fatal (_("error adding attribute: %s"),
+	      bfd_errmsg (bfd_get_error ()));
 
   /* Tag_ARC_ABI_osver.  */
   if (attributes_set_explicitly[Tag_ARC_ABI_osver])
@@ -5067,7 +5076,9 @@ arc_set_public_attributes (void)
     {
       as_warn (_("Overwrite explicitly set Tag_ARC_ABI_rf16 to full "
 		 "register file"));
-      bfd_elf_add_proc_attr_int (stdoutput, Tag_ARC_ABI_rf16, 0);
+      if (!bfd_elf_add_proc_attr_int (stdoutput, Tag_ARC_ABI_rf16, 0))
+	as_fatal (_("error adding attribute: %s"),
+		  bfd_errmsg (bfd_get_error ()));
     }
 }
 

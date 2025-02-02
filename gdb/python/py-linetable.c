@@ -1,6 +1,6 @@
 /* Python interface to line tables.
 
-   Copyright (C) 2013-2023 Free Software Foundation, Inc.
+   Copyright (C) 2013-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "python-internal.h"
 
 struct linetable_entry_object {
@@ -170,7 +169,7 @@ ltpy_get_pcs_for_line (PyObject *self, PyObject *args)
     }
   catch (const gdb_exception &except)
     {
-      GDB_PY_HANDLE_EXCEPTION (except);
+      return gdbpy_handle_gdb_exception (nullptr, except);
     }
 
   return build_line_table_tuple_from_pcs (py_line, pcs);
@@ -288,27 +287,11 @@ ltpy_dealloc (PyObject *self)
 static int CPYCHECKER_NEGATIVE_RESULT_SETS_EXCEPTION
 gdbpy_initialize_linetable (void)
 {
-  if (PyType_Ready (&linetable_object_type) < 0)
+  if (gdbpy_type_ready (&linetable_object_type) < 0)
     return -1;
-  if (PyType_Ready (&linetable_entry_object_type) < 0)
+  if (gdbpy_type_ready (&linetable_entry_object_type) < 0)
     return -1;
-  if (PyType_Ready (&ltpy_iterator_object_type) < 0)
-    return -1;
-
-  Py_INCREF (&linetable_object_type);
-  Py_INCREF (&linetable_entry_object_type);
-  Py_INCREF (&ltpy_iterator_object_type);
-
-  if (gdb_pymodule_addobject (gdb_module, "LineTable",
-			      (PyObject *) &linetable_object_type) < 0)
-    return -1;
-
-  if (gdb_pymodule_addobject (gdb_module, "LineTableEntry",
-			      (PyObject *) &linetable_entry_object_type) < 0)
-    return -1;
-
-  if (gdb_pymodule_addobject (gdb_module, "LineTableIterator",
-			      (PyObject *) &ltpy_iterator_object_type) < 0)
+  if (gdbpy_type_ready (&ltpy_iterator_object_type) < 0)
     return -1;
 
   return 0;
@@ -397,7 +380,8 @@ ltpy_iternext (PyObject *self)
 
   LTPY_REQUIRE_VALID (iter_obj->source, symtab);
 
-  if (iter_obj->current_index >= symtab->linetable ()->nitems)
+  if (symtab->linetable () == nullptr
+      || iter_obj->current_index >= symtab->linetable ()->nitems)
     {
       PyErr_SetNone (PyExc_StopIteration);
       return NULL;

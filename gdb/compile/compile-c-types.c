@@ -1,6 +1,6 @@
 /* Convert types from GDB to GCC
 
-   Copyright (C) 2014-2023 Free Software Foundation, Inc.
+   Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,7 +18,6 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 
-#include "defs.h"
 #include "gdbtypes.h"
 #include "compile-internal.h"
 #include "compile-c.h"
@@ -44,7 +43,7 @@ convert_array (compile_c_instance *context, struct type *type)
 
   element_type = context->convert_type (type->target_type ());
 
-  if (range->bounds ()->low.kind () != PROP_CONST)
+  if (!range->bounds ()->low.is_constant ())
     return context->plugin ().error (_("array type with non-constant"
 				       " lower bound is not supported"));
   if (range->bounds ()->low.const_val () != 0)
@@ -106,7 +105,7 @@ convert_struct_or_union (compile_c_instance *context, struct type *type)
   for (i = 0; i < type->num_fields (); ++i)
     {
       gcc_type field_type;
-      unsigned long bitsize = TYPE_FIELD_BITSIZE (type, i);
+      unsigned long bitsize = type->field (i).bitsize ();
 
       field_type = context->convert_type (type->field (i).type ());
       if (bitsize == 0)
@@ -118,7 +117,11 @@ convert_struct_or_union (compile_c_instance *context, struct type *type)
 					  type->field (i).loc_bitpos ());
     }
 
-  context->plugin ().finish_record_or_union (result, type->length ());
+  if (context->plugin ().version () >= GCC_C_FE_VERSION_2)
+    context->plugin ().finish_record_with_alignment (result, type->length (),
+						     type_align (type));
+  else
+    context->plugin ().finish_record_or_union (result, type->length ());
   return result;
 }
 

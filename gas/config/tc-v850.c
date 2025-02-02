@@ -1,5 +1,5 @@
 /* tc-v850.c -- Assembler code for the NEC V850
-   Copyright (C) 1996-2023 Free Software Foundation, Inc.
+   Copyright (C) 1996-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -198,8 +198,6 @@ struct v850_seg_entry v850_seg_table[] =
   { NULL, ".call_table_text",
     SEC_ALLOC | SEC_LOAD | SEC_RELOC | SEC_READONLY | SEC_CODE
     | SEC_HAS_CONTENTS},
-  { NULL, ".bss",
-    SEC_ALLOC }
 };
 
 #define SDATA_SECTION		0
@@ -215,7 +213,6 @@ struct v850_seg_entry v850_seg_table[] =
 #define ZCOMMON_SECTION		10
 #define CALL_TABLE_DATA_SECTION	11
 #define CALL_TABLE_TEXT_SECTION	12
-#define BSS_SECTION		13
 
 static void
 do_v850_seg (int i, subsegT sub)
@@ -578,7 +575,6 @@ const pseudo_typeS md_pseudo_table[] =
   { "zbss",		v850_seg,		ZBSS_SECTION		},
   { "rosdata",		v850_seg,		ROSDATA_SECTION 	},
   { "rozdata",		v850_seg,		ROZDATA_SECTION 	},
-  { "bss",		v850_seg,		BSS_SECTION		},
   { "offset",		v850_offset,		0			},
   { "word",		cons,			4			},
   { "zcomm",		v850_comm,		ZCOMMON_SECTION 	},
@@ -1519,9 +1515,9 @@ parse_register_list (unsigned long *insn,
   return NULL;
 }
 
-const char *md_shortopts = "m:";
+const char md_shortopts[] = "m:";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #define OPTION_DISP_SIZE_DEFAULT_22 (OPTION_MD_BASE)
   {"disp-size-default-22", no_argument, NULL, OPTION_DISP_SIZE_DEFAULT_22},
@@ -1530,7 +1526,7 @@ struct option md_longopts[] =
   {NULL, no_argument, NULL, 0}
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 static bool v850_data_8 = false;
 
@@ -1969,7 +1965,6 @@ md_begin (void)
       op++;
     }
 
-  v850_seg_table[BSS_SECTION].s = bss_section;
   bfd_set_arch_mach (stdoutput, v850_target_arch, machine);
   bfd_set_private_flags (stdoutput, v850_e_flags);
 }
@@ -2909,6 +2904,7 @@ md_assemble (char *str)
 	      else
 		{
 		  expression (&ex);
+		  resolve_register (&ex);
 
 		  if ((operand->flags & V850_NOT_IMM0)
 		      && ex.X_op == O_constant
@@ -3333,10 +3329,10 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 {
   arelent *reloc;
 
-  reloc		      = XNEW (arelent);
-  reloc->sym_ptr_ptr  = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
-  reloc->address      = fixp->fx_frag->fr_address + fixp->fx_where;
+  reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
 
   if (   fixp->fx_r_type == BFD_RELOC_VTABLE_ENTRY
       || fixp->fx_r_type == BFD_RELOC_VTABLE_INHERIT
@@ -3363,9 +3359,6 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 		    /* xgettext:c-format  */
 		    _("reloc %d not supported by object file format"),
 		    (int) fixp->fx_r_type);
-
-      xfree (reloc);
-
       return NULL;
     }
 

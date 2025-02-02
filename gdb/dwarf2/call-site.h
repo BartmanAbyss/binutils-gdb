@@ -1,6 +1,6 @@
 /* Call site information.
 
-   Copyright (C) 2011-2023 Free Software Foundation, Inc.
+   Copyright (C) 2011-2024 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support, using pieces from other GDB modules.
 
@@ -19,12 +19,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef CALL_SITE_H
-#define CALL_SITE_H
+#ifndef GDB_DWARF2_CALL_SITE_H
+#define GDB_DWARF2_CALL_SITE_H
 
 #include "dwarf2/types.h"
 #include "../frame.h"
 #include "gdbsupport/function-view.h"
+#include "gdbsupport/unordered_set.h"
 
 struct dwarf2_locexpr_baton;
 struct dwarf2_per_cu_data;
@@ -59,7 +60,7 @@ struct call_site_target
     ADDRESSES,
   };
 
-  void set_loc_physaddr (CORE_ADDR physaddr)
+  void set_loc_physaddr (unrelocated_addr physaddr)
   {
     m_loc_kind = PHYSADDR;
     m_loc.physaddr = physaddr;
@@ -77,7 +78,7 @@ struct call_site_target
       m_loc.dwarf_block = dwarf_block;
     }
 
-  void set_loc_array (unsigned length, const CORE_ADDR *data)
+  void set_loc_array (unsigned length, const unrelocated_addr *data)
   {
     m_loc_kind = ADDRESSES;
     m_loc.addresses.length = length;
@@ -94,7 +95,7 @@ struct call_site_target
 
   void iterate_over_addresses (struct gdbarch *call_site_gdbarch,
 			       const struct call_site *call_site,
-			       frame_info_ptr caller_frame,
+			       const frame_info_ptr &caller_frame,
 			       iterate_ftype callback) const;
 
 private:
@@ -102,7 +103,7 @@ private:
   union
   {
     /* Address.  */
-    CORE_ADDR physaddr;
+    unrelocated_addr physaddr;
     /* Mangled name.  */
     const char *physname;
     /* DWARF block.  */
@@ -111,7 +112,7 @@ private:
     struct
     {
       unsigned length;
-      const CORE_ADDR *values;
+      const unrelocated_addr *values;
     } addresses;
   } m_loc;
 
@@ -163,45 +164,28 @@ struct call_site_parameter
 
 struct call_site
 {
-  call_site (CORE_ADDR pc, dwarf2_per_cu_data *per_cu,
+  call_site (unrelocated_addr pc, dwarf2_per_cu_data *per_cu,
 	     dwarf2_per_objfile *per_objfile)
     : per_cu (per_cu), per_objfile (per_objfile), m_unrelocated_pc (pc)
   {}
 
-  static int
-  eq (const call_site *a, const call_site *b)
-  {
-    return a->m_unrelocated_pc == b->m_unrelocated_pc;
-  }
-
-  static hashval_t
-  hash (const call_site *a)
-  {
-    return a->m_unrelocated_pc;
-  }
-
-  static int
-  eq (const void *a, const void *b)
-  {
-    return eq ((const call_site *)a, (const call_site *)b);
-  }
-
-  static hashval_t
-  hash (const void *a)
-  {
-    return hash ((const call_site *)a);
-  }
-
-  /* Return the address of the first instruction after this call.  */
+  /* Return the relocated (using the objfile from PER_OBJFILE) address of the
+     first instruction after this call.  */
 
   CORE_ADDR pc () const;
+
+  /* Return the unrelocated address of the first instruction after this
+     call.  */
+
+  unrelocated_addr unrelocated_pc () const noexcept
+  { return m_unrelocated_pc; }
 
   /* Call CALLBACK for each target address.  CALLER_FRAME (for
      registers) can be NULL if it is not known.  This function may
      throw NO_ENTRY_VALUE_ERROR.  */
 
   void iterate_over_addresses (struct gdbarch *call_site_gdbarch,
-			       frame_info_ptr caller_frame,
+			       const frame_info_ptr &caller_frame,
 			       call_site_target::iterate_ftype callback)
     const
   {
@@ -233,7 +217,7 @@ struct call_site
 
 private:
   /* Unrelocated address of the first instruction after this call.  */
-  const CORE_ADDR m_unrelocated_pc;
+  const unrelocated_addr m_unrelocated_pc;
 
 public:
   /* * Describe DW_TAG_call_site's DW_TAG_formal_parameter.  */
@@ -241,4 +225,37 @@ public:
   struct call_site_parameter parameter[];
 };
 
-#endif /* CALL_SITE_H */
+/* Key hash type to store call_site objects in gdb::unordered_set, identified by
+   their unrelocated PC.  */
+
+struct call_site_hash_pc
+{
+  using is_transparent = void;
+
+  std::size_t operator() (const call_site *site) const noexcept
+  { return (*this) (site->unrelocated_pc ()); }
+
+  std::size_t operator() (unrelocated_addr pc) const noexcept
+  { return std::hash<unrelocated_addr> () (pc); }
+};
+
+/* Key equal type to store call_site objects in gdb::unordered_set, identified
+   by their unrelocated PC.  */
+
+struct call_site_eq_pc
+{
+  using is_transparent = void;
+
+  bool operator() (const call_site *a, const call_site *b) const noexcept
+  { return (*this) (a->unrelocated_pc (), b); }
+
+  bool operator() (unrelocated_addr pc, const call_site *site) const noexcept
+  { return pc == site->unrelocated_pc (); }
+};
+
+/* Set of call_site objects identified by their unrelocated PC.  */
+
+using call_site_htab_t
+  = gdb::unordered_set<call_site *, call_site_hash_pc, call_site_eq_pc>;
+
+#endif /* GDB_DWARF2_CALL_SITE_H */

@@ -1,6 +1,6 @@
 /* Print values for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,12 +17,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "event-top.h"
+#include "extract-store-integer.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "value.h"
 #include "gdbcore.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "target.h"
 #include "language.h"
 #include "annotate.h"
@@ -499,6 +500,76 @@ generic_val_print_array (struct value *val,
 
 }
 
+/* generic_val_print helper for TYPE_CODE_STRING.  */
+
+static void
+generic_val_print_string (struct value *val,
+			  struct ui_file *stream, int recurse,
+			  const struct value_print_options *options,
+			  const struct generic_val_print_decorations
+			    *decorations)
+{
+  struct type *type = check_typedef (val->type ());
+  struct type *unresolved_elttype = type->target_type ();
+  struct type *elttype = check_typedef (unresolved_elttype);
+
+  if (type->length () > 0 && unresolved_elttype->length () > 0)
+    {
+      LONGEST low_bound, high_bound;
+
+      if (!get_array_bounds (type, &low_bound, &high_bound))
+	error (_("Could not determine the array high bound"));
+
+      const gdb_byte *valaddr = val->contents_for_printing ().data ();
+      int force_ellipses = 0;
+      enum bfd_endian byte_order = type_byte_order (type);
+      int eltlen, len;
+
+      eltlen = elttype->length ();
+      len = high_bound - low_bound + 1;
+
+      /* If requested, look for the first null char and only
+	 print elements up to it.  */
+      if (options->stop_print_at_null)
+	{
+	  unsigned int print_max_chars = get_print_max_chars (options);
+	  unsigned int temp_len;
+
+	  for (temp_len = 0;
+	      (temp_len < len
+	       && temp_len < print_max_chars
+	       && extract_unsigned_integer (valaddr + temp_len * eltlen,
+					    eltlen, byte_order) != 0);
+	      ++temp_len)
+	      ;
+
+	    /* Force printstr to print ellipses if
+	       we've printed the maximum characters and
+	       the next character is not \000.  */
+	    if (temp_len == print_max_chars && temp_len < len)
+	      {
+		ULONGEST ival
+		  = extract_unsigned_integer (valaddr + temp_len * eltlen,
+					      eltlen, byte_order);
+		if (ival != 0)
+		  force_ellipses = 1;
+	      }
+
+	    len = temp_len;
+	}
+
+	current_language->printstr (stream, unresolved_elttype, valaddr, len,
+				    nullptr, force_ellipses, options);
+    }
+  else
+    {
+      /* Array of unspecified length: treat like pointer to first elt.  */
+      print_unpacked_pointer (type, elttype, val->address (),
+			      stream, options);
+    }
+
+}
+
 /* generic_value_print helper for TYPE_CODE_PTR.  */
 
 static void
@@ -929,6 +1000,10 @@ generic_value_print (struct value *val, struct ui_file *stream, int recurse,
       generic_val_print_array (val, stream, recurse, options, decorations);
       break;
 
+    case TYPE_CODE_STRING:
+      generic_val_print_string (val, stream, recurse, options, decorations);
+      break;
+
     case TYPE_CODE_MEMBERPTR:
       generic_value_print_memberptr (val, stream, recurse, options,
 				     decorations);
@@ -1054,16 +1129,6 @@ common_val_print (struct value *value, struct ui_file *stream, int recurse,
 
   QUIT;
 
-  /* Ensure that the type is complete and not just a stub.  If the type is
-     only a stub and we can't find and substitute its complete type, then
-     print appropriate string and return.  */
-
-  if (real_type->is_stub ())
-    {
-      fprintf_styled (stream, metadata_style.style (), _("<incomplete type>"));
-      return;
-    }
-
   if (!valprint_check_validity (stream, real_type, 0, value))
     return;
 
@@ -1072,6 +1137,16 @@ common_val_print (struct value *value, struct ui_file *stream, int recurse,
       if (apply_ext_lang_val_pretty_printer (value, stream, recurse, options,
 					     language))
 	return;
+    }
+
+  /* Ensure that the type is complete and not just a stub.  If the type is
+     only a stub and we can't find and substitute its complete type, then
+     print appropriate string and return.  */
+
+  if (real_type->is_stub ())
+    {
+      fprintf_styled (stream, metadata_style.style (), _("<incomplete type>"));
+      return;
     }
 
   /* Handle summary mode.  If the value is a scalar, print it;
@@ -1153,12 +1228,6 @@ value_check_printable (struct value *val, struct ui_file *stream,
       fprintf_styled (stream, metadata_style.style (),
 		      _("<internal function %s>"),
 		      value_internal_function_name (val));
-      return 0;
-    }
-
-  if (type_not_associated (val->type ()))
-    {
-      val_print_not_associated (stream);
       return 0;
     }
 
@@ -1244,7 +1313,7 @@ val_print_type_code_flags (struct type *type, struct value *original_value,
 		 problematic place to notify the user of an internal error
 		 though.  Instead just fall through and print the field as an
 		 int.  */
-	      && TYPE_FIELD_BITSIZE (type, field) == 1)
+	      && type->field (field).bitsize () == 1)
 	    {
 	      if (val & ((ULONGEST)1 << type->field (field).loc_bitpos ()))
 		gdb_printf
@@ -1254,7 +1323,7 @@ val_print_type_code_flags (struct type *type, struct value *original_value,
 	    }
 	  else
 	    {
-	      unsigned field_len = TYPE_FIELD_BITSIZE (type, field);
+	      unsigned field_len = type->field (field).bitsize ();
 	      ULONGEST field_val = val >> type->field (field).loc_bitpos ();
 
 	      if (field_len < sizeof (ULONGEST) * TARGET_CHAR_BIT)
@@ -2021,6 +2090,10 @@ value_print_array_elements (struct value *val, struct ui_file *stream,
 
 	  while (rep1 < len)
 	    {
+	      /* When printing large arrays this spot is called frequently, so
+		 clean up temporary values asap to prevent allocating a large
+		 amount of them.  */
+	      scoped_value_mark free_values_inner;
 	      struct value *rep_elt
 		= val->from_component_bitsize (elttype,
 					       rep1 * bit_stride,
@@ -2356,23 +2429,27 @@ count_next_character (wchar_iterator *iter,
 /* Print the characters in CHARS to the OBSTACK.  QUOTE_CHAR is the quote
    character to use with string output.  WIDTH is the size of the output
    character type.  BYTE_ORDER is the target byte order.  OPTIONS
-   is the user's print options.  */
+   is the user's print options.  *FINISHED is set to 0 if we didn't print
+   all the elements in CHARS.  */
 
 static void
 print_converted_chars_to_obstack (struct obstack *obstack,
 				  const std::vector<converted_character> &chars,
 				  int quote_char, int width,
 				  enum bfd_endian byte_order,
-				  const struct value_print_options *options)
+				  const struct value_print_options *options,
+				  int *finished)
 {
-  unsigned int idx;
+  unsigned int idx, num_elements;
   const converted_character *elem;
   enum {START, SINGLE, REPEAT, INCOMPLETE, FINISH} state, last;
   gdb_wchar_t wide_quote_char = gdb_btowc (quote_char);
   bool need_escape = false;
+  const int print_max = options->print_max_chars > 0
+      ? options->print_max_chars : options->print_max;
 
   /* Set the start state.  */
-  idx = 0;
+  idx = num_elements = 0;
   last = state = START;
   elem = NULL;
 
@@ -2400,7 +2477,13 @@ print_converted_chars_to_obstack (struct obstack *obstack,
 		obstack_grow (obstack, &wide_quote_char, sizeof (gdb_wchar_t));
 	      }
 	    /* Output the character.  */
-	    for (j = 0; j < elem->repeat_count; ++j)
+	    int repeat_count = elem->repeat_count;
+	    if (print_max < repeat_count + num_elements)
+	      {
+		repeat_count = print_max - num_elements;
+		*finished = 0;
+	      }
+	    for (j = 0; j < repeat_count; ++j)
 	      {
 		if (elem->result == wchar_iterate_ok)
 		  print_wchar (elem->chars[0], elem->buf, elem->buflen, width,
@@ -2408,6 +2491,7 @@ print_converted_chars_to_obstack (struct obstack *obstack,
 		else
 		  print_wchar (gdb_WEOF, elem->buf, elem->buflen, width,
 			       byte_order, obstack, quote_char, &need_escape);
+		num_elements += 1;
 	      }
 	  }
 	  break;
@@ -2439,6 +2523,7 @@ print_converted_chars_to_obstack (struct obstack *obstack,
 	    obstack_grow_wstr (obstack, LCST ("'"));
 	    std::string s = string_printf (_(" <repeats %u times>"),
 					   elem->repeat_count);
+	    num_elements += elem->repeat_count;
 	    for (j = 0; s[j]; ++j)
 	      {
 		gdb_wchar_t w = gdb_btowc (s[j]);
@@ -2463,6 +2548,7 @@ print_converted_chars_to_obstack (struct obstack *obstack,
 	  print_wchar (gdb_WEOF, elem->buf, elem->buflen, width, byte_order,
 		       obstack, 0, &need_escape);
 	  obstack_grow_wstr (obstack, LCST (">"));
+	  num_elements += 1;
 
 	  /* We do not attempt to output anything after this.  */
 	  state = FINISH;
@@ -2597,7 +2683,7 @@ generic_printstr (struct ui_file *stream, struct type *type,
 
   /* Print the output string to the obstack.  */
   print_converted_chars_to_obstack (&wchar_buf, converted_chars, quote_char,
-				    width, byte_order, options);
+				    width, byte_order, options, &finished);
 
   if (force_ellipses || !finished)
     obstack_grow_wstr (&wchar_buf, LCST ("..."));

@@ -1,4 +1,4 @@
-# Copyright 2022, 2023 Free Software Foundation, Inc.
+# Copyright 2022-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,13 +13,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import gdb
-import gdb.printing
+# This is deprecated in 3.9, but required in older versions.
+from typing import Optional
 
-from .frames import frame_for_id
-from .server import request
-from .startup import send_gdb_with_response, in_gdb_thread
-from .varref import find_variable, VariableReference
+import gdb
+
+from .frames import select_frame
+from .server import capability, client_bool_capability, request
+from .startup import DAPException, in_gdb_thread, parse_and_eval
+from .varref import VariableReference, apply_format, find_variable
 
 
 class EvaluateResult(VariableReference):
@@ -29,21 +31,37 @@ class EvaluateResult(VariableReference):
 
 # Helper function to evaluate an expression in a certain frame.
 @in_gdb_thread
-def _evaluate(expr, frame_id):
-    if frame_id is not None:
-        frame = frame_for_id(frame_id)
-        frame.select()
-    val = gdb.parse_and_eval(expr)
-    ref = EvaluateResult(val)
-    return ref.to_object()
+def _evaluate(expr, frame_id, value_format):
+    with apply_format(value_format):
+        global_context = True
+        if frame_id is not None:
+            select_frame(frame_id)
+            global_context = False
+        val = parse_and_eval(expr, global_context=global_context)
+        ref = EvaluateResult(val)
+        return ref.to_object()
+
+
+# Like _evaluate but ensure that the expression cannot cause side
+# effects.
+@in_gdb_thread
+def _eval_for_hover(expr, frame_id, value_format):
+    with gdb.with_parameter("may-write-registers", "off"):
+        with gdb.with_parameter("may-write-memory", "off"):
+            with gdb.with_parameter("may-call-functions", "off"):
+                return _evaluate(expr, frame_id, value_format)
+
+
+class _SetResult(VariableReference):
+    def __init__(self, value):
+        super().__init__(None, value, "value")
 
 
 # Helper function to evaluate a gdb command in a certain frame.
 @in_gdb_thread
 def _repl(command, frame_id):
     if frame_id is not None:
-        frame = frame_for_id(frame_id)
-        frame.select()
+        select_frame(frame_id)
     val = gdb.execute(command, from_tty=True, to_string=True)
     return {
         "result": val,
@@ -51,32 +69,70 @@ def _repl(command, frame_id):
     }
 
 
-# FIXME 'format' & hex
-# FIXME supportsVariableType handling
 @request("evaluate")
-def eval_request(*, expression, frameId=None, context="variables", **args):
+@capability("supportsEvaluateForHovers")
+@capability("supportsValueFormattingOptions")
+def eval_request(
+    *,
+    expression: str,
+    frameId: Optional[int] = None,
+    context: str = "variables",
+    format=None,
+    **args,
+):
     if context in ("watch", "variables"):
         # These seem to be expression-like.
-        return send_gdb_with_response(lambda: _evaluate(expression, frameId))
+        return _evaluate(expression, frameId, format)
+    elif context == "hover":
+        return _eval_for_hover(expression, frameId, format)
     elif context == "repl":
-        return send_gdb_with_response(lambda: _repl(expression, frameId))
+        # Ignore the format for repl evaluation.
+        return _repl(expression, frameId)
     else:
-        raise Exception(f'unknown evaluate context "{context}"')
-
-
-@in_gdb_thread
-def _variables(ref, start, count):
-    var = find_variable(ref)
-    children = var.fetch_children(start, count)
-    return [x.to_object() for x in children]
+        raise DAPException('unknown evaluate context "' + context + '"')
 
 
 @request("variables")
 # Note that we ignore the 'filter' field.  That seems to be
 # specific to javascript.
-# FIXME: implement format
-def variables(*, variablesReference, start=0, count=0, **args):
-    result = send_gdb_with_response(
-        lambda: _variables(variablesReference, start, count)
-    )
-    return {"variables": result}
+def variables(
+    *, variablesReference: int, start: int = 0, count: int = 0, format=None, **args
+):
+    # This behavior was clarified here:
+    # https://github.com/microsoft/debug-adapter-protocol/pull/394
+    if not client_bool_capability("supportsVariablePaging"):
+        start = 0
+        count = 0
+    with apply_format(format):
+        var = find_variable(variablesReference)
+        children = var.fetch_children(start, count)
+        return {"variables": [x.to_object() for x in children]}
+
+
+@capability("supportsSetExpression")
+@request("setExpression")
+def set_expression(
+    *, expression: str, value: str, frameId: Optional[int] = None, format=None, **args
+):
+    with apply_format(format):
+        global_context = True
+        if frameId is not None:
+            select_frame(frameId)
+            global_context = False
+        lhs = parse_and_eval(expression, global_context=global_context)
+        rhs = parse_and_eval(value, global_context=global_context)
+        lhs.assign(rhs)
+        return _SetResult(lhs).to_object()
+
+
+@capability("supportsSetVariable")
+@request("setVariable")
+def set_variable(
+    *, variablesReference: int, name: str, value: str, format=None, **args
+):
+    with apply_format(format):
+        var = find_variable(variablesReference)
+        lhs = var.find_child_by_name(name)
+        rhs = parse_and_eval(value)
+        lhs.assign(rhs)
+        return lhs.to_object()

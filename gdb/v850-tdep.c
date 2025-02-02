@@ -1,6 +1,6 @@
 /* Target-dependent code for the NEC V850 for GDB, the GNU debugger.
 
-   Copyright (C) 1996-2023 Free Software Foundation, Inc.
+   Copyright (C) 1996-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "frame-base.h"
 #include "trad-frame.h"
@@ -201,7 +201,7 @@ enum
     E_R149_REGNUM,
     E_NUM_OF_V850E2_REGS,
 
-    /* v850e3v5 system registers, selID 1 thru 7.  */
+    /* v850e3v5 system registers, selID 1 through 7.  */
     E_SELID_1_R0_REGNUM = E_NUM_OF_V850E2_REGS,
     E_SELID_1_R31_REGNUM = E_SELID_1_R0_REGNUM + 31,
 
@@ -312,7 +312,7 @@ v850_register_name (struct gdbarch *gdbarch, int regnum)
     "sr24", "sr25", "sr26", "sr27", "sr28", "sr29", "sr30", "sr31",
     "pc", "fp"
   };
-  gdb_static_assert (E_NUM_OF_V850_REGS == ARRAY_SIZE (v850_reg_names));
+  static_assert (E_NUM_OF_V850_REGS == ARRAY_SIZE (v850_reg_names));
   return v850_reg_names[regnum];
 }
 
@@ -331,7 +331,7 @@ v850e_register_name (struct gdbarch *gdbarch, int regnum)
     "sr24", "sr25", "sr26", "sr27", "sr28", "sr29", "sr30", "sr31",
     "pc", "fp"
   };
-  gdb_static_assert (E_NUM_OF_V850E_REGS == ARRAY_SIZE (v850e_reg_names));
+  static_assert (E_NUM_OF_V850E_REGS == ARRAY_SIZE (v850e_reg_names));
   return v850e_reg_names[regnum];
 }
 
@@ -477,7 +477,7 @@ v850e3v5_register_name (struct gdbarch *gdbarch, int regnum)
     "vr24", "vr25", "vr26", "vr27", "vr28", "vr29", "vr30", "vr31",
   };
 
-  gdb_static_assert (E_NUM_OF_V850E3V5_REGS
+  static_assert (E_NUM_OF_V850E3V5_REGS
 		     == ARRAY_SIZE (v850e3v5_reg_names));
   return v850e3v5_reg_names[regnum];
 }
@@ -1047,7 +1047,7 @@ v850_push_dummy_call (struct gdbarch *gdbarch,
 
   /* Now load as many as possible of the first arguments into
      registers, and push the rest onto the stack.  There are 16 bytes
-     in four registers available.  Loop thru args from first to last.  */
+     in four registers available.  Loop through args from first to last.  */
   for (argnum = 0; argnum < nargs; argnum++)
     {
       int len;
@@ -1212,7 +1212,7 @@ v850_sw_breakpoint_from_kind (struct gdbarch *gdbarch, int kind, int *size)
 }
 
 static struct v850_frame_cache *
-v850_alloc_frame_cache (frame_info_ptr this_frame)
+v850_alloc_frame_cache (const frame_info_ptr &this_frame)
 {
   struct v850_frame_cache *cache;
 
@@ -1231,7 +1231,7 @@ v850_alloc_frame_cache (frame_info_ptr this_frame)
 }
 
 static struct v850_frame_cache *
-v850_frame_cache (frame_info_ptr this_frame, void **this_cache)
+v850_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   struct v850_frame_cache *cache;
@@ -1297,7 +1297,7 @@ v850_frame_cache (frame_info_ptr this_frame, void **this_cache)
 
 
 static struct value *
-v850_frame_prev_register (frame_info_ptr this_frame,
+v850_frame_prev_register (const frame_info_ptr &this_frame,
 			  void **this_cache, int regnum)
 {
   struct v850_frame_cache *cache = v850_frame_cache (this_frame, this_cache);
@@ -1308,7 +1308,7 @@ v850_frame_prev_register (frame_info_ptr this_frame,
 }
 
 static void
-v850_frame_this_id (frame_info_ptr this_frame, void **this_cache,
+v850_frame_this_id (const frame_info_ptr &this_frame, void **this_cache,
 		    struct frame_id *this_id)
 {
   struct v850_frame_cache *cache = v850_frame_cache (this_frame, this_cache);
@@ -1320,18 +1320,19 @@ v850_frame_this_id (frame_info_ptr this_frame, void **this_cache,
   *this_id = frame_id_build (cache->saved_regs[E_SP_REGNUM].addr (), cache->pc);
 }
 
-static const struct frame_unwind v850_frame_unwind = {
+static const struct frame_unwind_legacy v850_frame_unwind (
   "v850 prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   v850_frame_this_id,
   v850_frame_prev_register,
   NULL,
   default_frame_sniffer
-};
+);
 
 static CORE_ADDR
-v850_frame_base_address (frame_info_ptr this_frame, void **this_cache)
+v850_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct v850_frame_cache *cache = v850_frame_cache (this_frame, this_cache);
 

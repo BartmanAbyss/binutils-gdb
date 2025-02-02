@@ -1,5 +1,5 @@
 /* SFrame format description.
-   Copyright (C) 2022-2023 Free Software Foundation, Inc.
+   Copyright (C) 2022-2025 Free Software Foundation, Inc.
 
    This file is part of libsframe.
 
@@ -73,10 +73,11 @@ extern "C"
 
 /* SFrame format versions.  */
 #define SFRAME_VERSION_1	1
+#define SFRAME_VERSION_2	2
 /* SFrame magic number.  */
 #define SFRAME_MAGIC		0xdee2
 /* Current version of SFrame format.  */
-#define SFRAME_VERSION	SFRAME_VERSION_1
+#define SFRAME_VERSION	SFRAME_VERSION_2
 
 /* Various flags for SFrame.  */
 
@@ -117,8 +118,8 @@ extern "C"
 
 /* Unwinders perform a (PC >= FRE_START_ADDR) to look up a matching FRE.  */
 #define SFRAME_FDE_TYPE_PCINC   0
-/* Unwinders perform a (PC & FRE_START_ADDR_AS_MASK >= FRE_START_ADDR_AS_MASK)
-   to look up a matching FRE.  */
+/* Unwinders perform a (PC % REP_BLOCK_SIZE >= FRE_START_ADDR) to look up a
+   matching FRE.  */
 #define SFRAME_FDE_TYPE_PCMASK  1
 
 typedef struct sframe_preamble
@@ -193,6 +194,10 @@ typedef struct sframe_func_desc_entry
      ------------------------------------------------------------------------
      8               6                             5           4              0     */
   uint8_t sfde_func_info;
+  /* Size of the block of repeating insns.  Used for SFrame FDEs of type
+     SFRAME_FDE_TYPE_PCMASK.  */
+  uint8_t sfde_func_rep_size;
+  uint16_t sfde_func_padding2;
 } ATTRIBUTE_PACKED sframe_func_desc_entry;
 
 /* Macros to compose and decompose function info in FDE.  */
@@ -277,20 +282,22 @@ typedef struct sframe_fre_info
      S is the size of the stack frame offset for the FRE, and
      N is the number of stack frame offsets in the FRE
 
-   The offsets are interpreted in order as follows:
+   The interpretation of FRE stack offsets is ABI-specific:
 
-    offset1 (interpreted as CFA = BASE_REG + offset1)
-
-    if RA is being tracked
-      offset2 (interpreted as RA = CFA + offset2)
-      if FP is being tracked
-	offset3 (intrepreted as FP = CFA + offset2)
-      fi
-    else
+   AMD64:
+     offset1 (interpreted as CFA = BASE_REG + offset1)
       if FP is being tracked
 	offset2 (intrepreted as FP = CFA + offset2)
       fi
-    fi
+
+    AARCH64:
+     offset1 (interpreted as CFA = BASE_REG + offset1)
+     if FP is being tracked (in other words, if frame record created)
+       offset2 (interpreted as RA = CFA + offset2)
+       offset3 (intrepreted as FP = CFA + offset3)
+     fi
+     Note that in AAPCS64, a frame record, if created, will save both FP and
+     LR on stack.
 */
 
 /* Used when SFRAME_FRE_TYPE_ADDR1 is specified as FRE type.  */

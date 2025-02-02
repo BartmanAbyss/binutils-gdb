@@ -1,5 +1,5 @@
 /* tc-s12z.c -- Assembler code for the Freescale S12Z
-   Copyright (C) 2018-2023 Free Software Foundation, Inc.
+   Copyright (C) 2018-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -84,9 +84,9 @@ s12z_strtol (const char *str, char ** endptr)
 
 /* Options and initialization.  */
 
-const char *md_shortopts = "";
+const char md_shortopts[] = "";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
   {
 #define OPTION_REG_PREFIX (OPTION_MD_BASE)
    {"mreg-prefix", required_argument, NULL, OPTION_REG_PREFIX},
@@ -95,7 +95,7 @@ struct option md_longopts[] =
    {NULL, no_argument, NULL, 0}
   };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 
 relax_typeS md_relax_table[] =
@@ -3884,8 +3884,10 @@ md_estimate_size_before_relax (fragS *fragP ATTRIBUTE_UNUSED, asection *segment 
 arelent *
 tc_gen_reloc (asection *section, fixS *fixp)
 {
-  arelent *reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  arelent *reloc;
+
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   reloc->howto = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);

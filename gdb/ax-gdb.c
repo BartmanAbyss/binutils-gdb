@@ -1,6 +1,6 @@
 /* GDB-specific functions for operating on agent expressions.
 
-   Copyright (C) 1998-2023 Free Software Foundation, Inc.
+   Copyright (C) 1998-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "symtab.h"
 #include "symfile.h"
 #include "gdbtypes.h"
@@ -25,7 +24,7 @@
 #include "value.h"
 #include "expression.h"
 #include "command.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "frame.h"
 #include "target.h"
 #include "ax.h"
@@ -521,11 +520,9 @@ gen_var_ref (struct agent_expr *ax, struct axs_value *value, struct symbol *var)
   value->type = check_typedef (var->type ());
   value->optimized_out = 0;
 
-  if (SYMBOL_COMPUTED_OPS (var) != NULL)
-    {
-      SYMBOL_COMPUTED_OPS (var)->tracepoint_var_ref (var, ax, value);
-      return;
-    }
+  if (const symbol_computed_ops *computed_ops = var->computed_ops ();
+      computed_ops != nullptr)
+    return computed_ops->tracepoint_var_ref (var, ax, value);
 
   /* I'm imitating the code in read_var_value.  */
   switch (var->aclass ())
@@ -587,8 +584,7 @@ gen_var_ref (struct agent_expr *ax, struct axs_value *value, struct symbol *var)
 	 this as an lvalue or rvalue, the caller will generate the
 	 right code.  */
       value->kind = axs_lvalue_register;
-      value->u.reg
-	= SYMBOL_REGISTER_OPS (var)->register_number (var, ax->gdbarch);
+      value->u.reg = var->register_ops ()->register_number (var, ax->gdbarch);
       break;
 
       /* A lot like LOC_REF_ARG, but the pointer lives directly in a
@@ -596,16 +592,15 @@ gen_var_ref (struct agent_expr *ax, struct axs_value *value, struct symbol *var)
 	 because it's just like any other case where the thing
 	 has a real address.  */
     case LOC_REGPARM_ADDR:
-      ax_reg (ax,
-	      SYMBOL_REGISTER_OPS (var)->register_number (var, ax->gdbarch));
+      ax_reg (ax, var->register_ops ()->register_number (var, ax->gdbarch));
       value->kind = axs_lvalue_memory;
       break;
 
     case LOC_UNRESOLVED:
       {
-	struct bound_minimal_symbol msym
-	  = lookup_minimal_symbol (var->linkage_name (), NULL, NULL);
-
+	bound_minimal_symbol msym
+	  = lookup_minimal_symbol (current_program_space,
+				   var->linkage_name ());
 	if (!msym.minsym)
 	  error (_("Couldn't resolve symbol `%s'."), var->print_name ());
 
@@ -818,7 +813,6 @@ static int
 is_nontrivial_conversion (struct type *from, struct type *to)
 {
   agent_expr_up ax (new agent_expr (NULL, 0));
-  int nontrivial;
 
   /* Actually generate the code, and see if anything came out.  At the
      moment, it would be trivial to replicate the code in
@@ -827,8 +821,7 @@ is_nontrivial_conversion (struct type *from, struct type *to)
      way allows this function to be independent of the logic in
      gen_conversion.  */
   gen_conversion (ax.get (), from, to);
-  nontrivial = ax->len > 0;
-  return nontrivial;
+  return !ax->buf.empty ();
 }
 
 
@@ -1319,13 +1312,13 @@ gen_primitive_field (struct agent_expr *ax, struct axs_value *value,
 		     int offset, int fieldno, struct type *type)
 {
   /* Is this a bitfield?  */
-  if (TYPE_FIELD_PACKED (type, fieldno))
+  if (type->field (fieldno).is_packed ())
     gen_bitfield_ref (ax, value, type->field (fieldno).type (),
 		      (offset * TARGET_CHAR_BIT
 		       + type->field (fieldno).loc_bitpos ()),
 		      (offset * TARGET_CHAR_BIT
 		       + type->field (fieldno).loc_bitpos ()
-		       + TYPE_FIELD_BITSIZE (type, fieldno)));
+		       + type->field (fieldno).bitsize ()));
   else
     {
       gen_offset (ax, offset
@@ -1459,7 +1452,8 @@ gen_static_field (struct agent_expr *ax, struct axs_value *value,
   else
     {
       const char *phys_name = type->field (fieldno).loc_physname ();
-      struct symbol *sym = lookup_symbol (phys_name, 0, VAR_DOMAIN, 0).symbol;
+      struct symbol *sym = lookup_symbol (phys_name, 0,
+					  SEARCH_VAR_DOMAIN, 0).symbol;
 
       if (sym)
 	{
@@ -1504,7 +1498,7 @@ gen_struct_elt_for_reference (struct agent_expr *ax, struct axs_value *value,
 		       fieldname);
 	      return 1;
 	    }
-	  if (TYPE_FIELD_PACKED (t, i))
+	  if (t->field (i).is_packed ())
 	    error (_("pointers to bitfield members not allowed"));
 
 	  /* FIXME we need a way to do "want_address" equivalent */	  
@@ -1550,7 +1544,7 @@ gen_maybe_namespace_elt (struct agent_expr *ax, struct axs_value *value,
 
   sym = cp_lookup_symbol_namespace (namespace_name, name,
 				    block_for_pc (ax->scope),
-				    VAR_DOMAIN);
+				    SEARCH_VAR_DOMAIN);
 
   if (sym.symbol == NULL)
     return 0;
@@ -1719,10 +1713,10 @@ ternop_cond_operation::do_generate_ax (struct expression *exp,
   std::get<1> (m_storage)->generate_ax (exp, ax, &value2);
   gen_usual_unary (ax, &value2);
   end = ax_goto (ax, aop_goto);
-  ax_label (ax, if1, ax->len);
+  ax_label (ax, if1, ax->buf.size ());
   std::get<2> (m_storage)->generate_ax (exp, ax, &value3);
   gen_usual_unary (ax, &value3);
-  ax_label (ax, end, ax->len);
+  ax_label (ax, end, ax->buf.size ());
   /* This is arbitrary - what if B and C are incompatible types? */
   value->type = value2.type;
   value->kind = value2.kind;
@@ -1811,12 +1805,12 @@ unop_sizeof_operation::do_generate_ax (struct expression *exp,
      only way to find an expression's type is to generate code for it.
      So we generate code for the operand, and then throw it away,
      replacing it with code that simply pushes its size.  */
-  int start = ax->len;
+  int start = ax->buf.size ();
 
   std::get<0> (m_storage)->generate_ax (exp, ax, value);
 
   /* Throw away the code we just generated.  */
-  ax->len = start;
+  ax->buf.resize (start);
 
   ax_const_l (ax, value->type->length ());
   value->kind = axs_rvalue;
@@ -2033,18 +2027,18 @@ logical_and_operation::do_generate_ax (struct expression *exp,
   gen_usual_unary (ax, &value1);
   if1 = ax_goto (ax, aop_if_goto);
   go1 = ax_goto (ax, aop_goto);
-  ax_label (ax, if1, ax->len);
+  ax_label (ax, if1, ax->buf.size ());
   std::get<1> (m_storage)->generate_ax (exp, ax, &value2);
   gen_usual_unary (ax, &value2);
   if2 = ax_goto (ax, aop_if_goto);
   go2 = ax_goto (ax, aop_goto);
-  ax_label (ax, if2, ax->len);
+  ax_label (ax, if2, ax->buf.size ());
   ax_const_l (ax, 1);
   end = ax_goto (ax, aop_goto);
-  ax_label (ax, go1, ax->len);
-  ax_label (ax, go2, ax->len);
+  ax_label (ax, go1, ax->buf.size ());
+  ax_label (ax, go2, ax->buf.size ());
   ax_const_l (ax, 0);
-  ax_label (ax, end, ax->len);
+  ax_label (ax, end, ax->buf.size ());
   value->kind = axs_rvalue;
   value->type = builtin_type (ax->gdbarch)->builtin_int;
 }
@@ -2067,10 +2061,10 @@ logical_or_operation::do_generate_ax (struct expression *exp,
   if2 = ax_goto (ax, aop_if_goto);
   ax_const_l (ax, 0);
   end = ax_goto (ax, aop_goto);
-  ax_label (ax, if1, ax->len);
-  ax_label (ax, if2, ax->len);
+  ax_label (ax, if1, ax->buf.size ());
+  ax_label (ax, if2, ax->buf.size ());
   ax_const_l (ax, 1);
-  ax_label (ax, end, ax->len);
+  ax_label (ax, end, ax->buf.size ());
   value->kind = axs_rvalue;
   value->type = builtin_type (ax->gdbarch)->builtin_int;
 }
@@ -2337,7 +2331,7 @@ gen_trace_for_var (CORE_ADDR scope, struct gdbarch *gdbarch,
   agent_expr_up ax (new agent_expr (gdbarch, scope));
   struct axs_value value;
 
-  ax->tracing = 1;
+  ax->tracing = true;
   ax->trace_string = trace_string;
   gen_var_ref (ax.get (), &value, var);
 
@@ -2370,7 +2364,7 @@ gen_trace_for_expr (CORE_ADDR scope, struct expression *expr,
   agent_expr_up ax (new agent_expr (expr->gdbarch, scope));
   struct axs_value value;
 
-  ax->tracing = 1;
+  ax->tracing = true;
   ax->trace_string = trace_string;
   value.optimized_out = 0;
   expr->op->generate_ax (expr, ax.get (), &value);
@@ -2397,7 +2391,7 @@ gen_eval_for_expr (CORE_ADDR scope, struct expression *expr)
   agent_expr_up ax (new agent_expr (expr->gdbarch, scope));
   struct axs_value value;
 
-  ax->tracing = 0;
+  ax->tracing = false;
   value.optimized_out = 0;
   expr->op->generate_ax (expr, ax.get (), &value);
 
@@ -2416,7 +2410,7 @@ gen_trace_for_return_address (CORE_ADDR scope, struct gdbarch *gdbarch,
   agent_expr_up ax (new agent_expr (gdbarch, scope));
   struct axs_value value;
 
-  ax->tracing = 1;
+  ax->tracing = true;
   ax->trace_string = trace_string;
 
   gdbarch_gen_return_address (gdbarch, ax.get (), &value, scope);
@@ -2445,7 +2439,7 @@ gen_printf (CORE_ADDR scope, struct gdbarch *gdbarch,
   int tem;
 
   /* We're computing values, not doing side effects.  */
-  ax->tracing = 0;
+  ax->tracing = false;
 
   /* Evaluate and push the args on the stack in reverse order,
      for simplicity of collecting them on the target side.  */
@@ -2615,7 +2609,8 @@ maint_agent_printf_command (const char *cmdrest, int from_tty)
       const char *cmd1;
 
       cmd1 = cmdrest;
-      expression_up expr = parse_exp_1 (&cmd1, 0, (struct block *) 0, 1);
+      expression_up expr = parse_exp_1 (&cmd1, 0, (struct block *) 0,
+					PARSER_COMMA_TERMINATES);
       argvec.push_back (expr.release ());
       cmdrest = cmd1;
       if (*cmdrest == ',')
@@ -2660,7 +2655,9 @@ If not, generate remote agent bytecode for current frame pc address."),
 	   &maintenancelist);
 
   add_cmd ("agent-printf", class_maintenance, maint_agent_printf_command,
-	   _("Translate an expression into remote "
-	     "agent bytecode for evaluation and display the bytecodes."),
+	   _("\
+Translate a printf into remote agent bytecode and display the bytecodes.\n\
+Usage: maint agent-printf FORMAT, EXPR...\n\
+The expressions are translated for evaluation, not tracing."),
 	   &maintenancelist);
 }

@@ -1,4 +1,4 @@
-#   Copyright 1988-2023 Free Software Foundation, Inc.
+#   Copyright 1988-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,8 +15,11 @@
 
 # Start with a fresh gdb
 
-gdb_exit
-gdb_start
+with_ansi_styling_terminal {
+    setenv TERM dumb
+    gdb_exit
+    gdb_start
+}
 
 set prev_timeout $timeout
 set timeout 60
@@ -28,8 +31,8 @@ set timeout 60
 gdb_test "add-symbol-file" "add-symbol-file takes a file name and an address"
 
 # test append
-gdb_test "append" "List of append subcommands:.*" 
-gdb_test "append binary" "List of append binary subcommands:.*" 
+gdb_test "append" "List of \"append\" subcommands:.*" 
+gdb_test "append binary" "List of \"append binary\" subcommands:.*" 
 gdb_test "append memory" "Missing filename\." 
 gdb_test "append value"  "Missing filename\." 
 gdb_test "append binary memory" "Missing filename\." 
@@ -76,7 +79,7 @@ gdb_test "call" "The history is empty..*"
 
 
 #test catch
-gdb_test "catch" "List of catch subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help catch\" followed by catch subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
+gdb_test "catch" "List of \"catch\" subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help catch\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
 
 #test cd
 gdb_test "cd" "Working directory \[^\r\n\]*\(\r\n \\(canonically \[^\r\n\]*\\)\)?\\."
@@ -145,12 +148,12 @@ gdb_test "down" "No stack.*"
 #test down-silently
 gdb_test "down-silently" "No stack."
 # test dump
-gdb_test "dump" "List of dump subcommands:.*" 
-gdb_test "dump binary" "List of dump binary subcommands:.*" 
-gdb_test "dump ihex" "List of dump ihex subcommands:.*" 
+gdb_test "dump" "List of \"dump\" subcommands:.*" 
+gdb_test "dump binary" "List of \"dump binary\" subcommands:.*" 
+gdb_test "dump ihex" "List of \"dump ihex\" subcommands:.*" 
 gdb_test "dump memory" "Missing filename\." 
-gdb_test "dump srec" "List of dump srec subcommands:.*" 
-gdb_test "dump tekhex" "List of dump tekhex subcommands:.*" 
+gdb_test "dump srec" "List of \"dump srec\" subcommands:.*" 
+gdb_test "dump tekhex" "List of \"dump tekhex\" subcommands:.*" 
 gdb_test "dump value" "Missing filename\." 
 gdb_test "dump binary memory" "Missing filename\." 
 gdb_test "dump binary value"  "Missing filename\." 
@@ -251,9 +254,9 @@ gdb_test "help" "List of classes of commands:(\[^\r\n\]*\[\r\n\])+aliases -- Use
 #test handle
 gdb_test "handle" "Argument required .signal to handle.*"
 #test info "i" abbreviation 
-gdb_test "i" "List of info subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help info\" followed by info subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." "info \"i\" abbreviation"
+gdb_test "i" "List of \"info\" subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help info\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." "info \"i\" abbreviation"
 #test info
-gdb_test "info" "List of info subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help info\" followed by info subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
+gdb_test "info" "List of \"info\" subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help info\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
 #test ignore
 gdb_test "ignore" "Argument required .a breakpoint number.*"
 #test info address
@@ -265,15 +268,95 @@ gdb_test "info args" "No frame selected."
 #test info bogus-gdb-command
 gdb_test "info bogus-gdb-command" "Undefined info command: \"bogus-gdb-command\".  Try \"help info\".*"
 #test info breakpoints
-gdb_test "info breakpoints" "No breakpoints or watchpoints."
+gdb_test "info breakpoints" "No breakpoints, watchpoints, tracepoints, or catchpoints."
 #test info copying
-# FIXME -- doesn't work worth a shit
-#send_gdb "info copying"
-#	-re "GNU GENERAL PUBLIC LICENSE.*#of preserving the free status of all derivatives of our free software and.*#of promoting the sharing and reuse of software generally."# 
-gdb_test "info copying"
-#	}
-#
-#
+# The license text is very big, so it may overwhelm Expect's output buffer
+# and cause the test to fail occasionally.  To avoid this problem, verify
+# the command's output in small chunks.
+set saw_header 0
+set saw_terms 0
+set saw_section5 0
+set saw_section7 0
+set saw_section10 0
+set saw_section14 0
+set saw_last_para 0
+# These excerpts were chosen for no particular reason, except that they
+# occur at the beginning, middle and end of the license text.
+set re_header [multi_line \
+		   "\\s+GNU GENERAL PUBLIC LICENSE" \
+		   "\\s+Version 3, 29 June 2007" \
+		   "" \
+		   " Copyright \\(C\\) 2007 Free Software Foundation, Inc. <http://fsf.org/>" \
+		   " Everyone is permitted to copy and distribute verbatim copies" \
+		   " of this license document, but changing it is not allowed." \
+		   "" \
+		   "\\s+Preamble" \
+		   "" \
+		   "  The GNU General Public License is a free, copyleft license for" \
+		   "software and other kinds of works.\r\n"]
+set re_terms [multi_line \
+		  "\\s+TERMS AND CONDITIONS" \
+		  "" \
+		  "  0. Definitions." \
+		  "" \
+		  "  \"This License\" refers to version 3 of the GNU General Public License.\r\n"]
+set re_section5 [multi_line \
+		     "  5. Conveying Modified Source Versions." \
+		     "" \
+		     "  You may convey a work based on the Program, or the modifications to\r\n"]
+set re_section7 [multi_line \
+		     "  7. Additional Terms." \
+		     "" \
+		     "  \"Additional permissions\" are terms that supplement the terms of this\r\n"]
+set re_section10 [multi_line \
+		      "  10. Automatic Licensing of Downstream Recipients." \
+		      "" \
+		      "  Each time you convey a covered work, the recipient automatically\r\n"]
+set re_section14 [multi_line \
+		      "  14. Revised Versions of this License." \
+		      "" \
+		      "  The Free Software Foundation may publish revised and/or new versions of\r\n"]
+set re_last_para [multi_line \
+		      "  Later license versions may give you additional or different" \
+		      "permissions.  However, no additional obligations are imposed on any" \
+		      "author or copyright holder as a result of your choosing to follow a" \
+		      "later version.\r\n"]
+set test "info copying"
+gdb_test_multiple $test $test {
+    -re $re_header {
+	set saw_header 1
+	exp_continue
+    }
+    -re $re_terms {
+	set saw_terms 1
+	exp_continue
+    }
+    -re $re_section5 {
+	set saw_section5 1
+	exp_continue
+    }
+    -re $re_section7 {
+	set saw_section7 1
+	exp_continue
+    }
+    -re $re_section10 {
+	set saw_section10 1
+	exp_continue
+    }
+    -re $re_section14 {
+	set saw_section14 1
+	exp_continue
+    }
+    -re $re_last_para {
+	set saw_last_para 1
+	exp_continue
+    }
+    -re "$gdb_prompt \$" {
+	gdb_assert { $saw_header && $saw_terms && $saw_section5 \
+			 && $saw_section7 && $saw_section10 \
+			 && $saw_section14 && $saw_last_para } $test
+    }
+}
 #test info display
 gdb_test "info display" "There are no auto-display expressions now."
 #test info frame "f" abbreviation
@@ -376,7 +459,7 @@ gdb_test "nexti" "The program is not being run."
 gdb_test "output" "Argument required .expression to compute.*"
 
 #test overlay
-gdb_test "overlay" "List of overlay subcommands:.*"
+gdb_test "overlay" "List of \"overlay\" subcommands:.*"
 #test a non-existant overlay subcommand
 gdb_test "overlay on"     "Undefined overlay command.* Try \"help overlay\"."
 gdb_test_no_output "overlay manual" "overlay manual #1"
@@ -445,13 +528,13 @@ if $use_gdb_stub {
 }
 
 #test rbreak
-gdb_test "rbreak" "rbreak"
+gdb_test "rbreak" "No breakpoints made."
 
 # test restore
 gdb_test "restore" "You can't do that without a process to debug\."
 
 #test return
-# The middle case accomodated the obsolete a29k, where doing the "ni"
+# The middle case accommodated the obsolete a29k, where doing the "ni"
 # above causes an initial stack to be created.
 gdb_test "return" "No selected frame..*"
 
@@ -473,7 +556,7 @@ gdb_test_no_output "set args" "set args"
 
 # Test set check abbreviations
 foreach x {"c" "ch" "check"} {
-    gdb_test "set $x" "List of set check subcommands:(\[^\r\n\]*\[\r\n\])+set check range -- Set range checking(\[^\r\n\]*\[\r\n\])+set check type -- Set strict type checking(\[^\r\n\]*\[\r\n\])+Type \"help set check\" followed by set check subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." \
+    gdb_test "set $x" "List of \"set check\" subcommands:(\[^\r\n\]*\[\r\n\])+set check range -- Set range checking(\[^\r\n\]*\[\r\n\])+set check type -- Set strict type checking(\[^\r\n\]*\[\r\n\])+Type \"help set check\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." \
 	"set check \"$x\" abbreviation"
 }
 
@@ -503,17 +586,17 @@ gdb_test_no_output "set history save" "set history save"
 #test set history size
 gdb_test "set history size" "Argument required .integer to set it to.*"
 #test set history
-gdb_test "set history" "List of set history subcommands:(\[^\r\n\]*\[\r\n\])+set history expansion -- Set history expansion on command input(\[^\r\n\]*\[\r\n\])+set history filename -- Set the filename in which to record the command history(\[^\r\n\]*\[\r\n\])+set history save -- Set saving of the history record on exit(\[^\r\n\]*\[\r\n\])+set history size -- Set the size of the command history(\[^\r\n\]*\[\r\n\])+Type \"help set history\" followed by set history subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
+gdb_test "set history" "List of \"set history\" subcommands:(\[^\r\n\]*\[\r\n\])+set history expansion -- Set history expansion on command input(\[^\r\n\]*\[\r\n\])+set history filename -- Set the filename in which to record the command history(\[^\r\n\]*\[\r\n\])+set history save -- Set saving of the history record on exit(\[^\r\n\]*\[\r\n\])+set history size -- Set the size of the command history(\[^\r\n\]*\[\r\n\])+Type \"help set history\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
 #test set language
 gdb_test "set language" "Requires an argument. Valid arguments are auto, local, unknown, ada, asm, c, c.., d, fortran, go, minimal, modula-2, objective-c, opencl, pascal, rust."
 #test set listsize
 gdb_test "set listsize" "Argument required .integer to set it to.*"
 #test set print "p" abbreviation
-gdb_test "set p" "List of set print subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help set print\" followed by set print subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." "set print \"p\" abbreviation"
+gdb_test "set p" "List of \"set print\" subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help set print\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." "set print \"p\" abbreviation"
 #test set print "pr" abbreviation
-gdb_test "set pr" "List of set print subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help set print\" followed by set print subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." "set print \"pr\" abbreviation"
+gdb_test "set pr" "List of \"set print\" subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help set print\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous." "set print \"pr\" abbreviation"
 #test set print
-gdb_test "set print" "List of set print subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help set print\" followed by set print subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
+gdb_test "set print" "List of \"set print\" subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help set print\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
 #test set print address
 gdb_test_no_output "set print address" "set print address"
 #test set print array
@@ -604,6 +687,7 @@ set show_conv_list \
 	{$_probe_arg10 = <error: No frame selected>} \
 	{$_probe_arg11 = <error: No frame selected>} \
 	{$_cimag = <internal function _cimag>} \
+	{$_colorsupport = "monochrome"} \
 	{$_creal = <internal function _creal>} \
 	{$_isvoid = <internal function _isvoid>} \
 	{$_shell = <internal function _shell>} \
@@ -611,7 +695,7 @@ set show_conv_list \
 	{$_gdb_maint_setting = <internal function _gdb_maint_setting>} \
 	{$_gdb_setting_str = <internal function _gdb_setting_str>} \
 	{$_gdb_setting = <internal function _gdb_setting>} \
-	{$_gdb_major = 14} \
+	{$_gdb_major = 17} \
 	{$_gdb_minor = 1} \
 	{$_shell_exitsignal = void} \
 	{$_shell_exitcode = 0} \
@@ -802,7 +886,7 @@ gdb_expect {
 }
 
 #test target
-gdb_test "target" "List of target subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help target\" followed by target subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
+gdb_test "target" "List of \"target\" subcommands:(\[^\r\n\]*\[\r\n\])+Type \"help target\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
 #test tbreak
 gdb_test "tbreak" "No default breakpoint address now."
 #test thread
@@ -835,7 +919,7 @@ gdb_test "unset environment" \
     "y"
 
 #test unset
-gdb_test "unset" "List of unset subcommands:(\[^\r\n\]*\[\r\n\])+unset environment -- Cancel environment variable VAR for the program(\[^\r\n\]*\[\r\n\])+Type \"help unset\" followed by unset subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
+gdb_test "unset" "List of \"unset\" subcommands:(\[^\r\n\]*\[\r\n\])+unset environment -- Cancel environment variable VAR for the program(\[^\r\n\]*\[\r\n\])+Type \"help unset\" followed by subcommand name for full documentation.(\[^\r\n\]*\[\r\n\])+Command name abbreviations are allowed if unambiguous."
 #test up
 #test up-silently
 gdb_test "up-silently" "No stack."

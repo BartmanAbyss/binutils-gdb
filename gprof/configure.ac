@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl
-dnl   Copyright (C) 2012-2023 Free Software Foundation, Inc.
+dnl   Copyright (C) 2012-2025 Free Software Foundation, Inc.
 dnl
 dnl This file is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@ dnl along with this program; see the file COPYING3.  If not see
 dnl <http://www.gnu.org/licenses/>.
 dnl
 m4_include([../bfd/version.m4])
-AC_INIT([gprof], BFD_VERSION)
+AC_INIT([gprof], [BFD_VERSION])
 AC_CONFIG_SRCDIR([gprof.c])
 
 AC_CANONICAL_TARGET([])
@@ -32,7 +32,6 @@ dnl config.h, to avoid any possible confusion with the bfd config.h.
 AC_CONFIG_HEADERS([gconfig.h:gconfig.in])
 
 AC_PROG_CC
-AC_GNU_SOURCE
 AC_USE_SYSTEM_EXTENSIONS
 AC_PROG_INSTALL
 

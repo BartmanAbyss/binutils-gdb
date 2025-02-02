@@ -1,6 +1,6 @@
 /* Thread pool
 
-   Copyright (C) 2019-2023 Free Software Foundation, Inc.
+   Copyright (C) 2019-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -30,7 +30,7 @@
 #include <condition_variable>
 #include <future>
 #endif
-#include "gdbsupport/gdb_optional.h"
+#include <optional>
 
 namespace gdb
 {
@@ -198,12 +198,13 @@ private:
      to represent a task.  If the optional is empty, then this means
      that the receiving thread should terminate.  If the optional is
      non-empty, then it is an actual task to evaluate.  */
-  std::queue<optional<task_t>> m_tasks;
+  std::queue<std::optional<task_t>> m_tasks;
 
   /* A condition variable and mutex that are used for communication
      between the main thread and the worker threads.  */
   std::condition_variable m_tasks_cv;
   std::mutex m_tasks_mutex;
+  bool m_sized_at_least_once = false;
 #endif /* CXX_STD_THREAD */
 };
 

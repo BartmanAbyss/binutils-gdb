@@ -1,6 +1,6 @@
 /* Target-dependent code for the CSKY architecture, for GDB.
 
-   Copyright (C) 2010-2023 Free Software Foundation, Inc.
+   Copyright (C) 2010-2024 Free Software Foundation, Inc.
 
    Contributed by C-SKY Microsystems and Mentor Graphics.
 
@@ -19,13 +19,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "gdbsupport/gdb_assert.h"
 #include "frame.h"
 #include "inferior.h"
 #include "symtab.h"
 #include "value.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "language.h"
 #include "gdbcore.h"
 #include "symfile.h"
@@ -713,7 +713,7 @@ csky_register_type (struct gdbarch *gdbarch, int reg_nr)
 
   /* Vector register has 128 bits, and only in ck810. Just return
      csky_vector_type(), not check tdesc_has_registers(), is in case
-     of some GDB stub does not describe type for Vector resgisters
+     of some GDB stub does not describe type for Vector registers
      in the target-description-xml.  */
   if ((reg_nr >= CSKY_VR0_REGNUM) && (reg_nr <= CSKY_VR0_REGNUM + 15))
     return csky_vector_type (gdbarch);
@@ -958,7 +958,7 @@ csky_analyze_prologue (struct gdbarch *gdbarch,
 		       CORE_ADDR start_pc,
 		       CORE_ADDR limit_pc,
 		       CORE_ADDR end_pc,
-		       frame_info_ptr this_frame,
+		       const frame_info_ptr &this_frame,
 		       struct csky_unwind_cache *this_cache,
 		       lr_type_t lr_type)
 {
@@ -2063,7 +2063,7 @@ csky_analyze_lr_type (struct gdbarch *gdbarch,
 /* Heuristic unwinder.  */
 
 static struct csky_unwind_cache *
-csky_frame_unwind_cache (frame_info_ptr this_frame)
+csky_frame_unwind_cache (const frame_info_ptr &this_frame)
 {
   CORE_ADDR prologue_start, prologue_end, func_end, prev_pc, block_addr;
   struct csky_unwind_cache *cache;
@@ -2097,7 +2097,7 @@ csky_frame_unwind_cache (frame_info_ptr this_frame)
     func_size = bl->end () - bl->start ();
   else
     {
-      struct bound_minimal_symbol msymbol
+      bound_minimal_symbol msymbol
 	= lookup_minimal_symbol_by_pc (prologue_start);
       if (msymbol.minsym != NULL)
 	func_size = msymbol.minsym->size ();
@@ -2122,7 +2122,7 @@ csky_frame_unwind_cache (frame_info_ptr this_frame)
 /* Implement the this_id function for the normal unwinder.  */
 
 static void
-csky_frame_this_id (frame_info_ptr this_frame,
+csky_frame_this_id (const frame_info_ptr &this_frame,
 		    void **this_prologue_cache, struct frame_id *this_id)
 {
   struct csky_unwind_cache *cache;
@@ -2143,7 +2143,7 @@ csky_frame_this_id (frame_info_ptr this_frame,
 /* Implement the prev_register function for the normal unwinder.  */
 
 static struct value *
-csky_frame_prev_register (frame_info_ptr this_frame,
+csky_frame_prev_register (const frame_info_ptr &this_frame,
 			  void **this_prologue_cache, int regnum)
 {
   struct csky_unwind_cache *cache;
@@ -2159,9 +2159,10 @@ csky_frame_prev_register (frame_info_ptr this_frame,
 /* Data structures for the normal prologue-analysis-based
    unwinder.  */
 
-static const struct frame_unwind csky_unwind_cache = {
+static const struct frame_unwind_legacy csky_unwind_cache (
   "cski prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   csky_frame_this_id,
   csky_frame_prev_register,
@@ -2169,10 +2170,10 @@ static const struct frame_unwind csky_unwind_cache = {
   default_frame_sniffer,
   NULL,
   NULL
-};
+);
 
 static CORE_ADDR
-csky_check_long_branch (frame_info_ptr frame, CORE_ADDR pc)
+csky_check_long_branch (const frame_info_ptr &frame, CORE_ADDR pc)
 {
   gdb_byte buf[8];
   struct gdbarch *gdbarch = get_frame_arch (frame);
@@ -2209,7 +2210,7 @@ csky_check_long_branch (frame_info_ptr frame, CORE_ADDR pc)
 
 static int
 csky_stub_unwind_sniffer (const struct frame_unwind *self,
-			  frame_info_ptr this_frame,
+			  const frame_info_ptr &this_frame,
 			  void **this_prologue_cache)
 {
   CORE_ADDR addr_in_block, pc;
@@ -2240,7 +2241,7 @@ csky_stub_unwind_sniffer (const struct frame_unwind *self,
 }
 
 static struct csky_unwind_cache *
-csky_make_stub_cache (frame_info_ptr this_frame)
+csky_make_stub_cache (const frame_info_ptr &this_frame)
 {
   struct csky_unwind_cache *cache;
 
@@ -2252,7 +2253,7 @@ csky_make_stub_cache (frame_info_ptr this_frame)
 }
 
 static void
-csky_stub_this_id (frame_info_ptr this_frame,
+csky_stub_this_id (const frame_info_ptr &this_frame,
 		  void **this_cache,
 		  struct frame_id *this_id)
 {
@@ -2267,7 +2268,7 @@ csky_stub_this_id (frame_info_ptr this_frame,
 }
 
 static struct value *
-csky_stub_prev_register (frame_info_ptr this_frame,
+csky_stub_prev_register (const frame_info_ptr &this_frame,
 			    void **this_cache,
 			    int prev_regnum)
 {
@@ -2293,21 +2294,22 @@ csky_stub_prev_register (frame_info_ptr this_frame,
 				       prev_regnum);
 }
 
-static frame_unwind csky_stub_unwind = {
+static const frame_unwind_legacy csky_stub_unwind (
   "csky stub",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   csky_stub_this_id,
   csky_stub_prev_register,
   NULL,
   csky_stub_unwind_sniffer
-};
+);
 
 /* Implement the this_base, this_locals, and this_args hooks
    for the normal unwinder.  */
 
 static CORE_ADDR
-csky_frame_base_address (frame_info_ptr this_frame, void **this_cache)
+csky_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct csky_unwind_cache *cache;
 
@@ -2330,7 +2332,7 @@ static const struct frame_base csky_frame_base = {
 static void
 csky_dwarf2_frame_init_reg (struct gdbarch *gdbarch, int regnum,
 			    struct dwarf2_frame_state_reg *reg,
-			    frame_info_ptr this_frame)
+			    const frame_info_ptr &this_frame)
 {
   if (regnum == gdbarch_pc_regnum (gdbarch))
     reg->how = DWARF2_FRAME_REG_RA;
@@ -2581,7 +2583,7 @@ csky_pseudo_register_read (struct gdbarch *gdbarch,
       int offset = 0;
       gdb_byte reg_buf[16];
 
-      /* Ensure getting s0~s63 from vrx if tdep->has_vr0 is ture.  */
+      /* Ensure getting s0~s63 from vrx if tdep->has_vr0 is true.  */
       if (tdep->has_vr0)
 	{
 	  if (regnum < 64)
@@ -2872,8 +2874,8 @@ csky_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 				   tdep->fv_pseudo_registers_count);
       set_gdbarch_pseudo_register_read (gdbarch,
 					csky_pseudo_register_read);
-      set_gdbarch_pseudo_register_write (gdbarch,
-					 csky_pseudo_register_write);
+      set_gdbarch_deprecated_pseudo_register_write
+	(gdbarch, csky_pseudo_register_write);
       set_tdesc_pseudo_register_name (gdbarch, csky_pseudo_register_name);
     }
 

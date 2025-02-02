@@ -1,4 +1,4 @@
-# Copyright 2020-2023 Free Software Foundation, Inc.
+# Copyright 2020-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,14 +18,10 @@
 load_lib dwarf.exp
 
 # This test can only be run on targets which support DWARF-2 and use gas.
-if {![dwarf2_support]} {
-    return 0
-}
+require dwarf2_support
 
 # The .c files use __attribute__.
-if ![is_c_compiler_gcc] {
-    return 0
-}
+require is_c_compiler_gcc
 
 standard_testfile imported-unit-bp-alt.c .S imported-unit-bp-main.c
 
@@ -96,6 +92,7 @@ Dwarf::assemble $asm_file {
 	    DW_LNS_advance_line 1
 	    DW_LNS_copy
 
+	    DW_LNS_advance_pc 0
 	    DW_LNS_advance_line -4
 	    DW_LNS_negate_stmt
 	    DW_LNS_copy
@@ -109,7 +106,7 @@ Dwarf::assemble $asm_file {
 	    DW_LNS_negate_stmt
 	    DW_LNS_copy
 
-	    DW_LNE_set_address line_label_7
+	    DW_LNE_set_address "$func_start + $func_len"
 	    DW_LNE_end_sequence
 	}
     }

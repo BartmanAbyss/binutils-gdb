@@ -1,5 +1,5 @@
 /* MIPS-specific support for ELF
-   Copyright (C) 1993-2023 Free Software Foundation, Inc.
+   Copyright (C) 1993-2025 Free Software Foundation, Inc.
 
    Most of the information added by Ian Lance Taylor, Cygnus Support,
    <ian@cygnus.com>.
@@ -593,8 +593,6 @@ struct mips_elf_obj_tdata
 
   /* The Irix 5 support uses two virtual sections, which represent
      text/data symbols defined in dynamic objects.  */
-  asymbol *elf_data_symbol;
-  asymbol *elf_text_symbol;
   asection *elf_data_section;
   asection *elf_text_section;
 
@@ -787,14 +785,14 @@ static bfd *reldyn_sorting_bfd;
 /* True if ABFD is for CPUs with load interlocking that include
    non-MIPS1 CPUs and R3900.  */
 #define LOAD_INTERLOCKS_P(abfd) \
-  (   ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) != E_MIPS_ARCH_1) \
-   || ((elf_elfheader (abfd)->e_flags & EF_MIPS_MACH) == E_MIPS_MACH_3900))
+  (   ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) != EF_MIPS_ARCH_1) \
+   || ((elf_elfheader (abfd)->e_flags & EF_MIPS_MACH) == EF_MIPS_MACH_3900))
 
 /* True if ABFD is for CPUs that are faster if JAL is converted to BAL.
    This should be safe for all architectures.  We enable this predicate
    for RM9000 for now.  */
 #define JAL_TO_BAL_P(abfd) \
-  ((elf_elfheader (abfd)->e_flags & EF_MIPS_MACH) == E_MIPS_MACH_9000)
+  ((elf_elfheader (abfd)->e_flags & EF_MIPS_MACH) == EF_MIPS_MACH_9000)
 
 /* True if ABFD is for CPUs that are faster if JALR is converted to BAL.
    This should be safe for all architectures.  We enable this predicate for
@@ -812,7 +810,7 @@ static bfd *reldyn_sorting_bfd;
 
 /* Nonzero if ABFD is using the O32 ABI.  */
 #define ABI_O32_P(abfd) \
-  ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == E_MIPS_ABI_O32)
+  ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == EF_MIPS_ABI_O32)
 
 /* Nonzero if ABFD is using the N32 ABI.  */
 #define ABI_N32_P(abfd) \
@@ -831,8 +829,8 @@ static bfd *reldyn_sorting_bfd;
 
 /* Nonzero if ABFD is MIPS R6.  */
 #define MIPSR6_P(abfd) \
-  ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_32R6 \
-    || (elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_64R6)
+  ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_32R6 \
+    || (elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_64R6)
 
 /* The IRIX compatibility level we are striving for.  */
 #define IRIX_COMPAT(abfd) \
@@ -1376,8 +1374,7 @@ mips_elf_link_hash_newfunc (struct bfd_hash_entry *entry,
 bool
 _bfd_mips_elf_mkobject (bfd *abfd)
 {
-  return bfd_elf_allocate_object (abfd, sizeof (struct mips_elf_obj_tdata),
-				  MIPS_ELF_DATA);
+  return bfd_elf_allocate_object (abfd, sizeof (struct mips_elf_obj_tdata));
 }
 
 /* MIPS ELF uses a special find_nearest_line routine in order the
@@ -1389,70 +1386,37 @@ struct mips_elf_find_line
   struct ecoff_find_line i;
 };
 
-/* Free ECOFF debugging info used by find_nearest_line.  */
-
-static void
-free_ecoff_debug (struct ecoff_debug_info *debug)
-{
-  free (debug->line);
-  free (debug->external_dnr);
-  free (debug->external_pdr);
-  free (debug->external_sym);
-  free (debug->external_opt);
-  free (debug->external_aux);
-  free (debug->ss);
-  free (debug->ssext);
-  free (debug->external_fdr);
-  free (debug->external_rfd);
-  free (debug->external_ext);
-  debug->line = NULL;
-  debug->external_dnr = NULL;
-  debug->external_pdr = NULL;
-  debug->external_sym = NULL;
-  debug->external_opt = NULL;
-  debug->external_aux = NULL;
-  debug->ss = NULL;
-  debug->ssext = NULL;
-  debug->external_fdr = NULL;
-  debug->external_rfd = NULL;
-  debug->external_ext = NULL;
-}
-
 bool
-_bfd_mips_elf_close_and_cleanup (bfd *abfd)
+_bfd_mips_elf_free_cached_info (bfd *abfd)
 {
-  if (bfd_get_format (abfd) == bfd_object)
+  struct mips_elf_obj_tdata *tdata;
+
+  if ((bfd_get_format (abfd) == bfd_object
+       || bfd_get_format (abfd) == bfd_core)
+      && (tdata = mips_elf_tdata (abfd)) != NULL)
     {
-      struct mips_elf_obj_tdata *tdata = mips_elf_tdata (abfd);
-      if (tdata != NULL)
+      BFD_ASSERT (tdata->root.object_id == MIPS_ELF_DATA);
+      while (tdata->mips_hi16_list != NULL)
 	{
-	  BFD_ASSERT (tdata->root.object_id == MIPS_ELF_DATA);
-	  while (tdata->mips_hi16_list != NULL)
-	    {
-	      struct mips_hi16 *hi = tdata->mips_hi16_list;
-	      tdata->mips_hi16_list = hi->next;
-	      free (hi);
-	    }
-	  if (tdata->find_line_info != NULL)
-	    free_ecoff_debug (&tdata->find_line_info->d);
+	  struct mips_hi16 *hi = tdata->mips_hi16_list;
+	  tdata->mips_hi16_list = hi->next;
+	  free (hi);
 	}
+      if (tdata->find_line_info != NULL)
+	_bfd_ecoff_free_ecoff_debug_info (&tdata->find_line_info->d);
     }
-  return _bfd_elf_close_and_cleanup (abfd);
+  return _bfd_elf_free_cached_info (abfd);
 }
 
 bool
 _bfd_mips_elf_new_section_hook (bfd *abfd, asection *sec)
 {
-  if (!sec->used_by_bfd)
-    {
-      struct _mips_elf_section_data *sdata;
-      size_t amt = sizeof (*sdata);
+  struct _mips_elf_section_data *sdata;
 
-      sdata = bfd_zalloc (abfd, amt);
-      if (sdata == NULL)
-	return false;
-      sec->used_by_bfd = sdata;
-    }
+  sdata = bfd_zalloc (abfd, sizeof (*sdata));
+  if (sdata == NULL)
+    return false;
+  sec->used_by_bfd = sdata;
 
   return _bfd_elf_new_section_hook (abfd, sec);
 }
@@ -1523,7 +1487,7 @@ _bfd_mips_elf_read_ecoff_info (bfd *abfd, asection *section,
 
  error_return:
   free (ext_hdr);
-  free_ecoff_debug (debug);
+  _bfd_ecoff_free_ecoff_debug_info (debug);
   return false;
 }
 
@@ -2252,15 +2216,17 @@ micromips_reloc_p (unsigned int r_type)
 }
 
 /* Similar to MIPS16, the two 16-bit halves in microMIPS must be swapped
-   on a little-endian system.  This does not apply to R_MICROMIPS_PC7_S1
-   and R_MICROMIPS_PC10_S1 relocs that apply to 16-bit instructions.  */
+   on a little-endian system.  This does not apply to R_MICROMIPS_PC7_S1,
+   R_MICROMIPS_PC10_S1 and R_MICROMIPS_GPREL7_S2 relocs that apply to
+   16-bit instructions.  */
 
 static inline bool
 micromips_reloc_shuffle_p (unsigned int r_type)
 {
   return (micromips_reloc_p (r_type)
 	  && r_type != R_MICROMIPS_PC7_S1
-	  && r_type != R_MICROMIPS_PC10_S1);
+	  && r_type != R_MICROMIPS_PC10_S1
+	  && r_type != R_MICROMIPS_GPREL7_S2);
 }
 
 static inline bool
@@ -2510,8 +2476,11 @@ _bfd_mips_elf_gprel16_with_gp (bfd *abfd, asymbol *symbol,
   else
     relocation = symbol->value;
 
-  relocation += symbol->section->output_section->vma;
-  relocation += symbol->section->output_offset;
+  if (symbol->section->output_section != NULL)
+    {
+      relocation += symbol->section->output_section->vma;
+      relocation += symbol->section->output_offset;
+    }
 
   /* Set val to the offset into the section or symbol.  */
   val = reloc_entry->addend;
@@ -2702,7 +2671,8 @@ _bfd_mips_elf_generic_reloc (bfd *abfd ATTRIBUTE_UNUSED, arelent *reloc_entry,
 
   /* Build up the field adjustment in VAL.  */
   val = 0;
-  if (!relocatable || (symbol->flags & BSF_SECTION_SYM) != 0)
+  if ((!relocatable || (symbol->flags & BSF_SECTION_SYM) != 0)
+      && symbol->section->output_section != NULL)
     {
       /* Either we're calculating the final field value or we have a
 	 relocation against a section symbol.  Add in the section's
@@ -3951,8 +3921,7 @@ count_section_dynsyms (bfd *output_bfd, struct bfd_link_info *info)
   bfd_size_type count;
 
   count = 0;
-  if (bfd_link_pic (info)
-      || elf_hash_table (info)->is_relocatable_executable)
+  if (bfd_link_pic (info))
     {
       asection *p;
       const struct elf_backend_data *bed;
@@ -6280,21 +6249,24 @@ mips_elf_calculate_relocation (bfd *abfd, bfd *input_bfd,
     case R_MIPS_GPREL16:
     case R_MICROMIPS_GPREL7_S2:
     case R_MICROMIPS_GPREL16:
-      /* Only sign-extend the addend if it was extracted from the
-	 instruction.  If the addend was separate, leave it alone,
-	 otherwise we may lose significant bits.  */
-      if (howto->partial_inplace)
-	addend = _bfd_mips_elf_sign_extend (addend, 16);
-      value = symbol + addend - gp;
-      /* If the symbol was local, any earlier relocatable links will
-	 have adjusted its addend with the gp offset, so compensate
-	 for that now.  Don't do it for symbols forced local in this
-	 link, though, since they won't have had the gp offset applied
-	 to them before.  */
-      if (was_local_p)
-	value += gp0;
-      if (was_local_p || h->root.root.type != bfd_link_hash_undefweak)
-	overflowed_p = mips_elf_overflow_p (value, 16);
+      {
+	int bits = howto->bitsize + howto->rightshift;
+	/* Only sign-extend the addend if it was extracted from the
+	   instruction.  If the addend was separate, leave it alone,
+	   otherwise we may lose significant bits.  */
+	if (howto->partial_inplace)
+	  addend = _bfd_mips_elf_sign_extend (addend, bits);
+	value = symbol + addend - gp;
+	/* If the symbol was local, any earlier relocatable links will
+	   have adjusted its addend with the gp offset, so compensate
+	   for that now.  Don't do it for symbols forced local in this
+	   link, though, since they won't have had the gp offset applied
+	   to them before.  */
+	if (was_local_p)
+	  value += gp0;
+	if (was_local_p || h->root.root.type != bfd_link_hash_undefweak)
+	  overflowed_p = mips_elf_overflow_p (value, bits);
+      }
       break;
 
     case R_MIPS16_GOT16:
@@ -6862,6 +6834,7 @@ mips_elf_create_dynamic_relocation (bfd *output_bfd,
 	indx = 0;
       else if (sec == NULL || sec->owner == NULL)
 	{
+	  BFD_ASSERT (0);
 	  bfd_set_error (bfd_error_bad_value);
 	  return false;
 	}
@@ -7019,104 +6992,107 @@ _bfd_elf_mips_mach (flagword flags)
 {
   switch (flags & EF_MIPS_MACH)
     {
-    case E_MIPS_MACH_3900:
+    case EF_MIPS_MACH_3900:
       return bfd_mach_mips3900;
 
-    case E_MIPS_MACH_4010:
+    case EF_MIPS_MACH_4010:
       return bfd_mach_mips4010;
 
-    case E_MIPS_MACH_4100:
+    case EF_MIPS_MACH_ALLEGREX:
+      return bfd_mach_mips_allegrex;
+
+    case EF_MIPS_MACH_4100:
       return bfd_mach_mips4100;
 
-    case E_MIPS_MACH_4111:
+    case EF_MIPS_MACH_4111:
       return bfd_mach_mips4111;
 
-    case E_MIPS_MACH_4120:
+    case EF_MIPS_MACH_4120:
       return bfd_mach_mips4120;
 
-    case E_MIPS_MACH_4650:
+    case EF_MIPS_MACH_4650:
       return bfd_mach_mips4650;
 
-    case E_MIPS_MACH_5400:
+    case EF_MIPS_MACH_5400:
       return bfd_mach_mips5400;
 
-    case E_MIPS_MACH_5500:
+    case EF_MIPS_MACH_5500:
       return bfd_mach_mips5500;
 
-    case E_MIPS_MACH_5900:
+    case EF_MIPS_MACH_5900:
       return bfd_mach_mips5900;
 
-    case E_MIPS_MACH_9000:
+    case EF_MIPS_MACH_9000:
       return bfd_mach_mips9000;
 
-    case E_MIPS_MACH_SB1:
+    case EF_MIPS_MACH_SB1:
       return bfd_mach_mips_sb1;
 
-    case E_MIPS_MACH_LS2E:
+    case EF_MIPS_MACH_LS2E:
       return bfd_mach_mips_loongson_2e;
 
-    case E_MIPS_MACH_LS2F:
+    case EF_MIPS_MACH_LS2F:
       return bfd_mach_mips_loongson_2f;
 
-    case E_MIPS_MACH_GS464:
+    case EF_MIPS_MACH_GS464:
       return bfd_mach_mips_gs464;
 
-    case E_MIPS_MACH_GS464E:
+    case EF_MIPS_MACH_GS464E:
       return bfd_mach_mips_gs464e;
 
-    case E_MIPS_MACH_GS264E:
+    case EF_MIPS_MACH_GS264E:
       return bfd_mach_mips_gs264e;
 
-    case E_MIPS_MACH_OCTEON3:
+    case EF_MIPS_MACH_OCTEON3:
       return bfd_mach_mips_octeon3;
 
-    case E_MIPS_MACH_OCTEON2:
+    case EF_MIPS_MACH_OCTEON2:
       return bfd_mach_mips_octeon2;
 
-    case E_MIPS_MACH_OCTEON:
+    case EF_MIPS_MACH_OCTEON:
       return bfd_mach_mips_octeon;
 
-    case E_MIPS_MACH_XLR:
+    case EF_MIPS_MACH_XLR:
       return bfd_mach_mips_xlr;
 
-    case E_MIPS_MACH_IAMR2:
+    case EF_MIPS_MACH_IAMR2:
       return bfd_mach_mips_interaptiv_mr2;
 
     default:
       switch (flags & EF_MIPS_ARCH)
 	{
 	default:
-	case E_MIPS_ARCH_1:
+	case EF_MIPS_ARCH_1:
 	  return bfd_mach_mips3000;
 
-	case E_MIPS_ARCH_2:
+	case EF_MIPS_ARCH_2:
 	  return bfd_mach_mips6000;
 
-	case E_MIPS_ARCH_3:
+	case EF_MIPS_ARCH_3:
 	  return bfd_mach_mips4000;
 
-	case E_MIPS_ARCH_4:
+	case EF_MIPS_ARCH_4:
 	  return bfd_mach_mips8000;
 
-	case E_MIPS_ARCH_5:
+	case EF_MIPS_ARCH_5:
 	  return bfd_mach_mips5;
 
-	case E_MIPS_ARCH_32:
+	case EF_MIPS_ARCH_32:
 	  return bfd_mach_mipsisa32;
 
-	case E_MIPS_ARCH_64:
+	case EF_MIPS_ARCH_64:
 	  return bfd_mach_mipsisa64;
 
-	case E_MIPS_ARCH_32R2:
+	case EF_MIPS_ARCH_32R2:
 	  return bfd_mach_mipsisa32r2;
 
-	case E_MIPS_ARCH_64R2:
+	case EF_MIPS_ARCH_64R2:
 	  return bfd_mach_mipsisa64r2;
 
-	case E_MIPS_ARCH_32R6:
+	case EF_MIPS_ARCH_32R6:
 	  return bfd_mach_mipsisa32r6;
 
-	case E_MIPS_ARCH_64R6:
+	case EF_MIPS_ARCH_64R6:
 	  return bfd_mach_mipsisa64r6;
 	}
     }
@@ -7141,13 +7117,13 @@ elf_mips_abi_name (bfd *abfd)
 	return "64";
       else
 	return "none";
-    case E_MIPS_ABI_O32:
+    case EF_MIPS_ABI_O32:
       return "O32";
-    case E_MIPS_ABI_O64:
+    case EF_MIPS_ABI_O64:
       return "O64";
-    case E_MIPS_ABI_EABI32:
+    case EF_MIPS_ABI_EABI32:
       return "EABI32";
-    case E_MIPS_ABI_EABI64:
+    case EF_MIPS_ABI_EABI64:
       return "EABI64";
     default:
       return "unknown abi";
@@ -7198,10 +7174,11 @@ _bfd_mips_elf_symbol_processing (bfd *abfd, asymbol *asym)
 
     case SHN_COMMON:
       /* Common symbols less than the GP size are automatically
-	 treated as SHN_MIPS_SCOMMON symbols on IRIX5.  */
+	 treated as SHN_MIPS_SCOMMON symbols, with some exceptions.  */
       if (asym->value > elf_gp_size (abfd)
 	  || ELF_ST_TYPE (elfsym->internal_elf_sym.st_info) == STT_TLS
-	  || IRIX_COMPAT (abfd) == ict_irix6)
+	  || IRIX_COMPAT (abfd) == ict_irix6
+	  || strcmp (asym->name, "__gnu_lto_slim") == 0)
 	break;
       /* Fall through.  */
     case SHN_MIPS_SCOMMON:
@@ -7301,7 +7278,7 @@ _bfd_mips_elf_eh_frame_address_size (bfd *abfd, const asection *sec)
 {
   if (elf_elfheader (abfd)->e_ident[EI_CLASS] == ELFCLASS64)
     return 8;
-  if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == E_MIPS_ABI_EABI64)
+  if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == EF_MIPS_ABI_EABI64)
     {
       bool long32_p, long64_p;
 
@@ -7314,11 +7291,23 @@ _bfd_mips_elf_eh_frame_address_size (bfd *abfd, const asection *sec)
       if (long64_p)
 	return 8;
 
-      if (sec->reloc_count > 0
-	  && elf_section_data (sec)->relocs != NULL
-	  && (ELF32_R_TYPE (elf_section_data (sec)->relocs[0].r_info)
-	      == R_MIPS_64))
-	return 8;
+      if (sec->reloc_count > 0)
+	{
+	  /* Load the relocations for this section.  */
+	  Elf_Internal_Rela *internal_relocs =
+	    _bfd_elf_link_read_relocs (abfd, sec, NULL, NULL, true);
+	  if (internal_relocs == NULL)
+	    return 0;
+
+	  unsigned int size = 0;
+	  if (ELF32_R_TYPE (internal_relocs[0].r_info) == R_MIPS_64)
+	    size = 8;
+
+	  if (elf_section_data (sec)->relocs != internal_relocs)
+	    free (internal_relocs);
+
+	  return size;
+	}
 
       return 0;
     }
@@ -7376,7 +7365,7 @@ _bfd_mips_elf_section_processing (bfd *abfd, Elf_Internal_Shdr *hdr)
 		    SEEK_SET) != 0)
 	return false;
       H_PUT_32 (abfd, elf_gp (abfd), buf);
-      if (bfd_bwrite (buf, 4, abfd) != 4)
+      if (bfd_write (buf, 4, abfd) != 4)
 	return false;
     }
 
@@ -7424,7 +7413,7 @@ _bfd_mips_elf_section_processing (bfd *abfd, Elf_Internal_Shdr *hdr)
 			     SEEK_SET) != 0)
 		return false;
 	      H_PUT_64 (abfd, elf_gp (abfd), buf);
-	      if (bfd_bwrite (buf, 8, abfd) != 8)
+	      if (bfd_write (buf, 8, abfd) != 8)
 		return false;
 	    }
 	  else if (intopt.kind == ODK_REGINFO)
@@ -7439,7 +7428,7 @@ _bfd_mips_elf_section_processing (bfd *abfd, Elf_Internal_Shdr *hdr)
 			    SEEK_SET) != 0)
 		return false;
 	      H_PUT_32 (abfd, elf_gp (abfd), buf);
-	      if (bfd_bwrite (buf, 4, abfd) != 4)
+	      if (bfd_write (buf, 4, abfd) != 4)
 		return false;
 	    }
 	  l += intopt.size;
@@ -7884,10 +7873,11 @@ _bfd_mips_elf_add_symbol_hook (bfd *abfd, struct bfd_link_info *info,
     {
     case SHN_COMMON:
       /* Common symbols less than the GP size are automatically
-	 treated as SHN_MIPS_SCOMMON symbols.  */
+	 treated as SHN_MIPS_SCOMMON symbols, with some exceptions.  */
       if (sym->st_size > elf_gp_size (abfd)
 	  || ELF_ST_TYPE (sym->st_info) == STT_TLS
-	  || IRIX_COMPAT (abfd) == ict_irix6)
+	  || IRIX_COMPAT (abfd) == ict_irix6
+	  || strcmp (*namep, "__gnu_lto_slim") == 0)
 	break;
       /* Fall through.  */
     case SHN_MIPS_SCOMMON:
@@ -7916,11 +7906,8 @@ _bfd_mips_elf_add_symbol_hook (bfd *abfd, struct bfd_link_info *info,
 	  /* Initialize the section.  */
 
 	  mips_elf_tdata (abfd)->elf_text_section = elf_text_section;
-	  mips_elf_tdata (abfd)->elf_text_symbol = elf_text_symbol;
 
 	  elf_text_section->symbol = elf_text_symbol;
-	  elf_text_section->symbol_ptr_ptr = &mips_elf_tdata (abfd)->elf_text_symbol;
-
 	  elf_text_section->name = ".text";
 	  elf_text_section->flags = SEC_NO_FLAGS;
 	  elf_text_section->output_section = NULL;
@@ -7957,11 +7944,8 @@ _bfd_mips_elf_add_symbol_hook (bfd *abfd, struct bfd_link_info *info,
 	  /* Initialize the section.  */
 
 	  mips_elf_tdata (abfd)->elf_data_section = elf_data_section;
-	  mips_elf_tdata (abfd)->elf_data_symbol = elf_data_symbol;
 
 	  elf_data_section->symbol = elf_data_symbol;
-	  elf_data_section->symbol_ptr_ptr = &mips_elf_tdata (abfd)->elf_data_symbol;
-
 	  elf_data_section->name = ".data";
 	  elf_data_section->flags = SEC_NO_FLAGS;
 	  elf_data_section->output_section = NULL;
@@ -9659,48 +9643,6 @@ _bfd_mips_elf_adjust_dynamic_symbol (struct bfd_link_info *info,
   return _bfd_elf_adjust_dynamic_copy (info, h, s);
 }
 
-/* This function is called after all the input files have been read,
-   and the input sections have been assigned to output sections.  We
-   check for any mips16 stub sections that we can discard.  */
-
-bool
-_bfd_mips_elf_always_size_sections (bfd *output_bfd,
-				    struct bfd_link_info *info)
-{
-  asection *sect;
-  struct mips_elf_link_hash_table *htab;
-  struct mips_htab_traverse_info hti;
-
-  htab = mips_elf_hash_table (info);
-  BFD_ASSERT (htab != NULL);
-
-  /* The .reginfo section has a fixed size.  */
-  sect = bfd_get_section_by_name (output_bfd, ".reginfo");
-  if (sect != NULL)
-    {
-      bfd_set_section_size (sect, sizeof (Elf32_External_RegInfo));
-      sect->flags |= SEC_FIXED_SIZE | SEC_HAS_CONTENTS;
-    }
-
-  /* The .MIPS.abiflags section has a fixed size.  */
-  sect = bfd_get_section_by_name (output_bfd, ".MIPS.abiflags");
-  if (sect != NULL)
-    {
-      bfd_set_section_size (sect, sizeof (Elf_External_ABIFlags_v0));
-      sect->flags |= SEC_FIXED_SIZE | SEC_HAS_CONTENTS;
-    }
-
-  hti.info = info;
-  hti.output_bfd = output_bfd;
-  hti.error = false;
-  mips_elf_link_hash_traverse (mips_elf_hash_table (info),
-			       mips_elf_check_symbols, &hti);
-  if (hti.error)
-    return false;
-
-  return true;
-}
-
 /* If the link uses a GOT, lay it out and work out its size.  */
 
 static bool
@@ -10005,23 +9947,50 @@ mips_elf_set_plt_sym_value (struct mips_elf_link_hash_entry *h, void *data)
   return true;
 }
 
-/* Set the sizes of the dynamic sections.  */
+/* Set the sizes of the dynamic sections, some mips non-dynamic sections,
+   and check for any mips16 stub sections that we can discard.  */
 
 bool
-_bfd_mips_elf_size_dynamic_sections (bfd *output_bfd,
-				     struct bfd_link_info *info)
+_bfd_mips_elf_late_size_sections (bfd *output_bfd,
+				  struct bfd_link_info *info)
 {
   bfd *dynobj;
   asection *s, *sreldyn;
   bool reltext;
   struct mips_elf_link_hash_table *htab;
+  struct mips_htab_traverse_info hti;
 
   htab = mips_elf_hash_table (info);
   BFD_ASSERT (htab != NULL);
-  dynobj = elf_hash_table (info)->dynobj;
-  BFD_ASSERT (dynobj != NULL);
 
-  if (elf_hash_table (info)->dynamic_sections_created)
+  /* The .reginfo section has a fixed size.  */
+  s = bfd_get_section_by_name (output_bfd, ".reginfo");
+  if (s != NULL)
+    {
+      bfd_set_section_size (s, sizeof (Elf32_External_RegInfo));
+      s->flags |= SEC_FIXED_SIZE | SEC_HAS_CONTENTS;
+    }
+
+  /* The .MIPS.abiflags section has a fixed size.  */
+  s = bfd_get_section_by_name (output_bfd, ".MIPS.abiflags");
+  if (s != NULL)
+    {
+      bfd_set_section_size (s, sizeof (Elf_External_ABIFlags_v0));
+      s->flags |= SEC_FIXED_SIZE | SEC_HAS_CONTENTS;
+    }
+
+  hti.info = info;
+  hti.output_bfd = output_bfd;
+  hti.error = false;
+  mips_elf_link_hash_traverse (htab, mips_elf_check_symbols, &hti);
+  if (hti.error)
+    return false;
+
+  dynobj = htab->root.dynobj;
+  if (dynobj == NULL)
+    return true;
+
+  if (htab->root.dynamic_sections_created)
     {
       /* Set the contents of the .interp section to the interpreter.  */
       if (bfd_link_executable (info) && !info->nointerp)
@@ -10032,6 +10001,7 @@ _bfd_mips_elf_size_dynamic_sections (bfd *output_bfd,
 	    = strlen (ELF_DYNAMIC_INTERPRETER (output_bfd)) + 1;
 	  s->contents
 	    = (bfd_byte *) ELF_DYNAMIC_INTERPRETER (output_bfd);
+	  s->alloced = 1;
 	}
 
       /* Figure out the size of the PLT header if we know that we
@@ -10161,7 +10131,7 @@ _bfd_mips_elf_size_dynamic_sections (bfd *output_bfd,
 	    }
 	}
       else if (bfd_link_executable (info)
-	       && ! mips_elf_hash_table (info)->use_rld_obj_head
+	       && !htab->use_rld_obj_head
 	       && startswith (name, ".rld_map"))
 	{
 	  /* We add a room for __rld_map.  It will be filled in by the
@@ -10170,7 +10140,7 @@ _bfd_mips_elf_size_dynamic_sections (bfd *output_bfd,
 	}
       else if (SGI_COMPAT (output_bfd)
 	       && startswith (name, ".compact_rel"))
-	s->size += mips_elf_hash_table (info)->compact_rel_size;
+	s->size += htab->compact_rel_size;
       else if (s == htab->root.splt)
 	{
 	  /* If the last PLT entry has a branch delay slot, allocate
@@ -10208,9 +10178,10 @@ _bfd_mips_elf_size_dynamic_sections (bfd *output_bfd,
 	  bfd_set_error (bfd_error_no_memory);
 	  return false;
 	}
+      s->alloced = 1;
     }
 
-  if (elf_hash_table (info)->dynamic_sections_created)
+  if (htab->root.dynamic_sections_created)
     {
       /* Add some entries to the .dynamic section.  We fill in the
 	 values later, in _bfd_mips_elf_finish_dynamic_sections, but we
@@ -10691,7 +10662,7 @@ _bfd_mips_elf_relocate_section (bfd *output_bfd, struct bfd_link_info *info,
 		  && (gprel16_reloc_p (howto->type)
 		      || literal_reloc_p (howto->type)))
 		{
-		  msg = _("small-data section exceeds 64KB;"
+		  msg = _("small-data section too large;"
 			  " lower small-data size limit (see option -G)");
 
 		  htab->small_data_overflow_reported = true;
@@ -11201,7 +11172,13 @@ _bfd_mips_elf_finish_dynamic_symbol (bfd *output_bfd,
 	 sign extension at runtime in the stub, resulting in a negative
 	 index value.  */
       if (h->dynindx & ~0x7fffffff)
-	return false;
+	{
+	  _bfd_error_handler
+	    (_("%pB: cannot handle more than %d dynamic symbols"),
+	     output_bfd, 0x7fffffff);
+	  bfd_set_error (bfd_error_bad_value);
+	  return false;
+	}
 
       /* Fill the stub.  */
       if (micromips_p)
@@ -12339,64 +12316,68 @@ mips_set_isa_flags (bfd *abfd)
     {
     default:
       if (ABI_N32_P (abfd) || ABI_64_P (abfd))
-        val = MIPS_DEFAULT_R6 ? E_MIPS_ARCH_64R6 : E_MIPS_ARCH_3;
+        val = MIPS_DEFAULT_R6 ? EF_MIPS_ARCH_64R6 : EF_MIPS_ARCH_3;
       else
-        val = MIPS_DEFAULT_R6 ? E_MIPS_ARCH_32R6 : E_MIPS_ARCH_1;
+        val = MIPS_DEFAULT_R6 ? EF_MIPS_ARCH_32R6 : EF_MIPS_ARCH_1;
       break;
 
     case bfd_mach_mips3000:
-      val = E_MIPS_ARCH_1;
+      val = EF_MIPS_ARCH_1;
       break;
 
     case bfd_mach_mips3900:
-      val = E_MIPS_ARCH_1 | E_MIPS_MACH_3900;
+      val = EF_MIPS_ARCH_1 | EF_MIPS_MACH_3900;
       break;
 
     case bfd_mach_mips6000:
-      val = E_MIPS_ARCH_2;
+      val = EF_MIPS_ARCH_2;
       break;
 
     case bfd_mach_mips4010:
-      val = E_MIPS_ARCH_2 | E_MIPS_MACH_4010;
+      val = EF_MIPS_ARCH_2 | EF_MIPS_MACH_4010;
+      break;
+
+    case bfd_mach_mips_allegrex:
+      val = EF_MIPS_ARCH_2 | EF_MIPS_MACH_ALLEGREX;
       break;
 
     case bfd_mach_mips4000:
     case bfd_mach_mips4300:
     case bfd_mach_mips4400:
     case bfd_mach_mips4600:
-      val = E_MIPS_ARCH_3;
+      val = EF_MIPS_ARCH_3;
       break;
 
     case bfd_mach_mips4100:
-      val = E_MIPS_ARCH_3 | E_MIPS_MACH_4100;
+      val = EF_MIPS_ARCH_3 | EF_MIPS_MACH_4100;
       break;
 
     case bfd_mach_mips4111:
-      val = E_MIPS_ARCH_3 | E_MIPS_MACH_4111;
+      val = EF_MIPS_ARCH_3 | EF_MIPS_MACH_4111;
       break;
 
     case bfd_mach_mips4120:
-      val = E_MIPS_ARCH_3 | E_MIPS_MACH_4120;
+      val = EF_MIPS_ARCH_3 | EF_MIPS_MACH_4120;
       break;
 
     case bfd_mach_mips4650:
-      val = E_MIPS_ARCH_3 | E_MIPS_MACH_4650;
+      val = EF_MIPS_ARCH_3 | EF_MIPS_MACH_4650;
       break;
 
     case bfd_mach_mips5400:
-      val = E_MIPS_ARCH_4 | E_MIPS_MACH_5400;
+      val = EF_MIPS_ARCH_4 | EF_MIPS_MACH_5400;
       break;
 
     case bfd_mach_mips5500:
-      val = E_MIPS_ARCH_4 | E_MIPS_MACH_5500;
+      val = EF_MIPS_ARCH_4 | EF_MIPS_MACH_5500;
       break;
 
     case bfd_mach_mips5900:
-      val = E_MIPS_ARCH_3 | E_MIPS_MACH_5900;
+      val = EF_MIPS_ARCH_3 | EF_MIPS_MACH_5900;
       break;
 
     case bfd_mach_mips9000:
-      val = E_MIPS_ARCH_4 | E_MIPS_MACH_9000;
+      val = EF_MIPS_ARCH_4 | EF_MIPS_MACH_9000;
       break;
 
     case bfd_mach_mips5000:
@@ -12406,84 +12387,84 @@ mips_set_isa_flags (bfd *abfd)
     case bfd_mach_mips12000:
     case bfd_mach_mips14000:
     case bfd_mach_mips16000:
-      val = E_MIPS_ARCH_4;
+      val = EF_MIPS_ARCH_4;
       break;
 
     case bfd_mach_mips5:
-      val = E_MIPS_ARCH_5;
+      val = EF_MIPS_ARCH_5;
       break;
 
     case bfd_mach_mips_loongson_2e:
-      val = E_MIPS_ARCH_3 | E_MIPS_MACH_LS2E;
+      val = EF_MIPS_ARCH_3 | EF_MIPS_MACH_LS2E;
       break;
 
     case bfd_mach_mips_loongson_2f:
-      val = E_MIPS_ARCH_3 | E_MIPS_MACH_LS2F;
+      val = EF_MIPS_ARCH_3 | EF_MIPS_MACH_LS2F;
       break;
 
     case bfd_mach_mips_sb1:
-      val = E_MIPS_ARCH_64 | E_MIPS_MACH_SB1;
+      val = EF_MIPS_ARCH_64 | EF_MIPS_MACH_SB1;
       break;
 
     case bfd_mach_mips_gs464:
-      val = E_MIPS_ARCH_64R2 | E_MIPS_MACH_GS464;
+      val = EF_MIPS_ARCH_64R2 | EF_MIPS_MACH_GS464;
       break;
 
     case bfd_mach_mips_gs464e:
-      val = E_MIPS_ARCH_64R2 | E_MIPS_MACH_GS464E;
+      val = EF_MIPS_ARCH_64R2 | EF_MIPS_MACH_GS464E;
       break;
 
     case bfd_mach_mips_gs264e:
-      val = E_MIPS_ARCH_64R2 | E_MIPS_MACH_GS264E;
+      val = EF_MIPS_ARCH_64R2 | EF_MIPS_MACH_GS264E;
       break;
 
     case bfd_mach_mips_octeon:
     case bfd_mach_mips_octeonp:
-      val = E_MIPS_ARCH_64R2 | E_MIPS_MACH_OCTEON;
+      val = EF_MIPS_ARCH_64R2 | EF_MIPS_MACH_OCTEON;
       break;
 
     case bfd_mach_mips_octeon3:
-      val = E_MIPS_ARCH_64R2 | E_MIPS_MACH_OCTEON3;
+      val = EF_MIPS_ARCH_64R2 | EF_MIPS_MACH_OCTEON3;
       break;
 
     case bfd_mach_mips_xlr:
-      val = E_MIPS_ARCH_64 | E_MIPS_MACH_XLR;
+      val = EF_MIPS_ARCH_64 | EF_MIPS_MACH_XLR;
       break;
 
     case bfd_mach_mips_octeon2:
-      val = E_MIPS_ARCH_64R2 | E_MIPS_MACH_OCTEON2;
+      val = EF_MIPS_ARCH_64R2 | EF_MIPS_MACH_OCTEON2;
       break;
 
     case bfd_mach_mipsisa32:
-      val = E_MIPS_ARCH_32;
+      val = EF_MIPS_ARCH_32;
       break;
 
     case bfd_mach_mipsisa64:
-      val = E_MIPS_ARCH_64;
+      val = EF_MIPS_ARCH_64;
       break;
 
     case bfd_mach_mipsisa32r2:
     case bfd_mach_mipsisa32r3:
     case bfd_mach_mipsisa32r5:
-      val = E_MIPS_ARCH_32R2;
+      val = EF_MIPS_ARCH_32R2;
       break;
 
     case bfd_mach_mips_interaptiv_mr2:
-      val = E_MIPS_ARCH_32R2 | E_MIPS_MACH_IAMR2;
+      val = EF_MIPS_ARCH_32R2 | EF_MIPS_MACH_IAMR2;
       break;
 
     case bfd_mach_mipsisa64r2:
     case bfd_mach_mipsisa64r3:
     case bfd_mach_mipsisa64r5:
-      val = E_MIPS_ARCH_64R2;
+      val = EF_MIPS_ARCH_64R2;
       break;
 
     case bfd_mach_mipsisa32r6:
-      val = E_MIPS_ARCH_32R6;
+      val = EF_MIPS_ARCH_32R6;
       break;
 
     case bfd_mach_mipsisa64r6:
-      val = E_MIPS_ARCH_64R6;
+      val = EF_MIPS_ARCH_64R6;
       break;
     }
   elf_elfheader (abfd)->e_flags &= ~(EF_MIPS_ARCH | EF_MIPS_MACH);
@@ -12540,22 +12521,24 @@ _bfd_mips_final_write_processing (bfd *abfd)
 	case SHT_MIPS_GPTAB:
 	  BFD_ASSERT ((*hdrpp)->bfd_section != NULL);
 	  name = bfd_section_name ((*hdrpp)->bfd_section);
-	  BFD_ASSERT (name != NULL
-		      && startswith (name, ".gptab."));
-	  sec = bfd_get_section_by_name (abfd, name + sizeof ".gptab" - 1);
-	  BFD_ASSERT (sec != NULL);
-	  (*hdrpp)->sh_info = elf_section_data (sec)->this_idx;
+	  if (startswith (name, ".gptab."))
+	    {
+	      sec = bfd_get_section_by_name (abfd, name + sizeof ".gptab" - 1);
+	      if (sec != NULL)
+		(*hdrpp)->sh_info = elf_section_data (sec)->this_idx;
+	    }
 	  break;
 
 	case SHT_MIPS_CONTENT:
 	  BFD_ASSERT ((*hdrpp)->bfd_section != NULL);
 	  name = bfd_section_name ((*hdrpp)->bfd_section);
-	  BFD_ASSERT (name != NULL
-		      && startswith (name, ".MIPS.content"));
-	  sec = bfd_get_section_by_name (abfd,
-					 name + sizeof ".MIPS.content" - 1);
-	  BFD_ASSERT (sec != NULL);
-	  (*hdrpp)->sh_link = elf_section_data (sec)->this_idx;
+	  if (startswith (name, ".MIPS.content"))
+	    {
+	      sec = bfd_get_section_by_name (abfd,
+					     name + sizeof ".MIPS.content" - 1);
+	      if (sec != NULL)
+		(*hdrpp)->sh_link = elf_section_data (sec)->this_idx;
+	    }
 	  break;
 
 	case SHT_MIPS_SYMBOL_LIB:
@@ -12570,19 +12553,16 @@ _bfd_mips_final_write_processing (bfd *abfd)
 	case SHT_MIPS_EVENTS:
 	  BFD_ASSERT ((*hdrpp)->bfd_section != NULL);
 	  name = bfd_section_name ((*hdrpp)->bfd_section);
-	  BFD_ASSERT (name != NULL);
 	  if (startswith (name, ".MIPS.events"))
 	    sec = bfd_get_section_by_name (abfd,
 					   name + sizeof ".MIPS.events" - 1);
+	  else if (startswith (name, ".MIPS.post_rel"))
+	    sec = bfd_get_section_by_name (abfd,
+					   name + sizeof ".MIPS.post_rel" - 1);
 	  else
-	    {
-	      BFD_ASSERT (startswith (name, ".MIPS.post_rel"));
-	      sec = bfd_get_section_by_name (abfd,
-					     (name
-					      + sizeof ".MIPS.post_rel" - 1));
-	    }
-	  BFD_ASSERT (sec != NULL);
-	  (*hdrpp)->sh_link = elf_section_data (sec)->this_idx;
+	    sec = NULL;
+	  if (sec != NULL)
+	    (*hdrpp)->sh_link = elf_section_data (sec)->this_idx;
 	  break;
 
 	case SHT_MIPS_XHASH:
@@ -13225,7 +13205,7 @@ _bfd_mips_elf_find_nearest_line (bfd *abfd, asymbol **symbols,
 	  fi->d.fdr = bfd_alloc (abfd, amt);
 	  if (fi->d.fdr == NULL)
 	    {
-	      free_ecoff_debug (&fi->d);
+	      _bfd_ecoff_free_ecoff_debug_info (&fi->d);
 	      msec->flags = origflags;
 	      return false;
 	    }
@@ -13464,7 +13444,7 @@ _bfd_elf_mips_get_relocated_section_contents
 		     * bfd_octets_per_byte (input_bfd, input_section));
 	      _bfd_clear_contents ((*parent)->howto, input_bfd,
 				   input_section, data, off);
-	      (*parent)->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;
+	      (*parent)->sym_ptr_ptr = &bfd_abs_section_ptr->symbol;
 	      (*parent)->addend = 0;
 	      (*parent)->howto = &none_howto;
 	      r = bfd_reloc_ok;
@@ -14465,8 +14445,7 @@ _bfd_mips_elf_link_hash_table_create (bfd *abfd)
 
   if (!_bfd_elf_link_hash_table_init (&ret->root, abfd,
 				      mips_elf_link_hash_newfunc,
-				      sizeof (struct mips_elf_link_hash_entry),
-				      MIPS_ELF_DATA))
+				      sizeof (struct mips_elf_link_hash_entry)))
     {
       free (ret);
       return NULL;
@@ -14617,6 +14596,7 @@ static const struct mips_mach_extension mips_mach_extensions[] =
   { bfd_mach_mips4000, bfd_mach_mips6000 },
   { bfd_mach_mipsisa32, bfd_mach_mips6000 },
   { bfd_mach_mips4010, bfd_mach_mips6000 },
+  { bfd_mach_mips_allegrex, bfd_mach_mips6000 },
 
   /* MIPS I extensions.  */
   { bfd_mach_mips6000, bfd_mach_mips3000 },
@@ -14734,17 +14714,17 @@ update_mips_abiflags_isa (bfd *abfd, Elf_Internal_ABIFlags_v0 *abiflags)
   int new_isa = 0;
   switch (elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH)
     {
-    case E_MIPS_ARCH_1:    new_isa = LEVEL_REV (1, 0); break;
-    case E_MIPS_ARCH_2:    new_isa = LEVEL_REV (2, 0); break;
-    case E_MIPS_ARCH_3:    new_isa = LEVEL_REV (3, 0); break;
-    case E_MIPS_ARCH_4:    new_isa = LEVEL_REV (4, 0); break;
-    case E_MIPS_ARCH_5:    new_isa = LEVEL_REV (5, 0); break;
-    case E_MIPS_ARCH_32:   new_isa = LEVEL_REV (32, 1); break;
-    case E_MIPS_ARCH_32R2: new_isa = LEVEL_REV (32, 2); break;
-    case E_MIPS_ARCH_32R6: new_isa = LEVEL_REV (32, 6); break;
-    case E_MIPS_ARCH_64:   new_isa = LEVEL_REV (64, 1); break;
-    case E_MIPS_ARCH_64R2: new_isa = LEVEL_REV (64, 2); break;
-    case E_MIPS_ARCH_64R6: new_isa = LEVEL_REV (64, 6); break;
+    case EF_MIPS_ARCH_1:    new_isa = LEVEL_REV (1, 0); break;
+    case EF_MIPS_ARCH_2:    new_isa = LEVEL_REV (2, 0); break;
+    case EF_MIPS_ARCH_3:    new_isa = LEVEL_REV (3, 0); break;
+    case EF_MIPS_ARCH_4:    new_isa = LEVEL_REV (4, 0); break;
+    case EF_MIPS_ARCH_5:    new_isa = LEVEL_REV (5, 0); break;
+    case EF_MIPS_ARCH_32:   new_isa = LEVEL_REV (32, 1); break;
+    case EF_MIPS_ARCH_32R2: new_isa = LEVEL_REV (32, 2); break;
+    case EF_MIPS_ARCH_32R6: new_isa = LEVEL_REV (32, 6); break;
+    case EF_MIPS_ARCH_64:   new_isa = LEVEL_REV (64, 1); break;
+    case EF_MIPS_ARCH_64R2: new_isa = LEVEL_REV (64, 2); break;
+    case EF_MIPS_ARCH_64R6: new_isa = LEVEL_REV (64, 6); break;
     default:
       _bfd_error_handler
 	/* xgettext:c-format */
@@ -14770,13 +14750,13 @@ static bool
 mips_32bit_flags_p (flagword flags)
 {
   return ((flags & EF_MIPS_32BITMODE) != 0
-	  || (flags & EF_MIPS_ABI) == E_MIPS_ABI_O32
-	  || (flags & EF_MIPS_ABI) == E_MIPS_ABI_EABI32
-	  || (flags & EF_MIPS_ARCH) == E_MIPS_ARCH_1
-	  || (flags & EF_MIPS_ARCH) == E_MIPS_ARCH_2
-	  || (flags & EF_MIPS_ARCH) == E_MIPS_ARCH_32
-	  || (flags & EF_MIPS_ARCH) == E_MIPS_ARCH_32R2
-	  || (flags & EF_MIPS_ARCH) == E_MIPS_ARCH_32R6);
+	  || (flags & EF_MIPS_ABI) == EF_MIPS_ABI_O32
+	  || (flags & EF_MIPS_ABI) == EF_MIPS_ABI_EABI32
+	  || (flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_1
+	  || (flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_2
+	  || (flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_32
+	  || (flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_32R2
+	  || (flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_32R6);
 }
 
 /* Infer the content of the ABI flags based on the elf header.  */
@@ -14948,7 +14928,7 @@ _bfd_mips_elf_final_link (bfd *abfd, struct bfd_link_info *info)
 	      input_section->flags &= ~SEC_HAS_CONTENTS;
 	    }
 
-	  /* Size has been set in _bfd_mips_elf_always_size_sections.  */
+	  /* Size has been set in _bfd_mips_elf_late_size_sections.  */
 	  BFD_ASSERT(o->size == sizeof (Elf_External_ABIFlags_v0));
 
 	  /* Skip this section later on (I don't think this currently
@@ -15007,7 +14987,7 @@ _bfd_mips_elf_final_link (bfd *abfd, struct bfd_link_info *info)
 	      input_section->flags &= ~SEC_HAS_CONTENTS;
 	    }
 
-	  /* Size has been set in _bfd_mips_elf_always_size_sections.  */
+	  /* Size has been set in _bfd_mips_elf_late_size_sections.  */
 	  BFD_ASSERT(o->size == sizeof (Elf32_External_RegInfo));
 
 	  /* Skip this section later on (I don't think this currently
@@ -15043,6 +15023,7 @@ _bfd_mips_elf_final_link (bfd *abfd, struct bfd_link_info *info)
 
 	  /* We accumulate the debugging information itself in the
 	     debug_info structure.  */
+	  debug.alloc_syments = false;
 	  debug.line = NULL;
 	  debug.external_dnr = NULL;
 	  debug.external_pdr = NULL;
@@ -15128,7 +15109,7 @@ _bfd_mips_elf_final_link (bfd *abfd, struct bfd_link_info *info)
 		     (mdebug_handle, abfd, &debug, swap, input_bfd,
 		      &input_debug, input_swap, info)))
 		{
-		  free_ecoff_debug (&input_debug);
+		  _bfd_ecoff_free_ecoff_debug_info (&input_debug);
 		  return false;
 		}
 
@@ -15171,7 +15152,7 @@ _bfd_mips_elf_final_link (bfd *abfd, struct bfd_link_info *info)
 		}
 
 	      /* Free up the information we just read.  */
-	      free_ecoff_debug (&input_debug);
+	      _bfd_ecoff_free_ecoff_debug_info (&input_debug);
 
 	      /* Hack: reset the SEC_HAS_CONTENTS flag so that
 		 elf_link_input_bfd ignores this section.  */
@@ -15426,6 +15407,7 @@ _bfd_mips_elf_final_link (bfd *abfd, struct bfd_link_info *info)
 
 	  o->size = c * sizeof (Elf32_External_gptab);
 	  o->contents = (bfd_byte *) ext_tab;
+	  o->alloced = 1;
 
 	  /* Skip this section later on (I don't think this currently
 	     matters, but someday it might).  */
@@ -16386,13 +16368,13 @@ _bfd_mips_elf_print_private_bfd_data (bfd *abfd, void *ptr)
   /* xgettext:c-format */
   fprintf (file, _("private flags = %lx:"), elf_elfheader (abfd)->e_flags);
 
-  if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == E_MIPS_ABI_O32)
+  if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == EF_MIPS_ABI_O32)
     fprintf (file, _(" [abi=O32]"));
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == E_MIPS_ABI_O64)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == EF_MIPS_ABI_O64)
     fprintf (file, _(" [abi=O64]"));
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == E_MIPS_ABI_EABI32)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == EF_MIPS_ABI_EABI32)
     fprintf (file, _(" [abi=EABI32]"));
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == E_MIPS_ABI_EABI64)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI) == EF_MIPS_ABI_EABI64)
     fprintf (file, _(" [abi=EABI64]"));
   else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ABI))
     fprintf (file, _(" [abi unknown]"));
@@ -16403,27 +16385,27 @@ _bfd_mips_elf_print_private_bfd_data (bfd *abfd, void *ptr)
   else
     fprintf (file, _(" [no abi set]"));
 
-  if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_1)
+  if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_1)
     fprintf (file, " [mips1]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_2)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_2)
     fprintf (file, " [mips2]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_3)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_3)
     fprintf (file, " [mips3]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_4)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_4)
     fprintf (file, " [mips4]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_5)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_5)
     fprintf (file, " [mips5]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_32)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_32)
     fprintf (file, " [mips32]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_64)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_64)
     fprintf (file, " [mips64]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_32R2)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_32R2)
     fprintf (file, " [mips32r2]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_64R2)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_64R2)
     fprintf (file, " [mips64r2]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_32R6)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_32R6)
     fprintf (file, " [mips32r6]");
-  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == E_MIPS_ARCH_64R6)
+  else if ((elf_elfheader (abfd)->e_flags & EF_MIPS_ARCH) == EF_MIPS_ARCH_64R6)
     fprintf (file, " [mips64r6]");
   else
     fprintf (file, _(" [unknown ISA]"));

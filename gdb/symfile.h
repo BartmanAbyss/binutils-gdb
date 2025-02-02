@@ -1,6 +1,6 @@
 /* Definitions for reading symbol files into GDB.
 
-   Copyright (C) 1990-2023 Free Software Foundation, Inc.
+   Copyright (C) 1990-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#if !defined (SYMFILE_H)
-#define SYMFILE_H
+#ifndef GDB_SYMFILE_H
+#define GDB_SYMFILE_H
 
 /* This file requires that you first include "bfd.h".  */
 #include "symtab.h"
@@ -244,17 +244,20 @@ extern void symbol_file_add_separate (const gdb_bfd_ref_ptr &, const char *,
 /* Find separate debuginfo for OBJFILE (using .gnu_debuglink section).
    Returns pathname, or an empty string.
 
-   Any warnings generated as part of this lookup are added to
-   WARNINGS_VECTOR, one std::string per warning.  */
+   Any warnings generated as part of this lookup are added to WARNINGS.  If
+   some other mechanism can be used to lookup the debug information then
+   the warning will not be shown, however, if GDB fails to find suitable
+   debug information using any approach, then any warnings will be
+   printed.  */
 
 extern std::string find_separate_debug_file_by_debuglink
-  (struct objfile *objfile, std::vector<std::string> *warnings_vector);
+  (struct objfile *objfile, deferred_warnings *warnings);
 
 /* Build (allocate and populate) a section_addr_info struct from an
    existing section table.  */
 
 extern section_addr_info
-    build_section_addr_info_from_section_table (const target_section_table &table);
+    build_section_addr_info_from_section_table (const std::vector<target_section> &table);
 
 			/*   Variables   */
 
@@ -349,7 +352,9 @@ bool expand_symtabs_matching
    gdb::function_view<expand_symtabs_symbol_matcher_ftype> symbol_matcher,
    gdb::function_view<expand_symtabs_exp_notify_ftype> expansion_notify,
    block_search_flags search_flags,
-   enum search_domain kind);
+   domain_search_flags kind,
+   gdb::function_view<expand_symtabs_lang_matcher_ftype> lang_matcher
+     = nullptr);
 
 void map_symbol_filenames (gdb::function_view<symbol_filename_ftype> fun,
 			   bool need_fullname);
@@ -368,6 +373,25 @@ extern gdb_bfd_ref_ptr find_separate_debug_file_in_section (struct objfile *);
 
 extern bool separate_debug_file_debug;
 
+/* Print a "separate-debug-file" debug statement.  */
+
+#define separate_debug_file_debug_printf(fmt, ...)		\
+  debug_prefixed_printf_cond (separate_debug_file_debug,	\
+			      "separate-debug-file",		\
+			      fmt, ##__VA_ARGS__)
+
+/* Print "separate-debug-file" enter/exit debug statements.  */
+
+#define SEPARATE_DEBUG_FILE_SCOPED_DEBUG_ENTER_EXIT \
+  scoped_debug_enter_exit (separate_debug_file_debug,	\
+			   "separate-debug-file")
+
+/* Print "separate-debug-file" start/end debug statements.  */
+
+#define SEPARATE_DEBUG_FILE_SCOPED_DEBUG_START_END(fmt, ...) \
+  scoped_debug_start_end (separate_debug_file_debug,	     \
+			  "separate-debug-file", fmt, ##__VA_ARGS__)
+
 /* Read full symbols immediately.  */
 
 extern int readnow_symbol_files;
@@ -376,4 +400,20 @@ extern int readnow_symbol_files;
 
 extern int readnever_symbol_files;
 
-#endif /* !defined(SYMFILE_H) */
+/* This is the symbol-file command.  Read the file, analyze its
+   symbols, and add a struct symtab to a symtab list.  The syntax of
+   the command is rather bizarre:
+
+   1. The function buildargv implements various quoting conventions
+   which are undocumented and have little or nothing in common with
+   the way things are quoted (or not quoted) elsewhere in GDB.
+
+   2. Options are used, which are not generally used in GDB (perhaps
+   "set mapped on", "set readnow on" would be better)
+
+   3. The order of options matters, which is contrary to GNU
+   conventions (because it is confusing and inconvenient).  */
+
+extern void symbol_file_command (const char *, int);
+
+#endif /* GDB_SYMFILE_H */

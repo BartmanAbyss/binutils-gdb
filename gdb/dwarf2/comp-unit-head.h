@@ -1,6 +1,6 @@
 /* Low-level DWARF 2 reading code
 
-   Copyright (C) 1994-2023 Free Software Foundation, Inc.
+   Copyright (C) 1994-2024 Free Software Foundation, Inc.
 
    Adapted by Gary Funck (gary@intrepid.com), Intrepid Technology,
    Inc.  with support from Florida State University (under contract
@@ -24,8 +24,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef GDB_DWARF2_COMP_UNIT_H
-#define GDB_DWARF2_COMP_UNIT_H
+#ifndef GDB_DWARF2_COMP_UNIT_HEAD_H
+#define GDB_DWARF2_COMP_UNIT_HEAD_H
 
 #include "dwarf2.h"
 #include "dwarf2/leb.h"
@@ -108,8 +108,8 @@ public:
   }
 
   /* Read an address from BUF.  BYTES_READ is updated.  */
-  CORE_ADDR read_address (bfd *abfd, const gdb_byte *buf,
-			  unsigned int *bytes_read) const;
+  unrelocated_addr read_address (bfd *abfd, const gdb_byte *buf,
+				 unsigned int *bytes_read) const;
 };
 
 /* Expected enum dwarf_unit_type for read_comp_unit_head.  */
@@ -136,4 +136,4 @@ extern const gdb_byte *read_and_check_comp_unit_head
    const gdb_byte *info_ptr,
    rcuh_kind section_kind);
 
-#endif /* GDB_DWARF2_COMP_UNIT_H */
+#endif /* GDB_DWARF2_COMP_UNIT_HEAD_H */

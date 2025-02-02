@@ -1,5 +1,5 @@
 /* Build symbol tables in GDB's internal format.
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,8 +16,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#if !defined (BUILDSYM_H)
-#define BUILDSYM_H 1
+#ifndef GDB_BUILDSYM_H
+#define GDB_BUILDSYM_H
 
 #include "gdbsupport/gdb_obstack.h"
 #include "symtab.h"
@@ -25,7 +25,6 @@
 
 struct objfile;
 struct symbol;
-struct addrmap;
 struct compunit_symtab;
 enum language;
 
@@ -131,6 +130,10 @@ enum linetable_entry_flag : unsigned
   /* Indicates this PC is a good location to place a breakpoint at the first
      instruction past a function prologue.  */
   LEF_PROLOGUE_END = 1 << 2,
+
+  /* Indicated that this PC is part of the epilogue of a function, making
+     software watchpoints unreliable.  */
+  LEF_EPILOGUE_BEGIN = 1 << 3,
 };
 DEF_ENUM_FLAGS_TYPE (enum linetable_entry_flag, linetable_entry_flags);
 
@@ -453,4 +456,4 @@ extern void add_symbol_to_list (struct symbol *symbol,
 extern struct symbol *find_symbol_in_list (struct pending *list,
 					   char *name, int length);
 
-#endif /* defined (BUILDSYM_H) */
+#endif /* GDB_BUILDSYM_H */

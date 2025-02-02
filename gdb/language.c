@@ -1,6 +1,6 @@
 /* Multiple source language support for GDB.
 
-   Copyright (C) 1991-2023 Free Software Foundation, Inc.
+   Copyright (C) 1991-2024 Free Software Foundation, Inc.
 
    Contributed by the Department of Computer Science at the State University
    of New York at Buffalo.
@@ -28,12 +28,11 @@
    return data out of a "language-specific" struct pointer that is set
    whenever the working language changes.  That would be a lot faster.  */
 
-#include "defs.h"
 #include <ctype.h>
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "value.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "expression.h"
 #include "language.h"
 #include "varobj.h"
@@ -79,8 +78,59 @@ enum case_sensitivity case_sensitivity = case_sensitive_on;
 
 /* The current language and language_mode (see language.h).  */
 
-const struct language_defn *current_language = nullptr;
+static const struct language_defn *global_current_language;
+static lazily_set_language_ftype *lazy_language_setter;
 enum language_mode language_mode = language_mode_auto;
+
+/* Whether to warn on language changes.  */
+bool warn_frame_lang_mismatch = true;
+
+/* See language.h.  */
+
+const struct language_defn *
+get_current_language ()
+{
+  if (lazy_language_setter != nullptr)
+    {
+      /* Avoid recursive calls -- set_language refers to
+	 current_language.  */
+      lazily_set_language_ftype *call = lazy_language_setter;
+      lazy_language_setter = nullptr;
+      call ();
+    }
+  return global_current_language;
+}
+
+void
+lazily_set_language (lazily_set_language_ftype *fun)
+{
+  lazy_language_setter = fun;
+}
+
+scoped_restore_current_language::scoped_restore_current_language ()
+  : m_lang (global_current_language),
+    m_fun (lazy_language_setter)
+{
+}
+
+scoped_restore_current_language::scoped_restore_current_language
+    (enum language lang)
+  : scoped_restore_current_language ()
+{
+  set_language (lang);
+}
+
+scoped_restore_current_language::~scoped_restore_current_language ()
+{
+  /* If both are NULL, then that means dont_restore was called.  */
+  if (m_lang != nullptr || m_fun != nullptr)
+    {
+      global_current_language = m_lang;
+      lazy_language_setter = m_fun;
+      if (lazy_language_setter == nullptr)
+	set_range_case ();
+    }
+}
 
 /* The language that the user expects to be typing in (the language
    of main(), or the last language we notified them about, or C).  */
@@ -121,7 +171,7 @@ show_language_command (struct ui_file *file, int from_tty,
 		_("The current source language is \"%s\".\n"),
 		current_language->name ());
 
-  if (has_stack_frames ())
+  if (warn_frame_lang_mismatch && has_stack_frames ())
     {
       frame_info_ptr frame;
 
@@ -177,9 +227,10 @@ set_language (const char *language)
 
       /* Found it!  Go into manual mode, and use this language.  */
       language_mode = language_mode_manual;
-      current_language = lang;
+      lazy_language_setter = nullptr;
+      global_current_language = lang;
       set_range_case ();
-      expected_language = current_language;
+      expected_language = lang;
       return;
     }
 
@@ -364,7 +415,8 @@ set_range_case (void)
 void
 set_language (enum language lang)
 {
-  current_language = language_def (lang);
+  lazy_language_setter = nullptr;
+  global_current_language = language_def (lang);
   set_range_case ();
 }
 
@@ -641,7 +693,7 @@ default_symbol_name_matcher (const char *symbol_search_name,
 			     const lookup_name_info &lookup_name,
 			     completion_match_result *comp_match_res)
 {
-  gdb::string_view name = lookup_name.name ();
+  std::string_view name = lookup_name.name ();
   completion_match_for_lcd *match_for_lcd
     = (comp_match_res != NULL ? &comp_match_res->match_for_lcd : NULL);
   strncmp_iw_mode mode = (lookup_name.completion_mode ()
@@ -874,6 +926,16 @@ language_string_char_type (const struct language_defn *la,
 
 /* See language.h.  */
 
+struct value *
+language_defn::value_string (struct gdbarch *gdbarch,
+			     const char *ptr, ssize_t len) const
+{
+  struct type *type = language_string_char_type (this, gdbarch);
+  return value_cstring (ptr, len, type);
+}
+
+/* See language.h.  */
+
 struct type *
 language_bool_type (const struct language_defn *la,
 		    struct gdbarch *gdbarch)
@@ -891,7 +953,8 @@ language_arch_info::bool_type () const
     {
       struct symbol *sym;
 
-      sym = lookup_symbol (m_bool_type_name, NULL, VAR_DOMAIN, NULL).symbol;
+      sym = lookup_symbol (m_bool_type_name, nullptr, SEARCH_TYPE_DOMAIN,
+			   nullptr).symbol;
       if (sym != nullptr)
 	{
 	  struct type *type = sym->type ();
@@ -920,7 +983,7 @@ language_arch_info::type_and_symbol::alloc_type_symbol
   symbol->set_is_objfile_owned (0);
   symbol->set_section_index (0);
   symbol->set_type (type);
-  symbol->set_domain (VAR_DOMAIN);
+  symbol->set_domain (TYPE_DOMAIN);
   symbol->set_aclass_index (LOC_TYPEDEF);
   return symbol;
 }
@@ -1083,6 +1146,16 @@ For Fortran the default is off; for other languages the default is on."),
 			set_case_command,
 			show_case_command,
 			&setlist, &showlist);
+
+  add_setshow_boolean_cmd ("warn-language-frame-mismatch", class_obscure,
+			   &warn_frame_lang_mismatch, _("\
+Enable or disable the frame language-mismatch warning."),
+			   _("\
+Show the current setting of the frame language-mismatch warning."),
+			   _("\
+The frame-language-mismatch warning is issued when the current language\n\
+does not match the selected frame's language."), nullptr, nullptr,
+			   &setlist, &showlist);
 
   add_set_language_command ();
 }

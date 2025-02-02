@@ -1,4 +1,4 @@
-/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2025 Free Software Foundation, Inc.
    Contributed by Oracle.
 
    This file is part of GNU Binutils.
@@ -41,6 +41,7 @@ template <typename Key_t, typename Value_t> class Map;
 #define GELF_R_TYPE(info)   ((((uint64_t)(info))<<56)>>56)
 
 #define	SHF_SUNW_ABSENT		0x00200000	/* section data not present */
+#define	SEC_DECOMPRESSED	0x00400000	/* bfd allocated this memory */
 
 // Ancillary values.
 #define ANC_SUNW_NULL       0
@@ -96,6 +97,7 @@ public:
   Elf_Internal_Rela *elf_getrela (Elf_Data *edta, unsigned int ndx, Elf_Internal_Rela *dst);
   Elf64_Ancillary *elf_getancillary (Elf_Data *edta, unsigned int ndx, Elf64_Ancillary *dst);
   Elf *find_ancillary_files (char *lo_name); // read the .gnu_debuglink and .SUNW_ancillary seections
+  const char *get_funcname_in_plt (uint64_t pc);
   char *get_location ();
   char *dump ();
   void dump_elf_sec ();
@@ -135,12 +137,20 @@ public:
 
 protected:
   Elf *get_related_file (const char *lo_name, const char *nm);
+  void get_bfd_symbols();
   int elf_class;
   int elf_datatype;
   Elf_Internal_Ehdr *ehdrp;
   Elf_Data **data;
   bfd *abfd;
   static int bfd_status;
+  long bfd_symcnt;
+  long bfd_dynsymcnt;
+  long bfd_synthcnt;
+  asymbol **bfd_sym;
+  asymbol **bfd_dynsym;
+  asymbol *bfd_synthsym;
+  Vector <asymbol *> *synthsym;
 };
 
 

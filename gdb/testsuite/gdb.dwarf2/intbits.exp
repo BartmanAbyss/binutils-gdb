@@ -1,4 +1,4 @@
-# Copyright 2020-2023 Free Software Foundation, Inc.
+# Copyright 2020-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -43,7 +43,7 @@ Dwarf::assemble ${asm_file} {
 		{DW_AT_endianity @DW_END_little}
 		{DW_AT_name "i7"}
 		{DW_AT_byte_size 2 DW_FORM_udata}
-		{DW_AT_bit_size 7 DW_FORM_udata}
+		{DW_AT_bit_size 7 DW_FORM_implicit_const}
 	    }
 
 	    DW_TAG_variable {

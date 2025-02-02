@@ -1,5 +1,5 @@
 /* 32-bit ELF support for C-SKY.
-   Copyright (C) 1998-2023 Free Software Foundation, Inc.
+   Copyright (C) 1998-2025 Free Software Foundation, Inc.
    Contributed by C-SKY Microsystems and Mentor Graphics.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -1502,8 +1502,7 @@ csky_elf_link_hash_table_create (bfd *abfd)
 
   if (!_bfd_elf_link_hash_table_init (&ret->elf, abfd,
 				      csky_elf_link_hash_newfunc,
-				      sizeof (struct csky_elf_link_hash_entry),
-				      CSKY_ELF_DATA))
+				      sizeof (struct csky_elf_link_hash_entry)))
     {
       free (ret);
       return NULL;
@@ -1522,8 +1521,7 @@ csky_elf_link_hash_table_create (bfd *abfd)
 static bool
 csky_elf_mkobject (bfd *abfd)
 {
-  return bfd_elf_allocate_object (abfd, sizeof (struct csky_elf_obj_tdata),
-				  CSKY_ELF_DATA);
+  return bfd_elf_allocate_object (abfd, sizeof (struct csky_elf_obj_tdata));
 }
 
 /* Adjust a symbol defined by a dynamic object and referenced by a
@@ -1614,7 +1612,7 @@ csky_elf_adjust_dynamic_symbol (struct bfd_link_info *info,
      only references to the symbol are via the global offset table.
      For such cases we need not do anything here; the relocations will
      be handled correctly by relocate_section.  */
-  if (bfd_link_pic (info) || htab->elf.is_relocatable_executable)
+  if (bfd_link_pic (info))
     return true;
 
   /* We must allocate the symbol in our .dynbss section, which will
@@ -1893,8 +1891,8 @@ csky_allocate_dynrelocs (struct elf_link_hash_entry *h, void *inf)
 /* Set the sizes of the dynamic sections.  */
 
 static bool
-csky_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
-				struct bfd_link_info *info)
+csky_elf_late_size_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
+			     struct bfd_link_info *info)
 {
   struct csky_elf_link_hash_table *htab;
   bfd *dynobj;
@@ -1907,7 +1905,7 @@ csky_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
     return false;
   dynobj = htab->elf.dynobj;
   if (dynobj == NULL)
-    return false;
+    return true;
 
   if (htab->elf.dynamic_sections_created)
     {
@@ -1918,6 +1916,7 @@ csky_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	  BFD_ASSERT (s != NULL);
 	  s->size = sizeof ELF_DYNAMIC_INTERPRETER;
 	  s->contents = (unsigned char *) ELF_DYNAMIC_INTERPRETER;
+	  s->alloced = 1;
 	}
     }
 
@@ -1942,8 +1941,7 @@ csky_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
 	{
 	  struct elf_dyn_relocs *p;
 
-	  for (p = *((struct elf_dyn_relocs **)
-		     &elf_section_data (s)->local_dynrel);
+	  for (p = elf_section_data (s)->local_dynrel;
 	       p != NULL;
 	       p = p->next)
 	    {
@@ -2087,6 +2085,7 @@ csky_elf_size_dynamic_sections (bfd *output_bfd ATTRIBUTE_UNUSED,
       s->contents = (bfd_byte *) bfd_zalloc (dynobj, s->size);
       if (s->contents == NULL)
 	return false;
+      s->alloced = 1;
     }
 
   if (htab->elf.dynamic_sections_created)
@@ -2106,8 +2105,6 @@ csky_elf_finish_dynamic_symbol (bfd *output_bfd,
   struct csky_elf_link_hash_table *htab;
 
   htab = csky_elf_hash_table (info);
-  if (htab == NULL)
-    return false;
 
   /* Sanity check to make sure no unexpected symbol reaches here.
      This matches the test in csky_elf_relocate_section handling
@@ -3859,6 +3856,7 @@ elf32_csky_build_stubs (struct bfd_link_info *info)
       stub_sec->contents = bfd_zalloc (htab->stub_bfd, size);
       if (stub_sec->contents == NULL && size != 0)
 	return false;
+      stub_sec->alloced = 1;
       stub_sec->size = 0;
     }
 
@@ -5302,6 +5300,7 @@ elf32_csky_obj_attrs_handle_unknown (bfd *abfd ATTRIBUTE_UNUSED,
 #define TARGET_LITTLE_SYM                     csky_elf32_le_vec
 #define TARGET_LITTLE_NAME                    "elf32-csky-little"
 #define ELF_ARCH                              bfd_arch_csky
+#define ELF_TARGET_ID			      CSKY_ELF_DATA
 #define ELF_MACHINE_CODE                      EM_CSKY
 #define ELF_MACHINE_ALT1		      EM_CSKY_OLD
 #define ELF_MAXPAGESIZE                       0x1000
@@ -5334,7 +5333,7 @@ elf32_csky_obj_attrs_handle_unknown (bfd *abfd ATTRIBUTE_UNUSED,
 /* Dynamic relocate related API.  */
 #define elf_backend_create_dynamic_sections   _bfd_elf_create_dynamic_sections
 #define elf_backend_adjust_dynamic_symbol     csky_elf_adjust_dynamic_symbol
-#define elf_backend_size_dynamic_sections     csky_elf_size_dynamic_sections
+#define elf_backend_late_size_sections        csky_elf_late_size_sections
 #define elf_backend_finish_dynamic_symbol     csky_elf_finish_dynamic_symbol
 #define elf_backend_finish_dynamic_sections   csky_elf_finish_dynamic_sections
 #define elf_backend_rela_normal               1

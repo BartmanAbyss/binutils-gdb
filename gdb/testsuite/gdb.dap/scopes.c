@@ -1,4 +1,4 @@
-/* Copyright 2023 Free Software Foundation, Inc.
+/* Copyright 2023-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,19 +17,20 @@
 
 int main ()
 {
-  struct dei_struct
+  typedef struct dei_struct
   {
     int x;
     int more[5];
-  };
+  } dei_type;
 
-  struct dei_struct dei = { 2, { 3, 5, 7, 11, 13 } };
+  dei_type dei = { 2, { 3, 5, 7, 11, 13 } };
 
   static int scalar = 23;
 
   {
     const char *inner = "inner block";
 
-    return 0;			/* BREAK */
+    /* Make sure to use 'scalar'.  */
+    return scalar - 23;			/* BREAK */
   }
 }

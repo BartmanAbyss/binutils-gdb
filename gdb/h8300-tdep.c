@@ -1,6 +1,6 @@
 /* Target-machine dependent code for Renesas H8/300, for GDB.
 
-   Copyright (C) 1988-2023 Free Software Foundation, Inc.
+   Copyright (C) 1988-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -22,7 +22,7 @@
    sac@cygnus.com
  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "value.h"
 #include "arch-utils.h"
 #include "regcache.h"
@@ -404,7 +404,7 @@ h8300_analyze_prologue (struct gdbarch *gdbarch,
 }
 
 static struct h8300_frame_cache *
-h8300_frame_cache (frame_info_ptr this_frame, void **this_cache)
+h8300_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   struct h8300_frame_cache *cache;
@@ -466,7 +466,7 @@ h8300_frame_cache (frame_info_ptr this_frame, void **this_cache)
 }
 
 static void
-h8300_frame_this_id (frame_info_ptr this_frame, void **this_cache,
+h8300_frame_this_id (const frame_info_ptr &this_frame, void **this_cache,
 		     struct frame_id *this_id)
 {
   struct h8300_frame_cache *cache =
@@ -480,7 +480,7 @@ h8300_frame_this_id (frame_info_ptr this_frame, void **this_cache,
 }
 
 static struct value *
-h8300_frame_prev_register (frame_info_ptr this_frame, void **this_cache,
+h8300_frame_prev_register (const frame_info_ptr &this_frame, void **this_cache,
 			   int regnum)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
@@ -500,18 +500,19 @@ h8300_frame_prev_register (frame_info_ptr this_frame, void **this_cache,
   return frame_unwind_got_register (this_frame, regnum, regnum);
 }
 
-static const struct frame_unwind h8300_frame_unwind = {
+static const struct frame_unwind_legacy h8300_frame_unwind (
   "h8300 prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   h8300_frame_this_id,
   h8300_frame_prev_register,
   NULL,
   default_frame_sniffer
-};
+);
 
 static CORE_ADDR
-h8300_frame_base_address (frame_info_ptr this_frame, void **this_cache)
+h8300_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct h8300_frame_cache *cache = h8300_frame_cache (this_frame, this_cache);
   return cache->base;
@@ -991,7 +992,7 @@ h8300sx_register_name (struct gdbarch *gdbarch, int regno)
 
 static void
 h8300_print_register (struct gdbarch *gdbarch, struct ui_file *file,
-		      frame_info_ptr frame, int regno)
+		      const frame_info_ptr &frame, int regno)
 {
   LONGEST rval;
   const char *name = gdbarch_register_name (gdbarch, regno);
@@ -1068,7 +1069,7 @@ h8300_print_register (struct gdbarch *gdbarch, struct ui_file *file,
 
 static void
 h8300_print_registers_info (struct gdbarch *gdbarch, struct ui_file *file,
-			    frame_info_ptr frame, int regno, int cpregs)
+			    const frame_info_ptr &frame, int regno, int cpregs)
 {
   if (regno < 0)
     {
@@ -1318,7 +1319,8 @@ h8300_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
     }
 
   set_gdbarch_pseudo_register_read (gdbarch, h8300_pseudo_register_read);
-  set_gdbarch_pseudo_register_write (gdbarch, h8300_pseudo_register_write);
+  set_gdbarch_deprecated_pseudo_register_write (gdbarch,
+						h8300_pseudo_register_write);
 
   /*
    * Basic register fields and methods.

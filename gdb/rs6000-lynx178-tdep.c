@@ -1,4 +1,4 @@
-/* Copyright (C) 2012-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2012-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -15,7 +15,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "osabi.h"
 #include "regcache.h"
 #include "gdbcore.h"
@@ -56,7 +56,7 @@ rs6000_lynx178_push_dummy_call (struct gdbarch *gdbarch,
      on PPC variants that lack them.  */
   gdb_assert (ppc_floating_point_unit_p (gdbarch));
 
-  /* The first eight words of ther arguments are passed in registers.
+  /* The first eight words of the arguments are passed in registers.
      Copy them appropriately.  */
   ii = 0;
 

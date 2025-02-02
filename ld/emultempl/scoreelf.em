@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright (C) 2006-2023 Free Software Foundation, Inc.
+#   Copyright (C) 2006-2025 Free Software Foundation, Inc.
 #   Contributed by:
 #   Brain.lin (brain.lin@sunplusct.com)
 #   Mei Ligang (ligang@sunnorth.com.cn)
@@ -76,7 +76,6 @@ EOF
 # Define some shell vars to insert bits of code into the standard elf
 # parse_args and list_options functions.
 #
-PARSE_AND_LIST_PROLOGUE=''
 PARSE_AND_LIST_SHORTOPTS=
 PARSE_AND_LIST_LONGOPTS=''
 PARSE_AND_LIST_OPTIONS=''

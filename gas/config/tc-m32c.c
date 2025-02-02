@@ -1,5 +1,5 @@
 /* tc-m32c.c -- Assembler for the Renesas M32C.
-   Copyright (C) 2005-2023 Free Software Foundation, Inc.
+   Copyright (C) 2005-2025 Free Software Foundation, Inc.
    Contributed by RedHat.
 
    This file is part of GAS, the GNU Assembler.
@@ -61,7 +61,7 @@ const char EXP_CHARS[]            = "eE";
 const char FLT_CHARS[]            = "dD";
 
 #define M32C_SHORTOPTS ""
-const char * md_shortopts = M32C_SHORTOPTS;
+const char md_shortopts[] = M32C_SHORTOPTS;
 
 /* assembler options */
 #define OPTION_CPU_M16C	       (OPTION_MD_BASE)
@@ -69,7 +69,7 @@ const char * md_shortopts = M32C_SHORTOPTS;
 #define OPTION_LINKRELAX       (OPTION_MD_BASE + 2)
 #define OPTION_H_TICK_HEX      (OPTION_MD_BASE + 3)
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   { "m16c",       no_argument,	      NULL, OPTION_CPU_M16C   },
   { "m32c",       no_argument,	      NULL, OPTION_CPU_M32C   },
@@ -77,7 +77,7 @@ struct option md_longopts[] =
   { "h-tick-hex", no_argument,	      NULL, OPTION_H_TICK_HEX  },
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* Default machine */
 
@@ -99,8 +99,6 @@ set_isa (enum isa_attr isa_num)
 {
   cgen_bitset_set (& m32c_isa, isa_num);
 }
-
-static void s_bss (int);
 
 int
 md_parse_option (int c, const char * arg ATTRIBUTE_UNUSED)
@@ -141,20 +139,9 @@ md_show_usage (FILE * stream)
   fprintf (stream, _(" M32C specific command line options:\n"));
 }
 
-static void
-s_bss (int ignore ATTRIBUTE_UNUSED)
-{
-  int temp;
-
-  temp = get_absolute_expression ();
-  subseg_set (bss_section, (subsegT) temp);
-  demand_empty_rest_of_line ();
-}
-
 /* The target specific pseudo-ops which we support.  */
 const pseudo_typeS md_pseudo_table[] =
 {
-  { "bss",	s_bss, 		0},
   { "3byte",	cons,		3 },
   { "word",	cons,		4 },
   { NULL, 	NULL, 		0 }
@@ -1045,11 +1032,10 @@ tc_gen_reloc (asection *sec, fixS *fx)
       || fx->fx_r_type == BFD_RELOC_M32C_RL_1ADDR
       || fx->fx_r_type == BFD_RELOC_M32C_RL_2ADDR)
     {
-      arelent * reloc;
+      arelent *reloc;
 
-      reloc = XNEW (arelent);
-
-      reloc->sym_ptr_ptr = XNEW (asymbol *);
+      reloc = notes_alloc (sizeof (arelent));
+      reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
       *reloc->sym_ptr_ptr = symbol_get_bfdsym (fx->fx_addsy);
       reloc->address = fx->fx_frag->fr_address + fx->fx_where;
       reloc->howto = bfd_reloc_type_lookup (stdoutput, fx->fx_r_type);

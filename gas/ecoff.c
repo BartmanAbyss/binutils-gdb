@@ -1,5 +1,5 @@
 /* ECOFF debugging support.
-   Copyright (C) 1993-2023 Free Software Foundation, Inc.
+   Copyright (C) 1993-2025 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
    This file was put together by Ian Lance Taylor <ian@cygnus.com>.  A
    good deal of it comes directly from mips-tfile.c, by Michael
@@ -3402,8 +3402,7 @@ ecoff_directive_weakext (int ignore ATTRIBUTE_UNUSED)
 	value		a numeric value or an address.  */
 
 void
-ecoff_stab (segT sec ATTRIBUTE_UNUSED,
-	    int what,
+ecoff_stab (int what,
 	    const char *string,
 	    int type,
 	    int other,

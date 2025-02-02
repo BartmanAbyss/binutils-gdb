@@ -1,5 +1,5 @@
 /* tc-score.c -- Assembler for Score
-   Copyright (C) 2006-2023 Free Software Foundation, Inc.
+   Copyright (C) 2006-2025 Free Software Foundation, Inc.
    Contributed by:
    Brain.lin (brain.lin@sunplusct.com)
    Mei Ligang (ligang@sunnorth.com.cn)
@@ -24,8 +24,6 @@
 
 #include "tc-score7.c"
 
-static void s3_s_score_bss (int ignore ATTRIBUTE_UNUSED);
-static void s3_s_score_text (int ignore);
 static void s3_score_s_section (int ignore);
 static void s3_s_change_sec (int sec);
 static void s3_s_score_mask (int reg_type ATTRIBUTE_UNUSED);
@@ -39,7 +37,6 @@ static void s3_s_score_gpword (int ignore ATTRIBUTE_UNUSED);
 static void s3_s_score_cpadd (int ignore ATTRIBUTE_UNUSED);
 static void s3_s_score_lcomm (int bytes_p);
 
-static void s_score_bss (int ignore ATTRIBUTE_UNUSED);
 static void s_score_text (int ignore);
 static void s_section (int ignore);
 static void s_change_sec (int sec);
@@ -196,7 +193,6 @@ symbolS *GOT_symbol;
 
 const pseudo_typeS md_pseudo_table[] =
 {
-  {"bss", s_score_bss, 0},
   {"text", s_score_text, 0},
   {"word", cons, 4},
   {"long", cons, 4},
@@ -220,8 +216,8 @@ const pseudo_typeS md_pseudo_table[] =
   {0, 0, 0}
 };
 
-const char *md_shortopts = "nO::g::G:";
-struct option md_longopts[] =
+const char md_shortopts[] = "nO::g::G:";
+const struct option md_longopts[] =
 {
 #ifdef OPTION_EB
   {"EB"     , no_argument, NULL, OPTION_EB},
@@ -243,7 +239,7 @@ struct option md_longopts[] =
   {NULL     , no_argument, NULL, 0}
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 #define s3_GP                     28
 #define s3_PIC_CALL_REG           29
@@ -5532,22 +5528,6 @@ s3_do_dsp3 (char *str)
     s3_inst.relax_inst = 0x8000;
 }
 
-
-/* If we change section we must dump the literal pool first.  */
-static void
-s3_s_score_bss (int ignore ATTRIBUTE_UNUSED)
-{
-  subseg_set (bss_section, (subsegT) get_absolute_expression ());
-  demand_empty_rest_of_line ();
-}
-
-static void
-s3_s_score_text (int ignore)
-{
-  obj_elf_text (ignore);
-  record_alignment (now_seg, 2);
-}
-
 static void
 s3_score_s_section (int ignore)
 {
@@ -6188,18 +6168,6 @@ s3_s_score_lcomm (int bytes_p)
 
       record_alignment (bss_seg, align);
     }
-  else
-    {
-      /* Assume some objects may require alignment on some systems.  */
-#if defined (TC_ALPHA) && ! defined (VMS)
-      if (temp > 1)
-        {
-          align = ffs (temp) - 1;
-          if (temp % (1 << align))
-            abort ();
-        }
-#endif
-    }
 
   *p = 0;
   symbolP = symbol_find_or_make (name);
@@ -6324,21 +6292,10 @@ s3_build_dependency_insn_hsh (void)
 }
 
 static void
-s_score_bss (int ignore ATTRIBUTE_UNUSED)
-{
-  if (score3)
-    return s3_s_score_bss (ignore);
-  else
-    return s7_s_score_bss (ignore);
-}
-
-static void
 s_score_text (int ignore)
 {
-  if (score3)
-    return s3_s_score_text (ignore);
-  else
-    return s7_s_score_text (ignore);
+  obj_elf_text (ignore);
+  record_alignment (now_seg, 2);
 }
 
 static void
@@ -7354,10 +7311,10 @@ s3_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
   bfd_reloc_code_real_type code;
   const char *type;
 
-  reloc = retval[0] = XNEW (arelent);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
+  retval[0] = reloc;
   retval[1] = NULL;
-
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   reloc->addend = fixp->fx_offset;
@@ -7385,9 +7342,9 @@ s3_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
       newval |= (((off >> 14) & 0x3) << 16);
       s3_md_number_to_chars (buf, newval, s3_INSN_SIZE);
 
-      retval[1] = XNEW (arelent);
+      retval[1] = notes_alloc (sizeof (arelent));
+      retval[1]->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
       retval[2] = NULL;
-      retval[1]->sym_ptr_ptr = XNEW (asymbol *);
       *retval[1]->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
       retval[1]->address = (reloc->address + s3_RELAX_RELOC2 (fixp->fx_frag->fr_subtype));
 

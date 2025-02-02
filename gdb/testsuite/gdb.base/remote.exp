@@ -1,4 +1,4 @@
-# Copyright 1999-2023 Free Software Foundation, Inc.
+# Copyright 1999-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -167,7 +167,7 @@ set sizeof_random_data [get_sizeof "random_data" 48*1024]
 clean_restart $binfile
 
 #
-# Part THREE: Check the upload behavour
+# Part THREE: Check the upload behavior.
 #
 if {![runto_main]} {
     return

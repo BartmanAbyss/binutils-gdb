@@ -1,6 +1,6 @@
 /* Target-dependent code for FT32.
 
-   Copyright (C) 2009-2023 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,13 +17,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "frame-unwind.h"
 #include "frame-base.h"
 #include "symtab.h"
 #include "gdbtypes.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "gdbcore.h"
 #include "value.h"
 #include "inferior.h"
@@ -96,7 +96,7 @@ static const char *const ft32_register_names[] =
 static const char *
 ft32_register_name (struct gdbarch *gdbarch, int reg_nr)
 {
-  gdb_static_assert (ARRAY_SIZE (ft32_register_names) == FT32_NUM_REGS);
+  static_assert (ARRAY_SIZE (ft32_register_names) == FT32_NUM_REGS);
   return ft32_register_names[reg_nr];
 }
 
@@ -174,8 +174,8 @@ ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
   ULONGEST inst;
   int isize = 0;
   int regnum, pushreg;
-  struct bound_minimal_symbol msymbol;
   const int first_saved_reg = 13;	/* The first saved register.  */
+
   /* PROLOGS are addresses of the subroutine prologs, PROLOGS[n]
      is the address of __prolog_$rN.
      __prolog_$rN pushes registers from 13 through n inclusive.
@@ -195,7 +195,8 @@ ft32_analyze_prologue (CORE_ADDR start_addr, CORE_ADDR end_addr,
 
       snprintf (prolog_symbol, sizeof (prolog_symbol), "__prolog_$r%02d",
 		regnum);
-      msymbol = lookup_minimal_symbol (prolog_symbol, NULL, NULL);
+      bound_minimal_symbol msymbol
+	= lookup_minimal_symbol (current_program_space, prolog_symbol);
       if (msymbol.minsym)
 	prologs[regnum] = msymbol.value_address ();
       else
@@ -297,7 +298,8 @@ ft32_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 	  plg_end = ft32_analyze_prologue (func_addr,
 					   func_end, &cache, gdbarch);
 	  /* Found a function.  */
-	  sym = lookup_symbol (func_name, NULL, VAR_DOMAIN, NULL).symbol;
+	  sym = lookup_symbol (func_name, nullptr, SEARCH_FUNCTION_DOMAIN,
+			       nullptr).symbol;
 	  /* Don't use line number debug info for assembly source files.  */
 	  if ((sym != NULL) && sym->language () != language_asm)
 	    {
@@ -449,7 +451,7 @@ ft32_alloc_frame_cache (void)
 /* Populate a ft32_frame_cache object for this_frame.  */
 
 static struct ft32_frame_cache *
-ft32_frame_cache (frame_info_ptr this_frame, void **this_cache)
+ft32_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct ft32_frame_cache *cache;
   CORE_ADDR current_pc;
@@ -489,7 +491,7 @@ ft32_frame_cache (frame_info_ptr this_frame, void **this_cache)
    frame.  This will be used to create a new GDB frame struct.  */
 
 static void
-ft32_frame_this_id (frame_info_ptr this_frame,
+ft32_frame_this_id (const frame_info_ptr &this_frame,
 		    void **this_prologue_cache, struct frame_id *this_id)
 {
   struct ft32_frame_cache *cache = ft32_frame_cache (this_frame,
@@ -505,7 +507,7 @@ ft32_frame_this_id (frame_info_ptr this_frame,
 /* Get the value of register regnum in the previous stack frame.  */
 
 static struct value *
-ft32_frame_prev_register (frame_info_ptr this_frame,
+ft32_frame_prev_register (const frame_info_ptr &this_frame,
 			  void **this_prologue_cache, int regnum)
 {
   struct ft32_frame_cache *cache = ft32_frame_cache (this_frame,
@@ -523,21 +525,21 @@ ft32_frame_prev_register (frame_info_ptr this_frame,
   return frame_unwind_got_register (this_frame, regnum, regnum);
 }
 
-static const struct frame_unwind ft32_frame_unwind =
-{
+static const struct frame_unwind_legacy ft32_frame_unwind (
   "ft32 prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   ft32_frame_this_id,
   ft32_frame_prev_register,
   NULL,
   default_frame_sniffer
-};
+);
 
 /* Return the base address of this_frame.  */
 
 static CORE_ADDR
-ft32_frame_base_address (frame_info_ptr this_frame, void **this_cache)
+ft32_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct ft32_frame_cache *cache = ft32_frame_cache (this_frame,
 						     this_cache);

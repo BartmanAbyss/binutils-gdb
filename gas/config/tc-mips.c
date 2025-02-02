@@ -1,5 +1,5 @@
 /* tc-mips.c -- assemble code for a MIPS chip.
-   Copyright (C) 1993-2023 Free Software Foundation, Inc.
+   Copyright (C) 1993-2025 Free Software Foundation, Inc.
    Contributed by the OSF and Ralph Campbell.
    Written by Keith Knowles and Ralph Campbell, working independently.
    Modified for ECOFF and R4000 support by Ian Lance Taylor of Cygnus
@@ -399,6 +399,12 @@ static int mips_32bitmode = 0;
    || (ISA) == ISA_MIPS64R5		\
    || (ISA) == ISA_MIPS64R6)
 
+/* Return true if the ISA and CPU support trap instructions.  */
+#define ISA_HAS_TRAPS(ISA, CPU)		\
+  (((ISA) != ISA_MIPS1			\
+    && (CPU) != CPU_ALLEGREX)		\
+   || mips_opts.micromips)		\
+
 /* Return true if ISA supports 64-bit right rotate (dror et al.)
    instructions.  */
 #define ISA_HAS_DROR(ISA)		\
@@ -437,6 +443,7 @@ static int mips_32bitmode = 0;
     || (ISA) == ISA_MIPS64R3		\
     || (ISA) == ISA_MIPS64R5		\
     || (ISA) == ISA_MIPS64R6		\
+    || (CPU) == CPU_ALLEGREX		\
     || (CPU) == CPU_R5900)		\
    && ((CPU) != CPU_GS464		\
     || (CPU) != CPU_GS464E		\
@@ -525,7 +532,7 @@ static int mips_32bitmode = 0;
 #define CPU_HAS_DROR(CPU)	((CPU) == CPU_VR5400 || (CPU) == CPU_VR5500)
 
 /* True if CPU has a ror instruction.  */
-#define CPU_HAS_ROR(CPU)	CPU_HAS_DROR (CPU)
+#define CPU_HAS_ROR(CPU)	(CPU_HAS_DROR (CPU) || (CPU) == CPU_ALLEGREX)
 
 /* True if CPU is in the Octeon family.  */
 #define CPU_IS_OCTEON(CPU) ((CPU) == CPU_OCTEON || (CPU) == CPU_OCTEONP \
@@ -535,8 +542,9 @@ static int mips_32bitmode = 0;
 #define CPU_HAS_SEQ(CPU)	(CPU_IS_OCTEON (CPU))
 
 /* True, if CPU has support for ldc1 and sdc1. */
-#define CPU_HAS_LDC1_SDC1(CPU)	\
-   ((mips_opts.isa != ISA_MIPS1) && ((CPU) != CPU_R5900))
+#define CPU_HAS_LDC1_SDC1(CPU)	(mips_opts.isa != ISA_MIPS1		\
+				 && (CPU) != CPU_ALLEGREX		\
+				 && (CPU) != CPU_R5900)
 
 /* True if mflo and mfhi can be immediately followed by instructions
    which write to the HI and LO registers.
@@ -561,6 +569,7 @@ static int mips_32bitmode = 0;
    || mips_opts.isa == ISA_MIPS64R3                   \
    || mips_opts.isa == ISA_MIPS64R5                   \
    || mips_opts.isa == ISA_MIPS64R6                   \
+   || mips_opts.arch == CPU_ALLEGREX                  \
    || mips_opts.arch == CPU_R4010                     \
    || mips_opts.arch == CPU_R5900                     \
    || mips_opts.arch == CPU_R10000                    \
@@ -1441,7 +1450,7 @@ static const struct mips_cpu_info *mips_cpu_info_from_isa (int);
 static const struct mips_cpu_info *mips_cpu_info_from_arch (int);
 
 /* Command-line options.  */
-const char *md_shortopts = "O::g::G:";
+const char md_shortopts[] = "O::g::G:";
 
 enum options
   {
@@ -1576,7 +1585,7 @@ enum options
     OPTION_END_OF_ENUM
   };
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   /* Options which specify architecture.  */
   {"march", required_argument, NULL, OPTION_MARCH},
@@ -1729,7 +1738,7 @@ struct option md_longopts[] =
 
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* Information about either an Application Specific Extension or an
    optional architecture feature that, for simplicity, we treat in the
@@ -1805,7 +1814,7 @@ static const struct mips_ase mips_ases[] = {
 
   { "mt", ASE_MT, 0,
     OPTION_MT, OPTION_NO_MT,
-     2,  2, -1, -1,
+    2, 2, 2, 2,
     -1 },
 
   { "smartmips", ASE_SMARTMIPS, 0,
@@ -4149,9 +4158,6 @@ file_mips_check_options (void)
       && ((mips_abi == NO_ABI && file_mips_opts.gp == 32)
 	  || mips_abi == O32_ABI))
     mips_32bitmode = 1;
-
-  if (file_mips_opts.isa == ISA_MIPS1 && mips_trap)
-    as_bad (_("trap exception not supported at ISA 1"));
 
   /* If the selected architecture includes support for ASEs, enable
      generation of code for them.  */
@@ -10266,6 +10272,16 @@ small_offset_p (unsigned int range, unsigned int align, unsigned int offbits)
   return false;
 }
 
+/* Return true if the ISA, CPU, and --trap settings imply using trap
+   rather than breakpoint instructions in the expansion of multiply
+   and divide macros.  */
+
+static bool
+mips_use_trap (void)
+{
+  return ISA_HAS_TRAPS (mips_opts.isa, mips_opts.arch) && mips_trap;
+}
+
 /*
  *			Build macros
  *   This routine implements the seemingly endless macro or synthesized
@@ -10784,7 +10800,7 @@ macro (struct mips_cl_insn *ip, char *str)
       if (op[2] == 0)
 	{
 	  as_warn (_("divide by zero"));
-	  if (mips_trap)
+	  if (mips_use_trap ())
 	    macro_build (NULL, "teq", TRAP_FMT, ZERO, ZERO, 7);
 	  else
 	    macro_build (NULL, "break", BRK_FMT, 7);
@@ -10792,7 +10808,7 @@ macro (struct mips_cl_insn *ip, char *str)
 	}
 
       start_noreorder ();
-      if (mips_trap)
+      if (mips_use_trap ())
 	{
 	  macro_build (NULL, "teq", TRAP_FMT, op[2], ZERO, 7);
 	  macro_build (NULL, dbl ? "ddiv" : "div", "z,s,t", op[1], op[2]);
@@ -10815,12 +10831,10 @@ macro (struct mips_cl_insn *ip, char *str)
       if (mips_opts.micromips)
 	micromips_label_expr (&label_expr);
       else
-	label_expr.X_add_number = mips_trap ? (dbl ? 12 : 8) : (dbl ? 20 : 16);
+	label_expr.X_add_number = mips_use_trap () ? 8 : 16;
       macro_build (&label_expr, "bne", "s,t,p", op[2], AT);
       if (dbl)
 	{
-	  expr1.X_add_number = 1;
-	  load_register (AT, &expr1, dbl);
 	  macro_build (NULL, "dsll32", SHFT_FMT, AT, AT, 31);
 	}
       else
@@ -10828,7 +10842,7 @@ macro (struct mips_cl_insn *ip, char *str)
 	  expr1.X_add_number = 0x80000000;
 	  macro_build (&expr1, "lui", LUI_FMT, AT, BFD_RELOC_HI16);
 	}
-      if (mips_trap)
+      if (mips_use_trap ())
 	{
 	  macro_build (NULL, "teq", TRAP_FMT, op[1], AT, 6);
 	  /* We want to close the noreorder block as soon as possible, so
@@ -10894,7 +10908,7 @@ macro (struct mips_cl_insn *ip, char *str)
       if (imm_expr.X_add_number == 0)
 	{
 	  as_warn (_("divide by zero"));
-	  if (mips_trap)
+	  if (mips_use_trap ())
 	    macro_build (NULL, "teq", TRAP_FMT, ZERO, ZERO, 7);
 	  else
 	    macro_build (NULL, "break", BRK_FMT, 7);
@@ -10940,7 +10954,7 @@ macro (struct mips_cl_insn *ip, char *str)
       s2 = "mfhi";
     do_divu3:
       start_noreorder ();
-      if (mips_trap)
+      if (mips_use_trap ())
 	{
 	  macro_build (NULL, "teq", TRAP_FMT, op[2], ZERO, 7);
 	  macro_build (NULL, s, "z,s,t", op[1], op[2]);
@@ -13305,7 +13319,7 @@ macro (struct mips_cl_insn *ip, char *str)
       macro_build (NULL, "mflo", MFHL_FMT, op[0]);
       macro_build (NULL, dbl ? "dsra32" : "sra", SHFT_FMT, op[0], op[0], 31);
       macro_build (NULL, "mfhi", MFHL_FMT, AT);
-      if (mips_trap)
+      if (mips_use_trap ())
 	macro_build (NULL, "tne", TRAP_FMT, op[0], AT, 6);
       else
 	{
@@ -13343,7 +13357,7 @@ macro (struct mips_cl_insn *ip, char *str)
 		   op[1], imm ? AT : op[2]);
       macro_build (NULL, "mfhi", MFHL_FMT, AT);
       macro_build (NULL, "mflo", MFHL_FMT, op[0]);
-      if (mips_trap)
+      if (mips_use_trap ())
 	macro_build (NULL, "tne", TRAP_FMT, AT, ZERO, 6);
       else
 	{
@@ -15284,7 +15298,9 @@ mips_after_parse_args (void)
   if (arch_info == 0)
     {
       arch_info = mips_parse_cpu ("default CPU", MIPS_CPU_STRING_DEFAULT);
-      gas_assert (arch_info);
+      if (!arch_info)
+	as_fatal  (_("gas doesn't understand your configure target %s"),
+		   TARGET_ALIAS);
     }
 
   if (ABI_NEEDS_64BIT_REGS (mips_abi) && !ISA_HAS_64BIT_REGS (arch_info->isa))
@@ -15449,8 +15465,7 @@ mips_frob_file (void)
 	 there isn't supposed to be a matching LO.  Ignore %gots against
 	 constants; we'll report an error for those later.  */
       if (got16_reloc_p (l->fixp->fx_r_type)
-	  && !(l->fixp->fx_addsy
-	       && pic_need_relax (l->fixp->fx_addsy)))
+	  && !pic_need_relax (l->fixp->fx_addsy))
 	continue;
 
       /* Check quickly whether the next fixup happens to be a matching %lo.  */
@@ -16433,7 +16448,7 @@ s_change_section (int ignore ATTRIBUTE_UNUSED)
     section_type = SHT_PROGBITS;
 
   obj_elf_change_section (section_name, section_type, section_flag,
-			  section_entry_size, 0, 0, 0);
+			  section_entry_size, 0, false);
 }
 
 void
@@ -16494,8 +16509,8 @@ s_mips_globl (int x ATTRIBUTE_UNUSED)
       symbolP = symbol_find_or_make (name);
       S_SET_EXTERNAL (symbolP);
 
-      *input_line_pointer = c;
-      SKIP_WHITESPACE_AFTER_NAME ();
+      restore_line_pointer (c);
+      SKIP_WHITESPACE ();
 
       if (!is_end_of_line[(unsigned char) *input_line_pointer]
 	  && (*input_line_pointer != ','))
@@ -17554,9 +17569,9 @@ s_mips_weakext (int ignore ATTRIBUTE_UNUSED)
   c = get_symbol_name (&name);
   symbolP = symbol_find_or_make (name);
   S_SET_WEAK (symbolP);
-  *input_line_pointer = c;
+  restore_line_pointer (c);
 
-  SKIP_WHITESPACE_AFTER_NAME ();
+  SKIP_WHITESPACE ();
 
   if (! is_end_of_line[(unsigned char) *input_line_pointer])
     {
@@ -17704,6 +17719,9 @@ static bool
 pic_need_relax (symbolS *sym)
 {
   asection *symsec;
+
+  if (!sym)
+    return false;
 
   /* Handle the case of a symbol equated to another symbol.  */
   while (symbol_equated_reloc_p (sym))
@@ -18363,9 +18381,10 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
   arelent *reloc;
   bfd_reloc_code_real_type code;
 
-  memset (retval, 0, sizeof(retval));
-  reloc = retval[0] = XCNEW (arelent);
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  memset (retval, 0, sizeof (retval));
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
+  retval[0] = reloc;
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
 
@@ -19529,16 +19548,16 @@ mips_elf_final_processing (void)
     elf_elfheader (stdoutput)->e_flags |= EF_MIPS_ARCH_ASE_MDMX;
 
   /* Set the MIPS ELF ABI flags.  */
-  if (mips_abi == O32_ABI && USE_E_MIPS_ABI_O32)
-    elf_elfheader (stdoutput)->e_flags |= E_MIPS_ABI_O32;
+  if (mips_abi == O32_ABI && USE_EF_MIPS_ABI_O32)
+    elf_elfheader (stdoutput)->e_flags |= EF_MIPS_ABI_O32;
   else if (mips_abi == O64_ABI)
-    elf_elfheader (stdoutput)->e_flags |= E_MIPS_ABI_O64;
+    elf_elfheader (stdoutput)->e_flags |= EF_MIPS_ABI_O64;
   else if (mips_abi == EABI_ABI)
     {
       if (file_mips_opts.gp == 64)
-	elf_elfheader (stdoutput)->e_flags |= E_MIPS_ABI_EABI64;
+	elf_elfheader (stdoutput)->e_flags |= EF_MIPS_ABI_EABI64;
       else
-	elf_elfheader (stdoutput)->e_flags |= E_MIPS_ABI_EABI32;
+	elf_elfheader (stdoutput)->e_flags |= EF_MIPS_ABI_EABI32;
     }
 
   /* Nothing to do for N32_ABI or N64_ABI.  */
@@ -20006,6 +20025,7 @@ static const struct mips_cpu_info mips_cpu_info_table[] =
 
   /* MIPS II */
   { "r6000",          0, 0,			ISA_MIPS2,    CPU_R6000 },
+  { "allegrex",       0, 0,			ISA_MIPS2,    CPU_ALLEGREX },
 
   /* MIPS III */
   { "r4000",          0, 0,			ISA_MIPS3,    CPU_R4000 },
@@ -20620,8 +20640,10 @@ mips_md_finish (void)
 	    }
 	}
 
-      bfd_elf_add_obj_attr_int (stdoutput, OBJ_ATTR_GNU,
-				Tag_GNU_MIPS_ABI_FP, fpabi);
+      if (!bfd_elf_add_obj_attr_int (stdoutput, OBJ_ATTR_GNU,
+				     Tag_GNU_MIPS_ABI_FP, fpabi))
+	as_fatal (_("error adding attribute: %s"),
+		  bfd_errmsg (bfd_get_error ()));
     }
 }
 

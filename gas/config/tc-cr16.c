@@ -1,5 +1,5 @@
 /* tc-cr16.c -- Assembler code for the CR16 CPU core.
-   Copyright (C) 2007-2023 Free Software Foundation, Inc.
+   Copyright (C) 2007-2025 Free Software Foundation, Inc.
 
    Contributed by M R Swami Reddy <MR.Swami.Reddy@nsc.com>
 
@@ -109,12 +109,12 @@ symbolS * GOT_symbol;
 #endif
 
 /* Target-specific multicharacter options, not const-declared at usage.  */
-const char *md_shortopts = "";
-struct option md_longopts[] =
+const char md_shortopts[] = "";
+const struct option md_longopts[] =
 {
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 static void
 l_cons (int nbytes)
@@ -537,8 +537,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS * fixP)
 	   && (S_GET_SEGMENT (fixP->fx_subsy) == absolute_section)))
     return NULL;
 
-  reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr  = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   reloc->address = fixP->fx_frag->fr_address + fixP->fx_where;
   reloc->addend = fixP->fx_offset;
@@ -574,8 +574,6 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS * fixP)
 	{
 	  /* We only resolve difference expressions in the same section.  */
 	  as_bad_subtract (fixP);
-	  free (reloc->sym_ptr_ptr);
-	  free (reloc);
 	  return NULL;
 	}
     }

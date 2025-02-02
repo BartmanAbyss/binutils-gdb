@@ -1,4 +1,4 @@
-# Copyright 2000-2023 Free Software Foundation, Inc.
+# Copyright 2000-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -129,8 +129,60 @@ proc gdb_target_cmd { args } {
     return [expr $res == 0 ? 0 : 1]
 }
 
-global portnum
-set portnum "2345"
+# Return a usable port number.
+
+proc get_portnum {} {
+    if { [target_info exists gdb,socketport] } {
+	# Hard-coded in target board.
+	return [target_info gdb,socketport]
+    }
+
+    # Not hard-coded in target board.  Return increasing port numbers,
+    # starting at $initial_portnum, to avoid conflicts with hung ports.
+    set initial_portnum 2345
+
+    if { ![info exists ::GDB_PARALLEL] } {
+	# Sequential case.
+
+	# Currently available port number.
+	gdb_persistent_global portnum
+
+	# Initialize, if necessary.
+	if { ![info exists portnum] } {
+	    set portnum $initial_portnum
+	}
+
+	# Return currently available port number, and update it.
+	set res $portnum
+	incr portnum
+	return $res
+    }
+
+    # Parallel case.
+    with_lock portnum.lock {
+	# Keep portnum file alongside the lock that guards it.
+	set portnum_file [lock_dir]/portnum
+
+	if { [file exists $portnum_file] } {
+	    set fd [open $portnum_file r]
+	    set portnum [read $fd]
+	    close $fd
+
+	    set portnum [string trim $portnum]
+	} else {
+	    # Initialize.
+	    set portnum $initial_portnum
+	}
+
+	set next_portnum [expr $portnum + 1]
+
+	set fd [open $portnum_file w]
+	puts $fd $next_portnum
+	close $fd
+    }
+
+    return $portnum
+}
 
 # Locate the gdbserver binary.  Returns "" if gdbserver could not be found.
 
@@ -247,16 +299,10 @@ proc gdbserver_default_get_comm_port { port } {
 # Returns the target protocol and socket to connect to.
 
 proc gdbserver_start { options arguments } {
-    global portnum
     global GDB_TEST_SOCKETHOST
 
     # Port id -- either specified in baseboard file, or managed here.
-    if [target_info exists gdb,socketport] {
-	set portnum [target_info gdb,socketport]
-    } else {
-	# Bump the port number to avoid conflicts with hung ports.
-	incr portnum
-    }
+    set portnum [get_portnum]
 
     # Extract the local and remote host ids from the target board struct.
     if { [info exists GDB_TEST_SOCKETHOST] } {
@@ -321,12 +367,26 @@ proc gdbserver_start { options arguments } {
 	    set enabled 0
 	    foreach entry [split $gdbserverdebug ,] {
 	      switch -- $entry {
-		"debug" {
-		  append gdbserver_command " --debug"
+		"debug-all" {
+		  append gdbserver_command " --debug=all"
 		  set enabled 1
 		}
-		"remote" {
-		  append gdbserver_command " --remote-debug"
+		"all" {
+		  # Different from the debug-all option, all argument sets
+		  # the replay log file.  See gdb_debug_init.
+		  append gdbserver_command " --debug=all"
+		  set enabled 1
+		}
+		"debug-threads" {
+		  append gdbserver_command " --debug=threads"
+		  set enabled 1
+		}
+		"debug-remote" {
+		  append gdbserver_command " --debug=remote"
+		  set enabled 1
+		}
+		"debug-event-loop" {
+		  append gdbserver_command " --debug=event-loop"
 		  set enabled 1
 		}
 	      }
@@ -372,15 +432,19 @@ proc gdbserver_start { options arguments } {
 	    -re "Listening on" { }
 	    -re "Can't (bind address|listen on socket): Address already in use\\.\r\n" {
 		verbose -log "Port $portnum is already in use."
-		if ![target_info exists gdb,socketport] {
+		set other_portnum [get_portnum]
+		if { $other_portnum != $portnum } {
 		    # Bump the port number to avoid the conflict.
 		    wait -i $expect_out(spawn_id)
-		    incr portnum
+		    set portnum $other_portnum
 		    continue
 		}
 	    }
 	    -re ".*: cannot resolve name: .*\r\n" {
 		error "gdbserver cannot resolve name."
+	    }
+	    -re "Can't open socket: Address family not supported by protocol." {
+		return {}
 	    }
 	    timeout {
 		error "Timeout waiting for gdbserver response."
@@ -433,6 +497,7 @@ proc close_gdbserver {} {
     # -nowait makes expect tell Tcl to wait for the process in the
     # background.
     catch "wait -nowait -i $server_spawn_id"
+    clean_up_spawn_id target $server_spawn_id
     unset server_spawn_id
 }
 
@@ -656,11 +721,6 @@ proc gdbserver_debug_enabled { } {
 	}
     }
 
-    # Expand the all option
-    if { $gdbserverdebug == "all" } {
-      set gdbserverdebug "debug,remote,replay"
-    }
-
     # Ensure it is not empty.
     return [expr { $gdbserverdebug != "" }]
 }
@@ -685,7 +745,7 @@ proc gdb_debug_init { } {
 
     if [gdbserver_debug_enabled] {
       foreach entry [split $gdbserverdebug ,] {
-	if { $entry == "replay" } {
+	if { $entry == "replay" || $entry == "all"} {
 	  set replayfile [standard_output_file_with_gdb_instance gdbserver.replay]
           send_gdb "set remotelogfile $replayfile\n" optional
 	  gdb_expect 10 {

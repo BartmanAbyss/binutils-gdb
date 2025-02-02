@@ -1,7 +1,7 @@
 /* Target-dependent code for Lattice Mico32 processor, for GDB.
    Contributed by Jon Beniston <jon@beniston.com>
 
-   Copyright (C) 2009-2023 Free Software Foundation, Inc.
+   Copyright (C) 2009-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,7 +18,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "frame-unwind.h"
 #include "frame-base.h"
@@ -32,9 +32,13 @@
 #include "regcache.h"
 #include "trad-frame.h"
 #include "reggroups.h"
-#include "opcodes/lm32-desc.h"
 #include <algorithm>
 #include "gdbarch.h"
+
+/* Make cgen names unique to prevent ODR conflicts with other targets.  */
+#define GDB_CGEN_REMAP_PREFIX lm32
+#include "cgen-remap.h"
+#include "opcodes/lm32-desc.h"
 
 /* Macros to extract fields from an instruction.  */
 #define LM32_OPCODE(insn)       ((insn >> 26) & 0x3f)
@@ -87,7 +91,7 @@ lm32_register_name (struct gdbarch *gdbarch, int reg_nr)
     "PC", "EID", "EBA", "DEBA", "IE", "IM", "IP"
   };
 
-  gdb_static_assert (ARRAY_SIZE (register_names) == SIM_LM32_NUM_REGS);
+  static_assert (ARRAY_SIZE (register_names) == SIM_LM32_NUM_REGS);
   return register_names[reg_nr];
 }
 
@@ -375,7 +379,7 @@ lm32_return_value (struct gdbarch *gdbarch, struct value *function,
    for it IS the sp for the next frame.  */
 
 static struct lm32_frame_cache *
-lm32_frame_cache (frame_info_ptr this_frame, void **this_prologue_cache)
+lm32_frame_cache (const frame_info_ptr &this_frame, void **this_prologue_cache)
 {
   CORE_ADDR current_pc;
   ULONGEST prev_sp;
@@ -421,7 +425,7 @@ lm32_frame_cache (frame_info_ptr this_frame, void **this_prologue_cache)
 }
 
 static void
-lm32_frame_this_id (frame_info_ptr this_frame, void **this_cache,
+lm32_frame_this_id (const frame_info_ptr &this_frame, void **this_cache,
 		    struct frame_id *this_id)
 {
   struct lm32_frame_cache *cache = lm32_frame_cache (this_frame, this_cache);
@@ -434,7 +438,7 @@ lm32_frame_this_id (frame_info_ptr this_frame, void **this_cache,
 }
 
 static struct value *
-lm32_frame_prev_register (frame_info_ptr this_frame,
+lm32_frame_prev_register (const frame_info_ptr &this_frame,
 			  void **this_prologue_cache, int regnum)
 {
   struct lm32_frame_cache *info;
@@ -443,18 +447,19 @@ lm32_frame_prev_register (frame_info_ptr this_frame,
   return trad_frame_get_prev_register (this_frame, info->saved_regs, regnum);
 }
 
-static const struct frame_unwind lm32_frame_unwind = {
+static const struct frame_unwind_legacy lm32_frame_unwind (
   "lm32 prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   lm32_frame_this_id,
   lm32_frame_prev_register,
   NULL,
   default_frame_sniffer
-};
+);
 
 static CORE_ADDR
-lm32_frame_base_address (frame_info_ptr this_frame, void **this_cache)
+lm32_frame_base_address (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct lm32_frame_cache *info = lm32_frame_cache (this_frame, this_cache);
 

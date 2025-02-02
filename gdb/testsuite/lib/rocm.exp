@@ -1,4 +1,4 @@
-# Copyright (C) 2019-2023 Free Software Foundation, Inc.
+# Copyright (C) 2019-2024 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -67,6 +67,10 @@ gdb_caching_proc allow_hipcc_tests {} {
 	return {0 "remote debugging"}
     }
 
+    if {![istarget "*-linux*"]} {
+	return {0 "target platform is not Linux"}
+    }
+
     # Ensure that GDB is built with amd-dbgapi support.
     set output [remote_exec host $::GDB "$::INTERNAL_GDBFLAGS --configuration"]
     if { [string first "--with-amd-dbgapi" $output] == -1 } {
@@ -89,7 +93,8 @@ gdb_caching_proc allow_hipcc_tests {} {
 	    main ()
 	    {
 		kern<<<1, 1>>> ();
-		hipDeviceSynchronize ();
+		if (hipDeviceSynchronize () != hipSuccess)
+		  return -1;
 		return 0;
 	    }
 	} executable $flags]} {
@@ -101,68 +106,54 @@ gdb_caching_proc allow_hipcc_tests {} {
 
 # The lock file used to ensure that only one GDB has access to the GPU
 # at a time.
-set gpu_lock_filename $objdir/gpu-parallel.lock
-
-# Acquire lock file LOCKFILE.  Tries forever until the lock file is
-# successfully created.
-
-proc lock_file_acquire {lockfile} {
-    verbose -log "acquiring lock file: $::subdir/${::gdb_test_file_name}.exp"
-    while {true} {
-	if {![catch {open $lockfile {WRONLY CREAT EXCL}} rc]} {
-	    set msg "locked by $::subdir/${::gdb_test_file_name}.exp"
-	    verbose -log "lock file: $msg"
-	    # For debugging, put info in the lockfile about who owns
-	    # it.
-	    puts  $rc $msg
-	    flush $rc
-	    return [list $rc $lockfile]
-	}
-	after 10
-    }
-}
-
-# Release a lock file.
-
-proc lock_file_release {info} {
-    verbose -log "releasing lock file: $::subdir/${::gdb_test_file_name}.exp"
-
-    if {![catch {fconfigure [lindex $info 0]}]} {
-	if {![catch {
-	    close [lindex $info 0]
-	    file delete -force [lindex $info 1]
-	} rc]} {
-	    return ""
-	} else {
-	    return -code error "Error releasing lockfile: '$rc'"
-	}
-    } else {
-	error "invalid lock"
-    }
-}
+set gpu_lock_filename gpu-parallel.lock
 
 # Run body under the GPU lock.  Also calls gdb_exit before releasing
 # the GPU lock.
 
 proc with_rocm_gpu_lock { body } {
-    if {[info exists ::GDB_PARALLEL]} {
-	set lock_rc [lock_file_acquire $::gpu_lock_filename]
-    }
-
-    set code [catch {uplevel 1 $body} result]
+    with_lock $::gpu_lock_filename {uplevel 1 $body}
 
     # In case BODY returned early due to some testcase failing, and
     # left GDB running, debugging the GPU.
     gdb_exit
+}
 
-    if {[info exists ::GDB_PARALLEL]} {
-	lock_file_release $lock_rc
+# Return true if all the devices support debugging multiple processes
+# using the GPU.
+
+proc hip_devices_support_debug_multi_process {} {
+    set unsupported_targets \
+	{gfx900 gfx906 gfx908 gfx1010 gfx1011 gfx1012 gfx1030 gfx1031 gfx1032}
+
+    set targets [hcc_amdgpu_targets]
+    if { [llength $targets] == 0 } {
+	return 0
     }
 
-    if {$code == 1} {
-	global errorInfo errorCode
-	return -code $code -errorinfo $errorInfo -errorcode $errorCode $result
-    } else {
-	return -code $code $result
+    foreach target $targets {
+	if { [lsearch -exact $unsupported_targets $target] != -1 } {
+	    return 0
+	}
     }
+    return 1
+}
+
+# Return true if all the devices on the host support precise memory.
+
+proc hip_devices_support_precise_memory {} {
+    set unsupported_targets \
+	{gfx900 gfx906 gfx908 gfx1010 gfx1011 gfx1012 gfx1030 gfx1031 gfx1032}
+
+    set targets [hcc_amdgpu_targets]
+    if { [llength $targets] == 0 } {
+	return 0
+    }
+
+    foreach target $targets {
+	if { [lsearch -exact $unsupported_targets $target] != -1 } {
+	    return 0
+	}
+    }
+    return 1
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 1986-2023 Free Software Foundation, Inc.
+/* Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -15,8 +15,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef INFRUN_H
-#define INFRUN_H 1
+#ifndef GDB_INFRUN_H
+#define GDB_INFRUN_H
 
 #include "gdbthread.h"
 #include "symtab.h"
@@ -207,8 +207,19 @@ extern int stepping_past_nonsteppable_watchpoint (void);
 
 /* Record in TP the frame and location we're currently stepping through.  */
 extern void set_step_info (thread_info *tp,
-			   frame_info_ptr frame,
+			   const frame_info_ptr &frame,
 			   struct symtab_and_line sal);
+
+/* Notify interpreters and observers that the current inferior has stopped with
+   signal SIG.  */
+extern void notify_signal_received (gdb_signal sig);
+
+/* Notify interpreters and observers that the current inferior has stopped
+   normally.  */
+extern void notify_normal_stop (bpstat *bs, int print_frame);
+
+/* Notify interpreters and observers that the user focus has changed.  */
+extern void notify_user_selected_context_changed (user_selected_what selection);
 
 /* Several print_*_reason helper functions to print why the inferior
    has stopped to the passed in UIOUT.  */
@@ -395,7 +406,8 @@ extern void maybe_call_commit_resumed_all_targets ();
 
 struct scoped_enable_commit_resumed
 {
-  explicit scoped_enable_commit_resumed (const char *reason);
+  explicit scoped_enable_commit_resumed (const char *reason,
+					 bool force_p = false);
   ~scoped_enable_commit_resumed ();
 
   DISABLE_COPY_AND_ASSIGN (scoped_enable_commit_resumed);
@@ -406,4 +418,4 @@ private:
 };
 
 
-#endif /* INFRUN_H */
+#endif /* GDB_INFRUN_H */

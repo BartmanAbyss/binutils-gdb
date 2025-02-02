@@ -1,6 +1,6 @@
 // powerpc.cc -- powerpc target support for gold.
 
-// Copyright (C) 2008-2023 Free Software Foundation, Inc.
+// Copyright (C) 2008-2025 Free Software Foundation, Inc.
 // Written by David S. Miller <davem@davemloft.net>
 //        and David Edelsohn <edelsohn@gnu.org>
 
@@ -795,6 +795,10 @@ class Target_powerpc : public Sized_target<size, big_endian>
   // Finalize the sections.
   void
   do_finalize_sections(Layout*, const Input_objects*, Symbol_table*);
+
+  // Get the custom dynamic tag value.
+  unsigned int
+  do_dynamic_tag_custom_value(elfcpp::DT) const;
 
   // Return the value to use for a dynamic which requires special
   // treatment.
@@ -1758,6 +1762,8 @@ class Target_powerpc : public Sized_target<size, big_endian>
   typedef std::vector<Branch_info> Branches;
   Branches branch_info_;
   Tocsave_loc tocsave_loc_;
+
+  off_t rela_dyn_size_;
 
   bool power10_relocs_;
   bool plt_thread_safe_;
@@ -3683,6 +3689,18 @@ Target_powerpc<size, big_endian>::Branch_info::make_stub(
   return ok;
 }
 
+// Helper for do_relax, avoiding checks that size, address and offset
+// are not set more than once.
+
+static inline void
+update_current_size(Output_section_data_build* od, off_t cur_size)
+{
+  od->reset_address_and_file_offset();
+  od->set_current_data_size(cur_size);
+  od->finalize_data_size();
+  od->output_section()->set_section_offsets_need_adjustment();
+}
+
 // Relaxation hook.  This is where we do stub generation.
 
 template<int size, bool big_endian>
@@ -3696,12 +3714,7 @@ Target_powerpc<size, big_endian>::do_relax(int pass,
   unsigned int prev_brlt_size = 0;
   if (pass == 1)
     {
-      bool thread_safe
-	= this->abiversion() < 2 && parameters->options().plt_thread_safe();
-      if (size == 64
-	  && this->abiversion() < 2
-	  && !thread_safe
-	  && !parameters->options().user_set_plt_thread_safe())
+      if (size == 64 && this->abiversion() < 2)
 	{
 	  static const char* const thread_starter[] =
 	    {
@@ -3729,29 +3742,38 @@ Target_powerpc<size, big_endian>::do_relax(int pass,
 	      /* libgo */
 	      "__go_go",
 	    };
+	  bool thread_safe = parameters->options().plt_thread_safe();
 
-	  if (parameters->options().shared())
-	    thread_safe = true;
-	  else
+	  if (!thread_safe
+	      && !parameters->options().user_set_plt_thread_safe())
 	    {
-	      for (unsigned int i = 0;
-		   i < sizeof(thread_starter) / sizeof(thread_starter[0]);
-		   i++)
+	      if (parameters->options().shared())
+		thread_safe = true;
+	      else
 		{
-		  Symbol* sym = symtab->lookup(thread_starter[i], NULL);
-		  thread_safe = (sym != NULL
-				 && sym->in_reg()
-				 && sym->in_real_elf());
-		  if (thread_safe)
-		    break;
+		  for (unsigned int i = 0;
+		       i < sizeof(thread_starter) / sizeof(thread_starter[0]);
+		       i++)
+		    {
+		      Symbol* sym = symtab->lookup(thread_starter[i], NULL);
+		      thread_safe = (sym != NULL
+				     && sym->in_reg()
+				     && sym->in_real_elf());
+		      if (thread_safe)
+			break;
+		    }
 		}
 	    }
+	  this->plt_thread_safe_ = thread_safe;
 	}
-      this->plt_thread_safe_ = thread_safe;
-    }
 
-  if (pass == 1)
-    {
+      if (size == 64
+	  && parameters->options().output_is_position_independent())
+	{
+	  gold_assert (this->rela_dyn_);
+	  this->rela_dyn_size_ = this->rela_dyn_->current_data_size();
+	}
+
       this->stub_group_size_ = parameters->options().stub_group_size();
       bool no_size_errors = true;
       if (this->stub_group_size_ == 1)
@@ -3864,7 +3886,15 @@ Target_powerpc<size, big_endian>::do_relax(int pass,
   if (size == 64 && num_huge_branches != 0)
     this->make_brlt_section(layout);
   if (size == 64 && again)
-    this->brlt_section_->set_current_size(num_huge_branches);
+    {
+      update_current_size(this->brlt_section_, num_huge_branches * 16);
+      if (parameters->options().output_is_position_independent())
+	{
+	  const unsigned int reloc_size = elfcpp::Elf_sizes<size>::rela_size;
+	  off_t cur = this->rela_dyn_size_ + num_huge_branches * reloc_size;
+	  update_current_size(this->rela_dyn_, cur);
+	}
+    }
 
   for (typename Stub_tables::reverse_iterator p = this->stub_tables_.rbegin();
        p != this->stub_tables_.rend();
@@ -3933,15 +3963,21 @@ Target_powerpc<size, big_endian>::do_relax(int pass,
       && parameters->options().output_is_position_independent())
     {
       // Fill in the BRLT relocs.
-      this->brlt_section_->reset_brlt_sizes();
+      this->rela_dyn_->reset_data_size();
+      this->rela_dyn_->set_current_data_size(this->rela_dyn_size_);
       for (typename Branch_lookup_table::const_iterator p
 	     = this->branch_lookup_table_.begin();
 	   p != this->branch_lookup_table_.end();
 	   ++p)
 	{
-	  this->brlt_section_->add_reloc(p->first, p->second);
+	  this->rela_dyn_->add_relative(elfcpp::R_POWERPC_RELATIVE,
+					this->brlt_section_, p->second,
+					p->first);
 	}
-      this->brlt_section_->finalize_brlt_sizes();
+      this->rela_dyn_->finalize_data_size();
+      const unsigned int reloc_size = elfcpp::Elf_sizes<size>::rela_size;
+      gold_assert(this->rela_dyn_->data_size()
+		  == this->rela_dyn_size_ + num_huge_branches * reloc_size);
     }
 
   if (!again
@@ -4550,51 +4586,10 @@ class Output_data_brlt_powerpc : public Output_section_data_build
   typedef Output_data_reloc<elfcpp::SHT_RELA, true,
 			    size, big_endian> Reloc_section;
 
-  Output_data_brlt_powerpc(Target_powerpc<size, big_endian>* targ,
-			   Reloc_section* brlt_rel)
+  Output_data_brlt_powerpc(Target_powerpc<size, big_endian>* targ)
     : Output_section_data_build(size == 32 ? 4 : 8),
-      rel_(brlt_rel),
       targ_(targ)
   { }
-
-  void
-  reset_brlt_sizes()
-  {
-    this->reset_data_size();
-    this->rel_->reset_data_size();
-  }
-
-  void
-  finalize_brlt_sizes()
-  {
-    this->finalize_data_size();
-    this->rel_->finalize_data_size();
-  }
-
-  // Add a reloc for an entry in the BRLT.
-  void
-  add_reloc(Address to, unsigned int off)
-  { this->rel_->add_relative(elfcpp::R_POWERPC_RELATIVE, this, off, to); }
-
-  // Update section and reloc section size.
-  void
-  set_current_size(unsigned int num_branches)
-  {
-    this->reset_address_and_file_offset();
-    this->set_current_data_size(num_branches * 16);
-    this->finalize_data_size();
-    Output_section* os = this->output_section();
-    os->set_section_offsets_need_adjustment();
-    if (this->rel_ != NULL)
-      {
-	const unsigned int reloc_size = elfcpp::Elf_sizes<size>::rela_size;
-	this->rel_->reset_address_and_file_offset();
-	this->rel_->set_current_data_size(num_branches * reloc_size);
-	this->rel_->finalize_data_size();
-	Output_section* os = this->rel_->output_section();
-	os->set_section_offsets_need_adjustment();
-      }
-  }
 
  protected:
   void
@@ -4613,8 +4608,6 @@ class Output_data_brlt_powerpc : public Output_section_data_build
   void
   do_write(Output_file*);
 
-  // The reloc section.
-  Reloc_section* rel_;
   Target_powerpc<size, big_endian>* targ_;
 };
 
@@ -4626,16 +4619,15 @@ Target_powerpc<size, big_endian>::make_brlt_section(Layout* layout)
 {
   if (size == 64 && this->brlt_section_ == NULL)
     {
-      Reloc_section* brlt_rel = NULL;
       bool is_pic = parameters->options().output_is_position_independent();
       if (is_pic)
 	{
 	  // When PIC we can't fill in .branch_lt but must initialise at
 	  // runtime via dynamic relocations.
-	  brlt_rel = this->rela_dyn_section(layout);
+	  this->rela_dyn_section(layout);
 	}
       this->brlt_section_
-	= new Output_data_brlt_powerpc<size, big_endian>(this, brlt_rel);
+	= new Output_data_brlt_powerpc<size, big_endian>(this);
       if (this->plt_ && is_pic && this->plt_->output_section())
 	this->plt_->output_section()
 	  ->add_output_section_data(this->brlt_section_);
@@ -8997,9 +8989,14 @@ Target_powerpc<size, big_endian>::Scan::global(
 		  = target->rela_dyn_section(symtab, layout, is_ifunc);
 		unsigned int dynrel = (is_ifunc ? elfcpp::R_POWERPC_IRELATIVE
 				       : elfcpp::R_POWERPC_RELATIVE);
-		rela_dyn->add_symbolless_global_addend(
+		// Use the "add" method that marks the reloc as being
+		// relative.  This is proper here and in other places
+		// that add IRELATIVE relocs because those relocs go
+		// into a separate section that isn't sorted, so it
+		// doesn't matter that they are marked is_relative.
+		rela_dyn->add_global_relative(
 		    gsym, dynrel, output_section, object, data_shndx,
-		    reloc.get_r_offset(), reloc.get_r_addend());
+		    reloc.get_r_offset(), reloc.get_r_addend(), false);
 	      }
 	    else
 	      {
@@ -10122,7 +10119,7 @@ Target_powerpc<size, big_endian>::do_finalize_sections(
 				      ? NULL
 				      : this->plt_->rel_plt());
       layout->add_target_dynamic_tags(false, this->plt_, rel_plt,
-				      this->rela_dyn_, true, size == 32);
+				      this->rela_dyn_, true, size == 32, true);
 
       if (size == 32)
 	{
@@ -10191,6 +10188,18 @@ Target_powerpc<size, big_endian>::do_finalize_sections(
 				      elfcpp::SHT_GNU_ATTRIBUTES, 0,
 				      attributes_section, ORDER_INVALID, false);
     }
+}
+
+// Get the custom dynamic tag value.
+
+template<int size, bool big_endian>
+unsigned int
+Target_powerpc<size, big_endian>::do_dynamic_tag_custom_value(
+    elfcpp::DT tag) const
+{
+  if (tag != elfcpp::DT_RELACOUNT)
+    gold_unreachable();
+  return this->rela_dyn_->relative_reloc_count();
 }
 
 // Merge object attributes from input file called NAME with those of the
@@ -12414,10 +12423,26 @@ Target_powerpc<size, big_endian>::Relocate::relocate(
 	       && gsym->is_undefined()
 	       && is_branch_reloc<size>(r_type))))
     {
-      gold_error_at_location(relinfo, relnum, rela.get_r_offset(),
-			     _("relocation overflow"));
-      if (has_stub_value)
-	gold_info(_("try relinking with a smaller --stub-group-size"));
+      std::string name;
+      if (gsym)
+	name = gsym->demangled_name();
+      else
+	name = relinfo->object->get_symbol_name(r_sym);
+      if (os->flags() & elfcpp::SHF_ALLOC)
+	{
+	  gold_error_at_location(relinfo, relnum, rela.get_r_offset(),
+				 _("reloc type %u overflow against '%s'"),
+				 r_type, name.c_str());
+	  if (has_stub_value)
+	    gold_info(_("try relinking with a smaller --stub-group-size"));
+	}
+      else
+	{
+	  gold_warning_at_location(relinfo, relnum, rela.get_r_offset(),
+				   _("reloc type %u overflow against '%s'"),
+				   r_type, name.c_str());
+	  gold_info(_("debug info may be unreliable, compile with -gdwarf64"));
+	}
     }
 
   return true;

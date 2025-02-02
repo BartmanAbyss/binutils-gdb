@@ -1,5 +1,5 @@
 /* as.h - global header file
-   Copyright (C) 1987-2023 Free Software Foundation, Inc.
+   Copyright (C) 1987-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -247,7 +247,9 @@ enum _relax_state
      1 constant byte: no-op fill control byte.  */
   rs_space_nop,
 
-  /* Similar to rs_fill.  It is used to implement .nop directive .  */
+  /* Similar to rs_fill.  It is used to implement .nops directive.
+     When listings are enabled, fr_opcode gets the buffer assigned, once
+     that's available.  */
   rs_fill_nop,
 
   /* A DWARF leb128 value; only ELF uses this.  The subtype is 0 for
@@ -261,7 +263,10 @@ enum _relax_state
   rs_dwarf2dbg,
 
   /* SFrame FRE type selection optimization.  */
-  rs_sframe
+  rs_sframe,
+
+  /* CodeView compressed integer.  */
+  rs_cv_comp,
 };
 
 typedef enum _relax_state relax_stateT;
@@ -313,14 +318,25 @@ COMMON bool flag_macro_alternate;
 COMMON unsigned char flag_readonly_data_in_text; /* -R */
 
 /* True if warnings should be inhibited.  */
-COMMON int flag_no_warnings; /* -W */
+COMMON int flag_no_warnings; /* -W, --no-warn */
 
 /* True if warnings count as errors.  */
 COMMON int flag_fatal_warnings; /* --fatal-warnings */
 
+/* True if infos should be inhibited.  */
+COMMON bool flag_no_information; /* --no-info */
+
 /* True if we should attempt to generate output even if non-fatal errors
    are detected.  */
 COMMON unsigned char flag_always_generate_output; /* -Z */
+
+enum synth_cfi_type
+{
+  SYNTH_CFI_NONE = 0,
+  SYNTH_CFI_EXPERIMENTAL,
+};
+
+COMMON enum synth_cfi_type flag_synth_cfi;
 
 /* This is true if the assembler should output time and space usage.  */
 COMMON unsigned char flag_print_statistics;
@@ -486,7 +502,7 @@ void   input_scrub_insert_line (const char *);
 void   input_scrub_insert_file (char *);
 char * input_scrub_new_file (const char *);
 char * input_scrub_next_buffer (char **bufp);
-size_t do_scrub_chars (size_t (*get) (char *, size_t), char *, size_t);
+size_t do_scrub_chars (size_t (*get) (char *, size_t), char *, size_t, bool);
 size_t do_scrub_pending (void);
 bool   scan_for_multibyte_characters (const unsigned char *, const unsigned char *, bool);
 int    gen_to_words (LITTLENUM_TYPE *, int, long);

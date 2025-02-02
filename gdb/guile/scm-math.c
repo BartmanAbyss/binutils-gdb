@@ -1,6 +1,6 @@
 /* GDB/Scheme support for math operations on values.
 
-   Copyright (C) 2008-2023 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,12 +20,11 @@
 /* See README file in this directory for implementation notes, coding
    conventions, et.al.  */
 
-#include "defs.h"
 #include "arch-utils.h"
 #include "charset.h"
 #include "cp-abi.h"
 #include "target-float.h"
-#include "symtab.h" /* Needed by language.h.  */
+#include "symtab.h"
 #include "language.h"
 #include "valprint.h"
 #include "value.h"
@@ -803,9 +802,7 @@ vlscm_convert_typed_value_from_scheme (const char *func_name,
 					0 /*non-strict*/,
 					&except_scm);
 	      if (s != NULL)
-		value = value_cstring (s.get (), len,
-				       language_string_char_type (language,
-								  gdbarch));
+		value = language->value_string (gdbarch, s.get (), len);
 	      else
 		value = NULL;
 	    }

@@ -1,4 +1,4 @@
-# Copyright 2022-2023 Free Software Foundation, Inc.
+# Copyright 2022-2024 Free Software Foundation, Inc.
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 3 of the License, or
@@ -86,7 +86,10 @@ set rtld_flags [list debug additional_flags=[list -static-pie -fPIE \
 						  -nostdlib -static -lc]]
 
 if { ![gdb_can_simple_compile static-pie-static-libc \
-	   "void _start (void) { _exit (0); }" \
+	   {
+	       #include <unistd.h>
+	       void _start (void) { _exit (0); }
+	   } \
 	   executable $rtld_flags] } {
     set reason "-static-pie not supported or static libc missing"
     untested "failed to compile ($reason)"

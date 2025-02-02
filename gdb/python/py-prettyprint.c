@@ -1,6 +1,6 @@
 /* Python pretty-printing
 
-   Copyright (C) 2008-2023 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "objfiles.h"
 #include "symtab.h"
 #include "language.h"
@@ -26,6 +25,8 @@
 #include "python.h"
 #include "python-internal.h"
 #include "cli/cli-style.h"
+
+extern PyTypeObject printer_object_type;
 
 /* Return type of print_string_repr.  */
 
@@ -661,15 +662,6 @@ apply_varobj_pretty_printer (PyObject *printer_obj,
 gdbpy_ref<>
 gdbpy_get_varobj_pretty_printer (struct value *value)
 {
-  try
-    {
-      value = value->copy ();
-    }
-  catch (const gdb_exception &except)
-    {
-      GDB_PY_HANDLE_EXCEPTION (except);
-    }
-
   gdbpy_ref<> val_obj (value_to_value_object (value));
   if (val_obj == NULL)
     return NULL;
@@ -788,3 +780,63 @@ gdbpy_get_print_options (value_print_options *opts)
   else
     get_user_print_options (opts);
 }
+
+/* A ValuePrinter is just a "tag", so it has no state other than that
+   required by Python.  */
+struct printer_object
+{
+  PyObject_HEAD
+};
+
+/* The ValuePrinter type object.  */
+PyTypeObject printer_object_type =
+{
+  PyVarObject_HEAD_INIT (NULL, 0)
+  "gdb.ValuePrinter",		/*tp_name*/
+  sizeof (printer_object),	  /*tp_basicsize*/
+  0,				  /*tp_itemsize*/
+  0,				  /*tp_dealloc*/
+  0,				  /*tp_print*/
+  0,				  /*tp_getattr*/
+  0,				  /*tp_setattr*/
+  0,				  /*tp_compare*/
+  0,				  /*tp_repr*/
+  0,				  /*tp_as_number*/
+  0,				  /*tp_as_sequence*/
+  0,				  /*tp_as_mapping*/
+  0,				  /*tp_hash*/
+  0,				  /*tp_call*/
+  0,				  /*tp_str*/
+  0,				  /*tp_getattro*/
+  0,				  /*tp_setattro*/
+  0,				  /*tp_as_buffer*/
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /*tp_flags*/
+  "GDB value printer object",	  /* tp_doc */
+  0,				  /* tp_traverse */
+  0,				  /* tp_clear */
+  0,				  /* tp_richcompare */
+  0,				  /* tp_weaklistoffset */
+  0,				  /* tp_iter */
+  0,				  /* tp_iternext */
+  0,				  /* tp_methods */
+  0,				  /* tp_members */
+  0,				  /* tp_getset */
+  0,				  /* tp_base */
+  0,				  /* tp_dict */
+  0,				  /* tp_descr_get */
+  0,				  /* tp_descr_set */
+  0,				  /* tp_dictoffset */
+  0,				  /* tp_init */
+  0,				  /* tp_alloc */
+  PyType_GenericNew,		  /* tp_new */
+};
+
+/* Set up the ValuePrinter type.  */
+
+static int
+gdbpy_initialize_prettyprint ()
+{
+  return gdbpy_type_ready (&printer_object_type);
+}
+
+GDBPY_INITIALIZE_FILE (gdbpy_initialize_prettyprint);

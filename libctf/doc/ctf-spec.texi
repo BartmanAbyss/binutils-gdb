@@ -9,7 +9,7 @@
 @synindex vr cp
 
 @copying
-Copyright @copyright{} 2021-2023 Free Software Foundation, Inc.
+Copyright @copyright{} 2021-2025 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU General Public License, Version 3 or any
@@ -582,7 +582,7 @@ typedef struct ctf_stype
     uint32_t ctt_size;
     uint32_t ctt_type;
   };
-} ctf_type_t;
+} ctf_stype_t;
 @end verbatim
 
 If @code{ctt_size} is the #define @code{CTF_LSIZE_SENT}, 0xffffffff, this type

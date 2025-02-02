@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl
-dnl   Copyright (C) 2012-2023 Free Software Foundation, Inc.
+dnl   Copyright (C) 2012-2025 Free Software Foundation, Inc.
 dnl
 dnl This file is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@ dnl <http://www.gnu.org/licenses/>.
 dnl
 
 m4_include([version.m4])
-AC_INIT([bfd], BFD_VERSION)
+AC_INIT([bfd], [BFD_VERSION])
 AC_CONFIG_SRCDIR([libbfd.c])
 
 AC_CANONICAL_TARGET
@@ -36,7 +36,6 @@ dnl configure option --enable-shared.
 AC_DISABLE_SHARED
 
 AC_PROG_CC
-AC_GNU_SOURCE
 AC_USE_SYSTEM_EXTENSIONS
 
 LT_INIT([dlopen])
@@ -113,7 +112,7 @@ AC_ARG_WITH(mmap,
   yes)  want_mmap=true ;;
   no)   want_mmap=false ;;
   *)    AC_MSG_ERROR(bad value ${withval} for BFD with-mmap option) ;;
-esac],[want_mmap=false])dnl
+esac],[want_mmap=true])dnl
 
 AC_ARG_ENABLE(secureplt,
 [  --enable-secureplt      Default to creating read-only plt entries],
@@ -233,6 +232,8 @@ AC_CHECK_DECLS([___lc_codepage_func], [], [], [[#include <locale.h>]])
 
 BFD_BINARY_FOPEN
 
+AX_TLS
+
 # Link in zlib/zstd if we can.  This allows us to read compressed debug sections.
 # This is used only by compress.c.
 AM_ZLIB
@@ -278,7 +279,7 @@ changequote([,])dnl
   fi
 fi
 
-SHARED_LIBADD="$SHARED_LIBADD $LIBINTL"
+SHARED_LIBADD="$SHARED_LIBADD $LTLIBINTL"
 
 if test "$enable_shared" = "yes"; then
   case "${host}" in
@@ -495,6 +496,8 @@ do
     ia64_pei_vec)		 tb="$tb pei-ia64.lo pepigen.lo $coff"; target_size=64 ;;
     ip2k_elf32_vec)		 tb="$tb elf32-ip2k.lo elf32.lo $elf" ;;
     iq2000_elf32_vec)		 tb="$tb elf32-iq2000.lo elf32.lo $elf" ;;
+    kvx_elf32_vec)		 tb="$tb elf32-kvx.lo elfxx-kvx.lo elf32.lo $elf $ipa" ;;
+    kvx_elf64_vec)		 tb="$tb elf64-kvx.lo elfxx-kvx.lo elf64.lo $elf $ipa"; target_size=64 ;;
     lm32_elf32_vec)		 tb="$tb elf32-lm32.lo elf32.lo $elf" ;;
     lm32_elf32_fdpic_vec)	 tb="$tb elf32-lm32.lo elf32.lo $elf" ;;
     loongarch_elf32_vec)	 tb="$tb elf32-loongarch.lo elfxx-loongarch.lo elf32.lo elf-ifunc.lo $elf" ;;
@@ -560,8 +563,6 @@ do
     nds32_elf32_linux_be_vec)	 tb="$tb elf32-nds32.lo elf32.lo $elf" ;;
     nds32_elf32_linux_le_vec)	 tb="$tb elf32-nds32.lo elf32.lo $elf" ;;
     nfp_elf64_vec)		 tb="$tb elf64-nfp.lo elf64.lo $elf" ;;
-    nios2_elf32_be_vec)		 tb="$tb elf32-nios2.lo elf32.lo $elf" ;;
-    nios2_elf32_le_vec)		 tb="$tb elf32-nios2.lo elf32.lo $elf" ;;
     ns32k_aout_pc532mach_vec)	 tb="$tb pc532-mach.lo aout-ns32k.lo" ;;
     ns32k_aout_pc532nbsd_vec)	 tb="$tb ns32knetbsd.lo aout-ns32k.lo" ;;
     or1k_elf32_vec)		 tb="$tb elf32-or1k.lo elf32.lo $elf" ;;
@@ -586,6 +587,7 @@ do
     riscv_elf64_vec)		 tb="$tb elf64-riscv.lo elf64.lo elfxx-riscv.lo elf-ifunc.lo elf32.lo $elf"; target_size=64 ;;
     riscv_elf32_be_vec)		 tb="$tb elf32-riscv.lo elfxx-riscv.lo elf-ifunc.lo elf32.lo $elf" ;;
     riscv_elf64_be_vec)		 tb="$tb elf64-riscv.lo elf64.lo elfxx-riscv.lo elf-ifunc.lo elf32.lo $elf"; target_size=64 ;;
+    riscv64_pei_vec)		 tb="$tb pei-riscv64.lo pe-riscv64igen.lo $coff"; target_size=64 ;;
     rl78_elf32_vec)		 tb="$tb elf32-rl78.lo elf32.lo $elf" ;;
     rs6000_xcoff64_vec)		 tb="$tb coff64-rs6000.lo aix5ppc-core.lo $xcoff"; target_size=64 ;;
     rs6000_xcoff64_aix_vec)	 tb="$tb coff64-rs6000.lo aix5ppc-core.lo $xcoff"; target_size=64 ;;
@@ -1024,7 +1026,7 @@ AC_MSG_RESULT($bfd_file_ptr)
 AC_SUBST(bfd_file_ptr)
 AC_SUBST(bfd_ufile_ptr)
 
-AC_FUNC_MMAP
+GCC_AC_FUNC_MMAP
 AC_CHECK_FUNCS(madvise mprotect)
 case ${want_mmap}+${ac_cv_func_mmap_fixed_mapped} in
   true+yes )  AC_DEFINE(USE_MMAP, 1, [Use mmap if it's available?]) ;;

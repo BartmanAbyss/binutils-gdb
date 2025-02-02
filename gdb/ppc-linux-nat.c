@@ -1,6 +1,6 @@
 /* PPC GNU/Linux native support.
 
-   Copyright (C) 1988-2023 Free Software Foundation, Inc.
+   Copyright (C) 1988-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "inferior.h"
 #include "gdbthread.h"
@@ -333,7 +333,7 @@ public:
 
   /* One and only one of these three functions returns true, indicating
      whether the corresponding interface is the one we detected.  The
-     interface must already have been detected as a precontidion.  */
+     interface must already have been detected as a precondition.  */
 
   bool hwdebug_p ()
   {
@@ -454,7 +454,7 @@ private:
 
      UNAVAILABLE can indicate that the kernel doesn't support any of the
      two sets of requests or that there was an error when we tried to
-     detect wich interface is available.  */
+     detect which interface is available.  */
 
   enum debug_reg_interface
     {
@@ -464,7 +464,7 @@ private:
     };
 
   /* The interface option.  Initialized if has_value () returns true.  */
-  gdb::optional<enum debug_reg_interface> m_interface;
+  std::optional<enum debug_reg_interface> m_interface;
 
   /* The info returned by the kernel with PPC_PTRACE_GETHWDBGINFO.  Only
      valid if we determined that the interface is HWDEBUG.  */
@@ -485,7 +485,7 @@ struct ppc_linux_process_info
   /* The watchpoint value that GDB requested for this process.
 
      Only used when the interface is DEBUGREG.  */
-  gdb::optional<long> requested_wp_val;
+  std::optional<long> requested_wp_val;
 };
 
 struct ppc_linux_nat_target final : public linux_nat_target
@@ -544,6 +544,8 @@ struct ppc_linux_nat_target final : public linux_nat_target
   void low_new_fork (struct lwp_info *, pid_t) override;
 
   void low_new_clone (struct lwp_info *, pid_t) override;
+
+  void low_init_process (pid_t pid) override;
 
   void low_forget_process (pid_t pid) override;
 
@@ -1914,13 +1916,15 @@ ppc_linux_nat_target::auxv_parse (const gdb_byte **readptr,
 				  const gdb_byte *endptr, CORE_ADDR *typep,
 				  CORE_ADDR *valp)
 {
+  gdb_assert (inferior_ptid != null_ptid);
+
   int tid = inferior_ptid.lwp ();
   if (tid == 0)
     tid = inferior_ptid.pid ();
 
   int sizeof_auxv_field = ppc_linux_target_wordsize (tid);
 
-  enum bfd_endian byte_order = gdbarch_byte_order (target_gdbarch ());
+  bfd_endian byte_order = gdbarch_byte_order (current_inferior ()->arch ());
   const gdb_byte *ptr = *readptr;
 
   if (endptr == ptr)
@@ -1941,6 +1945,9 @@ ppc_linux_nat_target::auxv_parse (const gdb_byte **readptr,
 const struct target_desc *
 ppc_linux_nat_target::read_description ()
 {
+  if (inferior_ptid == null_ptid)
+    return this->beneath ()->read_description ();
+
   int tid = inferior_ptid.pid ();
 
   if (have_ptrace_getsetevrregs)
@@ -2126,7 +2133,7 @@ ppc_linux_nat_target::region_ok_for_hw_watchpoint (CORE_ADDR addr, int len)
 	  /* DAWR interface allows to watch up to 512 byte wide ranges.  */
 	  region_size = 512;
 	  /* DAWR interface allows to watch up to 512 byte wide ranges which
-	     can't cross a 512 byte bondary on machines that doesn't have a
+	     can't cross a 512 byte boundary on machines that don't have a
 	     second DAWR (P9 or less).  */
 	  if (!(hwdebug_info.features & PPC_DEBUG_FEATURE_DATA_BP_ARCH_31))
 	    region_align = 512;
@@ -2353,8 +2360,8 @@ ppc_linux_nat_target::can_use_watchpoint_cond_accel (void)
 
   auto process_it = m_process_info.find (inferior_ptid.pid ());
 
-  /* No breakpoints or watchpoints have been requested for this process,
-     we have at least one free DVC register.  */
+  /* No breakpoints, watchpoints, tracepoints, or catchpoints have been
+     requested for this process, we have at least one free DVC register.  */
   if (process_it == m_process_info.end ())
     return true;
 
@@ -2700,6 +2707,19 @@ ppc_linux_nat_target::remove_watchpoint (CORE_ADDR addr, int len,
   return 0;
 }
 
+/* Implement the "low_init_process" target_ops method.  */
+
+void
+ppc_linux_nat_target::low_init_process (pid_t pid)
+{
+  /* Set the hardware debug register capacity.  This requires the process to be
+     ptrace-stopped, otherwise detection will fail and software watchpoints will
+     be used instead of hardware.  If we allow this to be done lazily, we
+     cannot guarantee that it's called when the process is ptrace-stopped, so
+     do it now.  */
+  m_dreg_interface.detect (ptid_t (pid, pid));
+}
+
 /* Clean up the per-process info associated with PID.  When using the
    HWDEBUG interface, we also erase the per-thread state of installed
    debug registers for all the threads that belong to the group of PID.
@@ -2733,7 +2753,7 @@ ppc_linux_nat_target::low_forget_process (pid_t pid)
 }
 
 /* Copy the per-process state associated with the pid of PARENT to the
-   sate of CHILD_PID.  GDB expects that a forked process will have the
+   state of CHILD_PID.  GDB expects that a forked process will have the
    same hardware breakpoints and watchpoints as the parent.
 
    If we're using the HWDEBUG interface, also copy the thread debug
@@ -2880,7 +2900,7 @@ ppc_linux_nat_target::low_prepare_to_resume (struct lwp_info *lp)
 		  perror_with_name (_("Error deleting hardware "
 				      "breakpoint or watchpoint"));
 
-	      /* We erase the entries one at a time after successfuly
+	      /* We erase the entries one at a time after successfully
 		 removing the corresponding slot form the thread so that
 		 if we throw an exception above in a future iteration the
 		 map remains consistent.  */

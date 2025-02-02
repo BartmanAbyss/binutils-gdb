@@ -1,5 +1,5 @@
 /* Code dealing with "using" directives for GDB.
-   Copyright (C) 2003-2023 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,10 +16,9 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef NAMESPACE_H
-#define NAMESPACE_H
+#ifndef GDB_NAMESPACE_H
+#define GDB_NAMESPACE_H
 
-#include "gdbsupport/gdb_vecs.h"
 #include "gdbsupport/gdb_obstack.h"
 
 /* This struct is designed to store data from using directives.  It
@@ -110,7 +109,7 @@ struct using_direct
      EXCLUDES entries, the last entry is NULL.  */
   const char *excludes[1];
 
-  /* Returns true if the using_direcive USING_DIR is valid in CURR_LINE.
+  /* Returns true if the using_directive USING_DIR is valid in CURR_LINE.
      Because current GCC (at least version 12.2) sets the decl_line as
      the last line in the current block, we need to take this into
      consideration when checking the validity, by comparing it to
@@ -125,7 +124,6 @@ extern void add_using_directive (struct using_direct **using_directives,
 				 const char *declaration,
 				 const std::vector<const char *> &excludes,
 				 const unsigned int decl_line,
-				 int copy_names,
 				 struct obstack *obstack);
 
-#endif /* NAMESPACE_H */
+#endif /* GDB_NAMESPACE_H */

@@ -1,5 +1,5 @@
 /* tc-alpha.c - Processor-specific code for the DEC Alpha AXP CPU.
-   Copyright (C) 1989-2023 Free Software Foundation, Inc.
+   Copyright (C) 1989-2025 Free Software Foundation, Inc.
    Contributed by Carnegie Mellon University, 1993.
    Written by Alessandro Forin, based on earlier gas-1.38 target CPU files.
    Modified by Ken Raeburn for gas-2.x and ECOFF support.
@@ -243,12 +243,12 @@ const char EXP_CHARS[] = "eE";
 const char FLT_CHARS[] = "rRsSfFdDxXpP";
 
 #ifdef OBJ_EVAX
-const char *md_shortopts = "Fm:g+1h:HG:";
+const char md_shortopts[] = "Fm:g+1h:HG:";
 #else
-const char *md_shortopts = "Fm:gG:";
+const char md_shortopts[] = "Fm:gG:";
 #endif
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
   {
 #define OPTION_32ADDR (OPTION_MD_BASE)
     { "32addr", no_argument, NULL, OPTION_32ADDR },
@@ -269,7 +269,7 @@ struct option md_longopts[] =
     { NULL, no_argument, NULL, 0 }
   };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 #ifdef OBJ_EVAX
 #define AXP_REG_R0     0
@@ -936,8 +936,8 @@ tokenize_arguments (char *str,
 	      goto err_report;
 	    }
 
-	  *input_line_pointer = c;
-	  SKIP_WHITESPACE_AFTER_NAME ();
+	  restore_line_pointer (c);
+	  SKIP_WHITESPACE ();
 	  if (*input_line_pointer != '!')
 	    {
 	      if (r->require_seq)
@@ -987,6 +987,7 @@ tokenize_arguments (char *str,
 
 	    /* First try for parenthesized register ...  */
 	    expression (tok);
+	    resolve_register (tok);
 	    if (*input_line_pointer == ')' && tok->X_op == O_register)
 	      {
 		tok->X_op = (saw_comma ? O_cpregister : O_pregister);
@@ -1009,6 +1010,8 @@ tokenize_arguments (char *str,
 	  expression (tok);
 	  if (tok->X_op == O_illegal || tok->X_op == O_absent)
 	    goto err;
+
+	  resolve_register (tok);
 
 	  saw_comma = 0;
 	  saw_arg = 1;
@@ -3496,9 +3499,9 @@ s_alpha_comm (int ignore ATTRIBUTE_UNUSED)
 
   /* Just after name is now '\0'.  */
   p = input_line_pointer;
-  *p = c;
+  restore_line_pointer (c);
 
-  SKIP_WHITESPACE_AFTER_NAME ();
+  SKIP_WHITESPACE ();
 
   /* Alpha OSF/1 compiler doesn't provide the comma, gcc does.  */
   if (*input_line_pointer == ',')
@@ -3743,8 +3746,8 @@ s_alpha_ent (int dummy ATTRIBUTE_UNUSED)
 
 	  /* The .ent directive is sometimes followed by a number.  Not sure
 	     what it really means, but ignore it.  */
-	  *input_line_pointer = name_end;
-	  SKIP_WHITESPACE_AFTER_NAME ();
+	  restore_line_pointer (name_end);
+	  SKIP_WHITESPACE ();
 	  if (*input_line_pointer == ',')
 	    {
 	      input_line_pointer++;
@@ -4313,11 +4316,11 @@ s_alpha_section (int secid)
 
      	      SKIP_WHITESPACE ();
      	      c = get_symbol_name (&beg);
-     	      *input_line_pointer = c;
+     	      restore_line_pointer (c);
 
      	      vms_flags |= s_alpha_section_word (beg, input_line_pointer - beg);
 
-     	      SKIP_WHITESPACE_AFTER_NAME ();
+     	      SKIP_WHITESPACE ();
      	    }
      	  while (*input_line_pointer++ == ',');
 
@@ -4935,8 +4938,8 @@ s_alpha_proc (int is_static ATTRIBUTE_UNUSED)
   c = get_symbol_name (&name);
   p = input_line_pointer;
   symbolP = symbol_find_or_make (name);
-  *p = c;
-  SKIP_WHITESPACE_AFTER_NAME ();
+  restore_line_pointer (c);
+  SKIP_WHITESPACE ();
   if (*input_line_pointer != ',')
     {
       *p = 0;
@@ -6221,8 +6224,8 @@ tc_gen_reloc (asection *sec ATTRIBUTE_UNUSED,
 {
   arelent *reloc;
 
-  reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
 
@@ -6297,7 +6300,7 @@ tc_gen_reloc (asection *sec ATTRIBUTE_UNUSED,
 	  pname = symbol_get_bfdsym (sym)->name;
 	}
 
-      udata = XNEW (struct evax_private_udata_struct);
+      udata = notes_alloc (sizeof (*udata));
       udata->enbsym = symbol_get_bfdsym (fixp->fx_addsy);
       udata->bsym = symbol_get_bfdsym (fixp->tc_fix_data.info->psym);
       udata->origname = (char *)pname;

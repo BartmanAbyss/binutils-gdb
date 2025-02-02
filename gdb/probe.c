@@ -1,6 +1,6 @@
 /* Generic static probe support for GDB.
 
-   Copyright (C) 2012-2023 Free Software Foundation, Inc.
+   Copyright (C) 2012-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "probe.h"
 #include "command.h"
 #include "cli/cli-cmds.h"
@@ -36,7 +35,7 @@
 #include "location.h"
 #include <ctype.h>
 #include <algorithm>
-#include "gdbsupport/gdb_optional.h"
+#include <optional>
 
 /* Class that implements the static probe methods for "any" probe.  */
 
@@ -280,7 +279,7 @@ collect_probes (const std::string &objname, const std::string &provider,
 		const std::string &probe_name, const static_probe_ops *spops)
 {
   std::vector<bound_probe> result;
-  gdb::optional<compiled_regex> obj_pat, prov_pat, probe_pat;
+  std::optional<compiled_regex> obj_pat, prov_pat, probe_pat;
 
   if (!provider.empty ())
     prov_pat.emplace (provider.c_str (), REG_NOSUB,
@@ -683,9 +682,9 @@ disable_probes_command (const char *arg, int from_tty)
 static bool ignore_probes_p = false;
 static bool ignore_probes_idx = 0;
 static bool ignore_probes_verbose_p;
-static gdb::optional<compiled_regex> ignore_probes_prov_pat[2];
-static gdb::optional<compiled_regex> ignore_probes_name_pat[2];
-static gdb::optional<compiled_regex> ignore_probes_obj_pat[2];
+static std::optional<compiled_regex> ignore_probes_prov_pat[2];
+static std::optional<compiled_regex> ignore_probes_name_pat[2];
+static std::optional<compiled_regex> ignore_probes_obj_pat[2];
 
 /* See comments in probe.h.  */
 
@@ -696,11 +695,11 @@ ignore_probe_p (const char *provider, const char *name,
   if (!ignore_probes_p)
     return false;
 
-  gdb::optional<compiled_regex> &re_prov
+  std::optional<compiled_regex> &re_prov
     = ignore_probes_prov_pat[ignore_probes_idx];
-  gdb::optional<compiled_regex> &re_name
+  std::optional<compiled_regex> &re_name
     = ignore_probes_name_pat[ignore_probes_idx];
-  gdb::optional<compiled_regex> &re_obj
+  std::optional<compiled_regex> &re_obj
     = ignore_probes_obj_pat[ignore_probes_idx];
 
   bool res
@@ -755,11 +754,11 @@ ignore_probes_command (const char *arg, int from_tty)
   /* Parse the regular expressions, making sure that the old regular
      expressions are still valid if an exception is throw.  */
   int new_ignore_probes_idx = 1 - ignore_probes_idx;
-  gdb::optional<compiled_regex> &re_prov
+  std::optional<compiled_regex> &re_prov
     = ignore_probes_prov_pat[new_ignore_probes_idx];
-  gdb::optional<compiled_regex> &re_name
+  std::optional<compiled_regex> &re_name
     = ignore_probes_name_pat[new_ignore_probes_idx];
-  gdb::optional<compiled_regex> &re_obj
+  std::optional<compiled_regex> &re_obj
     = ignore_probes_obj_pat[new_ignore_probes_idx];
   re_prov.reset ();
   re_name.reset ();
@@ -786,7 +785,7 @@ ignore_probes_command (const char *arg, int from_tty)
 /* See comments in probe.h.  */
 
 struct value *
-probe_safe_evaluate_at_pc (frame_info_ptr frame, unsigned n)
+probe_safe_evaluate_at_pc (const frame_info_ptr &frame, unsigned n)
 {
   struct bound_probe probe;
   unsigned n_args;

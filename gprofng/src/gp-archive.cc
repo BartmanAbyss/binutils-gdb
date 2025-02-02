@@ -1,4 +1,4 @@
-/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2025 Free Software Foundation, Inc.
    Contributed by Oracle.
 
    This file is part of GNU Binutils.
@@ -139,11 +139,8 @@ er_archive::usage ()
     "\n"
     "See also:\n"
     "\n"
-    "gprofng(1), gp-collect-app(1), gp-display-html(1), gp-display-src(1), gp-display-text(1)\n"));
-// Ruud
-/*
-  fprintf (stderr, GTXT ("GNU %s version %s\n"), get_basename (prog_name), VERSION);
-*/
+    "gprofng(1), gprofng-collect-app(1), gprofng-display-html(1), "
+    "gprofng-display-src(1), gprofng-display-text(1)\n"));
   exit (1);
 }
 
@@ -278,7 +275,7 @@ er_archive::start (int argc, char *argv[])
   if (founder_exp->get_status () == Experiment::FAILURE)
     {
       if (!quiet)
-	fprintf (stderr, GTXT ("er_archive: %s: %s\n"), argv[last],
+	fprintf (stderr, GTXT ("gp-archive: %s: %s\n"), argv[last],
 		 pr_mesgs (founder_exp->fetch_errors (), NTXT (""), NTXT ("")));
       exit (1);
     }
@@ -315,8 +312,8 @@ er_archive::start (int argc, char *argv[])
 	      if (exp->get_status () == Experiment::FAILURE)
 		{
 		  if (!quiet)
-		    fprintf (stderr, GTXT ("er_archive: %s: %s\n"), exp_path,
-			     pr_mesgs (exp->fetch_errors (), NTXT (""), NTXT ("")));
+		    fprintf (stderr, GTXT ("gp-archive: %s: %s\n"), exp_path,
+			     pr_mesgs (exp->fetch_errors (), "", ""));
 		  delete exp;
 		  continue;
 		}
@@ -362,7 +359,7 @@ er_archive::start (int argc, char *argv[])
       if (elf && (lo->checksum != 0) && (lo->checksum != elf->elf_checksum ()))
 	{
 	  if (!quiet)
-	    fprintf (stderr, GTXT ("er_archive: '%s' has an unexpected checksum value; perhaps it was rebuilt. File ignored\n"),
+	    fprintf (stderr, GTXT ("gp-archive: '%s' has an unexpected checksum value; perhaps it was rebuilt. File ignored\n"),
 		       df->get_location ());
 	  continue;
 	}
@@ -480,12 +477,13 @@ er_archive::start (int argc, char *argv[])
       for (long i = 0, sz = notfound_files->size (); i < sz; i++)
 	{
 	  DbeFile *df = notfound_files->get (i);
-	  fprintf (stderr, GTXT ("er_archive: Cannot find file: `%s'\n"), df->get_name ());
+	  fprintf (stderr, GTXT ("gp-archive: Cannot find file: `%s'\n"), df->get_name ());
 	}
-      fprintf (stderr, GTXT ("\n If you know the correct location of the missing file(s)"
-			     " you can help %s to find them by manually editing the .gprofng.rc file."
-			     " See %s man pages for more details.\n"),
-	       whoami, whoami);
+      fprintf (stderr,
+        GTXT ("\n If you know the correct location of the missing file(s)"
+	      " you can help gp-archive to find them by manually editing"
+	      " the .gprofng.rc file."
+	      " See the gp-archive man page for more details.\n"));
     }
   delete notfound_files;
 }
@@ -527,7 +525,7 @@ er_archive::check_args (int argc, char *argv[])
 	  if (dseen)
 	    fprintf (stderr, GTXT ("Warning: option -d was specified several times. Last value is used.\n"));
 	  free (common_archive_dir);
-	  common_archive_dir = strdup (optarg);
+	  common_archive_dir = xstrdup (optarg);
 	  dseen = 1;
 	  break;
 	case 'q':
@@ -545,7 +543,7 @@ er_archive::check_args (int argc, char *argv[])
 	  if (rseen)
 	    fprintf (stderr, GTXT ("Warning: option -r was specified several times. Last value is used.\n"));
 	  free (common_archive_dir);
-	  common_archive_dir = strdup (optarg);
+	  common_archive_dir = xstrdup (optarg);
 	  use_relative_path = 1;
 	  rseen = 1;
 	  break;
@@ -588,21 +586,21 @@ er_archive::check_args (int argc, char *argv[])
 	    int fd = open (optarg, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 	    if (fd == -1)
 	      {
-		fprintf (stderr, GTXT ("er_archive: Can't open %s: %s\n"),
+		fprintf (stderr, GTXT ("gp-archive: Can't open %s: %s\n"),
 			 optarg, strerror (errno));
 		break;
 	      }
 	    if (dup2 (fd, 2) == -1)
 	      {
 		close (fd);
-		fprintf (stderr, GTXT ("er_archive: Can't divert stderr: %s\n"),
+		fprintf (stderr, GTXT ("gp-archive: Can't divert stderr: %s\n"),
 			 strerror (errno));
 		break;
 	      }
 	    if (dup2 (fd, 1) == -1)
 	      {
 		close (fd);
-		fprintf (stderr, GTXT ("er_archive: Can't divert stdout: %s\n"),
+		fprintf (stderr, GTXT ("gp-archive: Can't divert stdout: %s\n"),
 			 strerror (errno));
 		break;
 	      }
@@ -616,11 +614,7 @@ er_archive::check_args (int argc, char *argv[])
 	    break;
 	  }
 	case 'V':
-// Ruud
 	  Application::print_version_info ();
-/*
-	  printf (GTXT ("GNU %s version %s\n"), get_basename (prog_name), VERSION);
-*/
 	  exit (0);
 	case 'w':
 	  whoami = optarg;
@@ -666,7 +660,7 @@ er_archive::check_env_var ()
     }
   if (opts->size () > 0)
     {
-      char **arr = (char **) malloc (sizeof (char *) *opts->size ());
+      char **arr = (char **) xmalloc (sizeof (char *) *opts->size ());
       for (long i = 0; i < opts->size (); i++)
 	arr[i] = opts->get (i);
       if (-1 == check_args (opts->size (), arr))
@@ -696,5 +690,6 @@ real_main (int argc, char *argv[])
 int
 main (int argc, char *argv[])
 {
+  xmalloc_set_program_name (argv[0]);
   return catch_out_of_memory (real_main, argc, argv);
 }

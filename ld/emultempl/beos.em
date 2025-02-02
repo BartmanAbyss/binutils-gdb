@@ -7,7 +7,7 @@ else
 fi
 fragment <<EOF
 /* This file is part of GLD, the Gnu Linker.
-   Copyright (C) 1995-2023 Free Software Foundation, Inc.
+   Copyright (C) 1995-2025 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -70,22 +70,6 @@ gld${EMULATION_NAME}_before_parse (void)
 
 /* PE format extra command line options.  */
 
-/* Used for setting flags in the PE header. */
-#define OPTION_BASE_FILE		(300  + 1)
-#define OPTION_DLL			(OPTION_BASE_FILE + 1)
-#define OPTION_FILE_ALIGNMENT		(OPTION_DLL + 1)
-#define OPTION_IMAGE_BASE		(OPTION_FILE_ALIGNMENT + 1)
-#define OPTION_MAJOR_IMAGE_VERSION	(OPTION_IMAGE_BASE + 1)
-#define OPTION_MAJOR_OS_VERSION		(OPTION_MAJOR_IMAGE_VERSION + 1)
-#define OPTION_MAJOR_SUBSYSTEM_VERSION	(OPTION_MAJOR_OS_VERSION + 1)
-#define OPTION_MINOR_IMAGE_VERSION	(OPTION_MAJOR_SUBSYSTEM_VERSION + 1)
-#define OPTION_MINOR_OS_VERSION		(OPTION_MINOR_IMAGE_VERSION + 1)
-#define OPTION_MINOR_SUBSYSTEM_VERSION	(OPTION_MINOR_OS_VERSION + 1)
-#define OPTION_SECTION_ALIGNMENT	(OPTION_MINOR_SUBSYSTEM_VERSION + 1)
-#define OPTION_STACK			(OPTION_SECTION_ALIGNMENT + 1)
-#define OPTION_SUBSYSTEM		(OPTION_STACK + 1)
-#define OPTION_HEAP			(OPTION_SUBSYSTEM + 1)
-
 static void
 gld${EMULATION_NAME}_add_options
   (int ns ATTRIBUTE_UNUSED, char **shortopts ATTRIBUTE_UNUSED, int nl,
@@ -98,7 +82,6 @@ gld${EMULATION_NAME}_add_options
     {"dll", no_argument, NULL, OPTION_DLL},
     {"file-alignment", required_argument, NULL, OPTION_FILE_ALIGNMENT},
     {"heap", required_argument, NULL, OPTION_HEAP},
-    {"image-base", required_argument, NULL, OPTION_IMAGE_BASE},
     {"major-image-version", required_argument, NULL, OPTION_MAJOR_IMAGE_VERSION},
     {"major-os-version", required_argument, NULL, OPTION_MAJOR_OS_VERSION},
     {"major-subsystem-version", required_argument, NULL, OPTION_MAJOR_SUBSYSTEM_VERSION},
@@ -718,7 +701,7 @@ then
 # Scripts compiled in.
 
 # sed commands to quote an ld script as a C string.
-sc="-f stringify.sed"
+sc="-f ${srcdir}/emultempl/stringify.sed"
 
 fragment <<EOF
 {

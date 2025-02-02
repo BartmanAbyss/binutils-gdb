@@ -1,5 +1,5 @@
 /* dwarf.h - DWARF support header file
-   Copyright (C) 2005-2023 Free Software Foundation, Inc.
+   Copyright (C) 2005-2025 Free Software Foundation, Inc.
 
    This file is part of GNU Binutils.
 
@@ -83,6 +83,7 @@ enum dwarf_section_display_enum
   pubnames,
   gnu_pubnames,
   eh_frame,
+  eh_frame_hdr,
   macinfo,
   macro,
   str,

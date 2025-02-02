@@ -1,4 +1,4 @@
-#   Copyright (C) 1993-2023 Free Software Foundation, Inc.
+#   Copyright (C) 1993-2025 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -246,8 +246,6 @@ if [is_elf_format] {
     # Test nm --line-numbers on DWARF-4 debug info.    
     set testname "nm --line-numbers on DWARF-4 debug info"
 
-    # The RISCV target does not (currently) support .uleb128.
-    setup_xfail "riscv*-*-*"
     # The SH targets complain that the pseudo-ops used to construct
     # the DWARF data are misaligned.
     setup_xfail "sh*-*-*"
@@ -298,6 +296,7 @@ if [is_elf_format] {
     setup_xfail "*-*-hpux*"
     setup_xfail "mips*-*-*" "tx39*-*-*"
     setup_xfail "msp430*-*-*"
+    setup_xfail "kvx*-*-*"
     setup_xfail "visium*-*-*"
     setup_xfail "x86_64-*-cloudabi*"
 

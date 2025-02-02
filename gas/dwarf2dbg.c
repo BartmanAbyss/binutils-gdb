@@ -1,5 +1,5 @@
 /* dwarf2dbg.c - DWARF2 debug support
-   Copyright (C) 1999-2023 Free Software Foundation, Inc.
+   Copyright (C) 1999-2025 Free Software Foundation, Inc.
    Contributed by David Mosberger-Tang <davidm@hpl.hp.com>
 
    This file is part of GAS, the GNU Assembler.
@@ -883,6 +883,8 @@ allocate_filename_to_slot (const char *dirname,
 		}
 	      
 	      dirs[files[num].dir] = xmemdup0 (dirname, strlen (dirname));
+	      if (dirs_in_use <= files[num].dir)
+		dirs_in_use = files[num].dir + 1;
 	    }
 	    
 	  return true;
@@ -911,6 +913,8 @@ allocate_filename_to_slot (const char *dirname,
 		    }
 
 		  dirs[files[num].dir] = xmemdup0 (filename, file - filename);
+		  if (dirs_in_use <= files[num].dir)
+		    dirs_in_use = files[num].dir + 1;
 		}
 	      return true;
 	    }
@@ -1326,21 +1330,21 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
       if (strcmp (p, "basic_block") == 0)
 	{
 	  current.flags |= DWARF2_FLAG_BASIC_BLOCK;
-	  *input_line_pointer = c;
+	  restore_line_pointer (c);
 	}
       else if (strcmp (p, "prologue_end") == 0)
 	{
 	  if (dwarf_level < 3)
 	    dwarf_level = 3;
 	  current.flags |= DWARF2_FLAG_PROLOGUE_END;
-	  *input_line_pointer = c;
+	  restore_line_pointer (c);
 	}
       else if (strcmp (p, "epilogue_begin") == 0)
 	{
 	  if (dwarf_level < 3)
 	    dwarf_level = 3;
 	  current.flags |= DWARF2_FLAG_EPILOGUE_BEGIN;
-	  *input_line_pointer = c;
+	  restore_line_pointer (c);
 	}
       else if (strcmp (p, "is_stmt") == 0)
 	{
@@ -1442,7 +1446,7 @@ dwarf2_directive_loc (int dummy ATTRIBUTE_UNUSED)
 	  return;
 	}
 
-      SKIP_WHITESPACE_AFTER_NAME ();
+      SKIP_WHITESPACE ();
     }
 
   demand_empty_rest_of_line ();

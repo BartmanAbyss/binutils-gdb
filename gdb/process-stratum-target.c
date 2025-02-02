@@ -1,6 +1,6 @@
 /* Abstract base class inherited by all process_stratum targets
 
-   Copyright (C) 2018-2023 Free Software Foundation, Inc.
+   Copyright (C) 2018-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "process-stratum-target.h"
 #include "inferior.h"
 #include <algorithm>
@@ -26,26 +25,12 @@ process_stratum_target::~process_stratum_target ()
 {
 }
 
-struct address_space *
-process_stratum_target::thread_address_space (ptid_t ptid)
-{
-  /* Fall-back to the "main" address space of the inferior.  */
-  inferior *inf = find_inferior_ptid (this, ptid);
-
-  if (inf == NULL || inf->aspace == NULL)
-    internal_error (_("Can't determine the current "
-		      "address space of thread %s\n"),
-		    target_pid_to_str (ptid).c_str ());
-
-  return inf->aspace;
-}
-
 struct gdbarch *
 process_stratum_target::thread_architecture (ptid_t ptid)
 {
   inferior *inf = find_inferior_ptid (this, ptid);
   gdb_assert (inf != NULL);
-  return inf->gdbarch;
+  return inf->arch ();
 }
 
 bool

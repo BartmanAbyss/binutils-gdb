@@ -1,4 +1,4 @@
-/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2025 Free Software Foundation, Inc.
    Contributed by Oracle.
 
    This file is part of GNU Binutils.
@@ -107,7 +107,7 @@ collect::putenv_libcollector_ld_preloads ()
   // for those data types that get extra libs LD_PRELOAD'd, add them
   if (cc->get_synctrace_mode () != 0)
     add_ld_preload ("libgp-sync.so");
-  if (cc->get_heaptrace_mode () != 0)
+  if (cc->get_heaptrace_mode () != NULL)
     add_ld_preload ("libgp-heap.so");
   if (cc->get_iotrace_mode () != 0)
     add_ld_preload ("libgp-iotrace.so");
@@ -136,7 +136,7 @@ int
 collect::putenv_libcollector_ld_misc ()
 {
 #if 0 // XXX 1 turns on LD_DEBUG
-  putenv (strdup ("LD_DEBUG=audit,bindings,detail"));
+  putenv (xstrdup ("LD_DEBUG=audit,bindings,detail"));
 #endif
   // workaround to have the dynamic linker use absolute names
   if (add_env (dbe_strdup ("LD_ORIGIN=yes")))
@@ -146,20 +146,42 @@ collect::putenv_libcollector_ld_misc ()
   // so that -agentlib:gp-collector works
   // and so that collect -F works with 32/64-bit mix of processes
 
-  // Set GPROFNG_PRELOAD_LIBDIRS
+  StringBuilder sb;
+  sb.append ("SP_COLLECTOR_LIBRARY_PATH=");
+  int len = sb.length ();
+  int cnt = 0;
+  char *fname;
   char *ev = getenv (GPROFNG_PRELOAD_LIBDIRS);
   char *libpath_list = NULL;
-  if (ev == NULL && settings->preload_libdirs == NULL)
+  if (ev)
+    { /* GPROFNG_PRELOAD_LIBDIRS is used only in the gprofng testing.
+       * Use these directories first.  */
+      ev = xstrdup (ev);
+      for (char *s = ev; s;)
+	{
+	  char *s1 = strchr (s, ':');
+	  if (s1)
+	    *(s1++) = 0;
+	  fname = dbe_sprintf ("%s/%s", s, LIBGP_COLLECTOR);
+	  if (access (fname, R_OK | F_OK) == 0)
+	    {
+	      if (++cnt != 1)
+		sb.append (':');
+	      sb.append (s);
+	    }
+	  free (fname);
+	  s = s1;
+	}
+      free (ev);
+      ev = NULL;
+    }
+  if (settings->preload_libdirs == NULL)
     {
       settings->read_rc (false);
       ev = settings->preload_libdirs;
     }
   ev = dbe_strdup (ev);
-  StringBuilder sb;
-  sb.appendf ("%s=", "SP_COLLECTOR_LIBRARY_PATH");
-  int len = sb.length ();
-  int cnt = 0;
-  char *fname = dbe_sprintf ("%s/%s/%s", LIBDIR, PACKAGE, LIBGP_COLLECTOR);
+  fname = dbe_sprintf ("%s/%s/%s", LIBDIR, PACKAGE, LIBGP_COLLECTOR);
   if (access (fname, R_OK | F_OK) == 0)
     {
       ++cnt;
@@ -224,7 +246,7 @@ collect::add_ld_preload (const char *lib)
     {
       char *old_sp = sp_preload_list[ii];
       if (old_sp == NULL)
-	sp_preload_list[ii] = strdup (lib);
+	sp_preload_list[ii] = xstrdup (lib);
       else
 	{
 	  sp_preload_list[ii] = dbe_sprintf ("%s %s", old_sp, lib);

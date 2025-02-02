@@ -1,5 +1,5 @@
 /* BFD back-end for Renesas Super-H COFF binaries.
-   Copyright (C) 1993-2023 Free Software Foundation, Inc.
+   Copyright (C) 1993-2025 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
    Written by Steve Chamberlain, <sac@cygnus.com>.
    Relaxing code written by Ian Lance Taylor, <ian@cygnus.com>.
@@ -544,7 +544,8 @@ sh_coff_reloc_name_lookup (bfd *abfd ATTRIBUTE_UNUSED,
       cache_ptr->addend = 0;					\
     else if (ptr && bfd_asymbol_bfd (ptr) == abfd		\
 	     && ptr->section != (asection *) NULL)		\
-      cache_ptr->addend = - (ptr->section->vma + ptr->value);	\
+      cache_ptr->addend = - (ptr->section->vma			\
+			     + COFF_PE_ADDEND_BIAS (ptr));	\
     else							\
       cache_ptr->addend = 0;					\
     if ((reloc).r_type == R_SH_SWITCH8				\
@@ -3118,8 +3119,6 @@ static const bfd_coff_backend_data bfd_coff_small_swap_table =
   coff_bfd_free_cached_info
 #define coff_small_get_section_contents \
   coff_get_section_contents
-#define coff_small_get_section_contents_in_window \
-  coff_get_section_contents_in_window
 
 extern const bfd_target sh_coff_small_le_vec;
 

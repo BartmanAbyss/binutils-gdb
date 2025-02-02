@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl
-dnl   Copyright (C) 2006-2023 Free Software Foundation, Inc.
+dnl   Copyright (C) 2006-2025 Free Software Foundation, Inc.
 dnl
 dnl This file is free software; you can redistribute it and/or modify
 dnl it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@ dnl along with this program; see the file COPYING3.  If not see
 dnl <http://www.gnu.org/licenses/>.
 dnl
 
-AC_INIT(gold, 0.1)
+AC_INIT([gold], [0.1])
 AC_CONFIG_SRCDIR(gold.cc)
 
 AC_CANONICAL_TARGET
@@ -312,8 +312,6 @@ AC_PROG_YACC
 AC_PROG_RANLIB
 AC_PROG_INSTALL
 AC_PROG_LN_S
-
-AC_GNU_SOURCE
 
 ZW_GNU_GETTEXT_SISTER_DIR
 AM_PO_SUBDIRS
@@ -680,6 +678,10 @@ if test "$gold_cv_unordered_map_rehash" = "yes"; then
   AC_DEFINE(HAVE_TR1_UNORDERED_MAP_REHASH, 1,
 	    [Define if ::std::tr1::unordered_map::rehash is usable])
 fi
+
+# Since 5e9091dab8858b25210a91d22fbbbfdee9c969ad gold now requires C++11
+# So we need to check for it.
+AX_CXX_COMPILE_STDCXX([11], [], [mandatory])
 
 # Use of tr1/unordered_map with off_t as a key is not supported on GCC
 # 4.1.xx when compiling in 32-bit mode with a 64-bit off_t type.

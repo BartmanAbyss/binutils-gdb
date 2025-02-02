@@ -355,7 +355,7 @@ Multiply64 (int sign, unsigned long op0)
   hi   = (((op0 >> 16) & 0xFFFF) * ((op1 >> 16) & 0xFFFF));
   
   /* We now need to add all of these results together, taking care
-     to propogate the carries from the additions: */
+     to propagate the carries from the additions: */
   RdLo = Add32 (lo, (mid1 << 16), & carry);
   RdHi = carry;
   RdLo = Add32 (RdLo, (mid2 << 16), & carry);
@@ -2106,7 +2106,6 @@ divn
   unsigned int    DBZ = als == 0 ? 1 : 0;
   unsigned int    Q   = ~(SS ^ SD) & 1;
   unsigned int    C;
-  unsigned int    S;
   unsigned int    i;
   unsigned long   alt = Q ? ~als : als;
 
@@ -2118,7 +2117,7 @@ divn
 	 | (((alt >> 31) ^ (ald >> 31)) & (~alo >> 31)));
   Q   = C ^ SS;
   R1  = (alo == 0) ? 0 : (R1 & (Q ^ (SS ^ SD)));
-  S   = alo >> 31;
+  /* S   = alo >> 31; */
   sfi = (sfi << (32-N+1)) | Q;
   ald = (alo << 1) | (sfi >> 31);
   if ((alo >> 31) ^ (ald >> 31))
@@ -2136,7 +2135,7 @@ divn
 	     | (((alt >> 31) ^ (ald >> 31)) & (~alo >> 31)));
       Q   = C ^ SS;
       R1  = (alo == 0) ? 0 : (R1 & (Q ^ (SS ^ SD)));
-      S   = alo >> 31;
+      /* S   = alo >> 31; */
       sfi = (sfi << 1) | Q;
       ald = (alo << 1) | (sfi >> 31);
       if ((alo >> 31) ^ (ald >> 31))
@@ -2456,7 +2455,6 @@ OP_28007E0 (void)
   signed long int remainder;
   signed long int divide_by;
   signed long int divide_this;
-  int         overflow = 0;
   
   trace_input ("divh", OP_REG_REG_REG, 0);
   
@@ -3034,7 +3032,7 @@ v850_float_compare (SIM_DESC sd, int cmp, sim_fpu wop1, sim_fpu wop2, int double
     }
   else
     {
-      int gt = 0,lt = 0,eq = 0, status;
+      int lt = 0, eq = 0, status;
 
       status = sim_fpu_cmp (&wop1, &wop2);
 
@@ -3049,19 +3047,19 @@ v850_float_compare (SIM_DESC sd, int cmp, sim_fpu wop1, sim_fpu wop2, int double
 	  lt = 1;
 	  break;
 	case SIM_FPU_IS_PINF:
-	  gt = 1;
+	  /* gt = 1; */
 	  break;
 	case SIM_FPU_IS_NNUMBER:
 	  lt = 1;
 	  break;
 	case SIM_FPU_IS_PNUMBER:
-	  gt = 1;
+	  /* gt = 1; */
 	  break;
 	case SIM_FPU_IS_NDENORM:
 	  lt = 1;
 	  break;
 	case SIM_FPU_IS_PDENORM:
-	  gt = 1;
+	  /* gt = 1; */
 	  break;
 	case SIM_FPU_IS_NZERO:
 	case SIM_FPU_IS_PZERO:

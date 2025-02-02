@@ -1,6 +1,6 @@
 /* C language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 1992-2023 Free Software Foundation, Inc.
+   Copyright (C) 1992-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "expression.h"
@@ -337,17 +337,17 @@ c_get_string (struct value *value, gdb::unique_xmalloc_ptr<gdb_byte> *buffer,
 	addr = value_as_address (value);
 
       /* Prior to the fix for PR 16196 read_string would ignore fetchlimit
-	 if length > 0.  The old "broken" behaviour is the behaviour we want:
+	 if length > 0.  The old "broken" behavior is the behavior we want:
 	 The caller may want to fetch 100 bytes from a variable length array
 	 implemented using the common idiom of having an array of length 1 at
 	 the end of a struct.  In this case we want to ignore the declared
 	 size of the array.  However, it's counterintuitive to implement that
-	 behaviour in read_string: what does fetchlimit otherwise mean if
-	 length > 0.  Therefore we implement the behaviour we want here:
+	 behavior in read_string: what does fetchlimit otherwise mean if
+	 length > 0.  Therefore we implement the behavior we want here:
 	 If *length > 0, don't specify a fetchlimit.  This preserves the
-	 previous behaviour.  We could move this check above where we know
+	 previous behavior.  We could move this check above where we know
 	 whether the array is declared with a fixed size, but we only want
-	 to apply this behaviour when calling read_string.  PR 16286.  */
+	 to apply this behavior when calling read_string.  PR 16286.  */
       if (*length > 0)
 	fetchlimit = UINT_MAX;
 
@@ -615,9 +615,6 @@ c_string_operation::evaluate (struct type *expect_type,
       internal_error (_("unhandled c_string_type"));
     }
 
-  /* Ensure TYPE_LENGTH is valid for TYPE.  */
-  check_typedef (type);
-
   /* If the caller expects an array of some integral type,
      satisfy them.  If something odder is expected, rely on the
      caller to cast.  */
@@ -652,16 +649,11 @@ c_string_operation::evaluate (struct type *expect_type,
     }
   else
     {
-      int i;
-
-      /* Write the terminating character.  */
-      for (i = 0; i < type->length (); ++i)
-	obstack_1grow (&output, 0);
+      int element_size = type->length ();
 
       if (satisfy_expected)
 	{
 	  LONGEST low_bound, high_bound;
-	  int element_size = type->length ();
 
 	  if (!get_discrete_bounds (expect_type->index_type (),
 				    &low_bound, &high_bound))
@@ -676,10 +668,13 @@ c_string_operation::evaluate (struct type *expect_type,
 	  result = value::allocate (expect_type);
 	  memcpy (result->contents_raw ().data (), obstack_base (&output),
 		  obstack_object_size (&output));
+	  /* Write the terminating character.  */
+	  memset (result->contents_raw ().data () + obstack_object_size (&output),
+		  0, element_size);
 	}
       else
-	result = value_cstring ((const char *) obstack_base (&output),
-				obstack_object_size (&output),
+	result = value_cstring ((const gdb_byte *) obstack_base (&output),
+				obstack_object_size (&output) / element_size,
 				type);
     }
   return result;
@@ -940,9 +935,11 @@ public:
   }
 
   /* See language.h.  */
-  struct type *lookup_transparent_type (const char *name) const override
+  struct type *lookup_transparent_type (const char *name,
+					domain_search_flags flags)
+    const override
   {
-    return cp_lookup_transparent_type (name);
+    return cp_lookup_transparent_type (name, flags);
   }
 
   /* See language.h.  */
@@ -1017,9 +1014,20 @@ public:
 
   /* See language.h.  */
 
+  struct block_symbol lookup_symbol_local
+       (const char *scope,
+	const char *name,
+	const struct block *block,
+	const domain_search_flags domain) const override
+  {
+    return cp_lookup_symbol_imports (scope, name, block, domain);
+  }
+
+  /* See language.h.  */
+
   struct block_symbol lookup_symbol_nonlocal
 	(const char *name, const struct block *block,
-	 const domain_enum domain) const override
+	 const domain_search_flags domain) const override
   {
     return cp_lookup_symbol_nonlocal (this, name, block, domain);
   }

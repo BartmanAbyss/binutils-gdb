@@ -1,6 +1,6 @@
 /* Code dealing with blocks for GDB.
 
-   Copyright (C) 2003-2023 Free Software Foundation, Inc.
+   Copyright (C) 2003-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,11 +17,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef BLOCK_H
-#define BLOCK_H
+#ifndef GDB_BLOCK_H
+#define GDB_BLOCK_H
 
 #include "dictionary.h"
 #include "gdbsupport/array-view.h"
+#include "gdbsupport/next-iterator.h"
 
 /* Opaque declarations.  */
 
@@ -30,7 +31,7 @@ struct compunit_symtab;
 struct block_namespace_info;
 struct using_direct;
 struct obstack;
-struct addrmap;
+struct addrmap_fixed;
 
 /* Blocks can occupy non-contiguous address ranges.  When this occurs,
    startaddr and endaddr within struct block (still) specify the lowest
@@ -105,7 +106,7 @@ struct blockranges
    This implies that within the body of one function
    the blocks appear in the order of a depth-first tree walk.  */
 
-struct block : public allocate_on_obstack
+struct block : public allocate_on_obstack<block>
 {
   /* Return this block's start address.  */
   CORE_ADDR start () const
@@ -177,27 +178,31 @@ struct block : public allocate_on_obstack
   bool is_contiguous () const
   { return this->ranges ().size () <= 1; }
 
-  /* Return the "entry PC" of this block.
+  /* Return the entry-pc of this block.
 
-     The entry PC is the lowest (start) address for the block when all addresses
-     within the block are contiguous.  If non-contiguous, then use the start
-     address for the first range in the block.
-
-     At the moment, this almost matches what DWARF specifies as the entry
-     pc.  (The missing bit is support for DW_AT_entry_pc which should be
-     preferred over range data and the low_pc.)
-
-     Once support for DW_AT_entry_pc is added, I expect that an entry_pc
-     field will be added to one of these data structures.  Once that's done,
-     the entry_pc field can be set from the dwarf reader (and other readers
-     too).  ENTRY_PC can then be redefined to be less DWARF-centric.  */
+     If the entry PC has been set to a specific value then this is
+     returned.  Otherwise, the default_entry_pc() address is returned.  */
 
   CORE_ADDR entry_pc () const
   {
-    if (this->is_contiguous ())
-      return this->start ();
-    else
-      return this->ranges ()[0].start ();
+    return default_entry_pc () + m_entry_pc_offset;
+  }
+
+  /* Set this block's entry-pc to ADDR, which must lie between start() and
+     end().  The entry-pc is stored as the signed offset from the
+     default_entry_pc() address.
+
+     Note that block sub-ranges can be out of order, as such the offset of
+     the entry-pc might be negative.  */
+
+  void set_entry_pc (CORE_ADDR addr)
+  {
+    CORE_ADDR start = default_entry_pc ();
+
+    gdb_assert (addr >= this->start () && addr < this->end ());
+    gdb_assert (start >= this->start () && start < this->end ());
+
+    m_entry_pc_offset = addr - start;
   }
 
   /* Return the objfile of this block.  */
@@ -227,7 +232,7 @@ struct block : public allocate_on_obstack
   /* This returns the using directives list associated with this
      block, if any.  */
 
-  struct using_direct *get_using () const;
+  next_range<using_direct> get_using () const;
 
   /* Set this block's using member to USING; if needed, allocate
      memory via OBSTACK.  (It won't make a copy of USING, however, so
@@ -254,13 +259,35 @@ struct block : public allocate_on_obstack
 
   const struct block *static_block () const;
 
-  /* Return the static block associated with block.  */
+  /* Return true if this block is a static block.  */
 
-  const struct block *global_block () const;
+  bool is_static_block () const
+  {
+    const block *sup = superblock ();
+    if (sup == nullptr)
+      return false;
+    return sup->is_global_block ();
+  }
 
-  /* Set the compunit of this block, which must be a global block.  */
+  /* Return the global block associated with block.  */
 
-  void set_compunit_symtab (struct compunit_symtab *);
+  const struct global_block *global_block () const;
+
+  /* Return true if this block is a global block.  */
+
+  bool is_global_block () const
+  { return superblock () == nullptr; }
+
+  /* Return this block as a global_block.  This block must be a global
+     block.  */
+  struct global_block *as_global_block ();
+  const struct global_block *as_global_block () const;
+
+  /* Return the function block for this block.  Returns nullptr if
+     there is no enclosing function, i.e., if this block is a static
+     or global block.  */
+
+  const struct block *function_block () const;
 
   /* Return a property to evaluate the static link associated to this
      block.
@@ -285,6 +312,26 @@ struct block : public allocate_on_obstack
   bool contains (const struct block *a, bool allow_nested = false) const;
 
 private:
+
+  /* Return the default entry-pc of this block.  The default is the address
+     we use if the debug information hasn't specifically set a different
+     entry-pc value.  This is the lowest address for the block when all
+     addresses within the block are contiguous.  If non-contiguous, then
+     use the start address for the first range in the block.
+
+     This almost matches what DWARF specifies as the entry pc, except that
+     the final case, using the first address of the first range, is a GDB
+     extension.  However, the DWARF reader sets the specific entry-pc
+     wherever possible, so this non-standard fallback case is only used as
+     a last resort.  */
+
+  CORE_ADDR default_entry_pc () const
+  {
+    if (this->is_contiguous ())
+      return this->start ();
+    else
+      return this->ranges ()[0].start ();
+  }
 
   /* If the namespace_info is NULL, allocate it via OBSTACK and
      initialize its members to zero.  */
@@ -322,16 +369,49 @@ private:
      startaddr and endaddr above.  */
 
   struct blockranges *m_ranges = nullptr;
+
+  /* The offset of the actual entry-pc value from the default entry-pc
+     value.  If space was no object then we'd store an actual address along
+     with a flag to indicate if the address has been set or not.  But we'd
+     like to keep the size of block low, so we'd like to use a single
+     member variable.
+
+     We would also like to avoid using 0 as a special address; some targets
+     do allow for accesses to address 0.
+
+     So instead we store the offset of the defined entry-pc from the
+     default entry-pc.  See default_entry_pc() for the definition of the
+     default entry-pc.  See entry_pc() for how this offset is used.  */
+
+  LONGEST m_entry_pc_offset = 0;
 };
 
 /* The global block is singled out so that we can provide a back-link
-   to the compunit symtab.  */
+   to the compunit.  */
 
 struct global_block : public block
 {
-  /* This holds a pointer to the compunit symtab holding this block.  */
+  /* Set the compunit of this global block.
 
-  struct compunit_symtab *compunit_symtab = nullptr;
+     The compunit must not have been set previously.  */
+  void set_compunit (compunit_symtab *cu)
+  {
+    gdb_assert (m_compunit == nullptr);
+    m_compunit = cu;
+  }
+
+  /* Return the compunit of this global block.
+
+     The compunit must have been set previously.  */
+  compunit_symtab *compunit () const
+  {
+    gdb_assert (m_compunit != nullptr);
+    return m_compunit;
+  }
+
+private:
+  /* This holds a pointer to the compunit holding this block.  */
+  compunit_symtab *m_compunit = nullptr;
 };
 
 struct blockvector
@@ -373,12 +453,15 @@ struct blockvector
   { return m_num_blocks; }
 
   /* Return the global block of this blockvector.  */
-  struct block *global_block ()
-  { return this->block (GLOBAL_BLOCK); }
+  struct global_block *global_block ()
+  { return static_cast<struct global_block *> (this->block (GLOBAL_BLOCK)); }
 
   /* Const version of the above.  */
-  const struct block *global_block () const
-  { return this->block (GLOBAL_BLOCK); }
+  const struct global_block *global_block () const
+  {
+    return static_cast<const struct global_block *>
+      (this->block (GLOBAL_BLOCK));
+  }
 
   /* Return the static block of this blockvector.  */
   struct block *static_block ()
@@ -389,22 +472,22 @@ struct blockvector
   { return this->block (STATIC_BLOCK); }
 
   /* Return the address -> block map of this blockvector.  */
-  addrmap *map ()
+  addrmap_fixed *map ()
   { return m_map; }
 
   /* Const version of the above.  */
-  const addrmap *map () const
+  const addrmap_fixed *map () const
   { return m_map; }
 
   /* Set this blockvector's address -> block map.  */
-  void set_map (addrmap *map)
+  void set_map (addrmap_fixed *map)
   { m_map = map; }
 
 private:
   /* An address map mapping addresses to blocks in this blockvector.
      This pointer is zero if the blocks' start and end addresses are
      enough.  */
-  struct addrmap *m_map;
+  addrmap_fixed *m_map;
 
   /* Number of blocks in the list.  */
   int m_num_blocks;
@@ -533,66 +616,42 @@ typedef iterator_range<block_iterator_wrapper> block_iterator_range;
 
 /* Return true if symbol A is the best match possible for DOMAIN.  */
 
-extern bool best_symbol (struct symbol *a, const domain_enum domain);
+extern bool best_symbol (struct symbol *a, const domain_search_flags domain);
 
 /* Return symbol B if it is a better match than symbol A for DOMAIN.
    Otherwise return A.  */
 
 extern struct symbol *better_symbol (struct symbol *a, struct symbol *b,
-				     const domain_enum domain);
+				     const domain_search_flags domain);
 
 /* Search BLOCK for symbol NAME in DOMAIN.  */
 
 extern struct symbol *block_lookup_symbol (const struct block *block,
-					   const char *name,
-					   symbol_name_match_type match_type,
-					   const domain_enum domain);
+					   const lookup_name_info &name,
+					   const domain_search_flags domain);
 
 /* Search BLOCK for symbol NAME in DOMAIN but only in primary symbol table of
    BLOCK.  BLOCK must be STATIC_BLOCK or GLOBAL_BLOCK.  Function is useful if
    one iterates all global/static blocks of an objfile.  */
 
-extern struct symbol *block_lookup_symbol_primary (const struct block *block,
-						   const char *name,
-						   const domain_enum domain);
+extern struct symbol *block_lookup_symbol_primary
+     (const struct block *block,
+      const char *name,
+      const domain_search_flags domain);
 
-/* The type of the MATCHER argument to block_find_symbol.  */
-
-typedef int (block_symbol_matcher_ftype) (struct symbol *, void *);
-
-/* Find symbol NAME in BLOCK and in DOMAIN that satisfies MATCHER.
-   DATA is passed unchanged to MATCHER.
-   BLOCK must be STATIC_BLOCK or GLOBAL_BLOCK.  */
+/* Find symbol NAME in BLOCK and in DOMAIN.  This will return a
+   matching symbol whose type is not a "opaque", see TYPE_IS_OPAQUE.
+   If STUB is non-NULL, an otherwise matching symbol whose type is a
+   opaque will be stored here.  */
 
 extern struct symbol *block_find_symbol (const struct block *block,
-					 const char *name,
-					 const domain_enum domain,
-					 block_symbol_matcher_ftype *matcher,
-					 void *data);
-
-/* A matcher function for block_find_symbol to find only symbols with
-   non-opaque types.  */
-
-extern int block_find_non_opaque_type (struct symbol *sym, void *data);
-
-/* A matcher function for block_find_symbol to prefer symbols with
-   non-opaque types.  The way to use this function is as follows:
-
-   struct symbol *with_opaque = NULL;
-   struct symbol *sym
-     = block_find_symbol (block, name, domain,
-			  block_find_non_opaque_type_preferred, &with_opaque);
-
-   At this point if SYM is non-NULL then a non-opaque type has been found.
-   Otherwise, if WITH_OPAQUE is non-NULL then an opaque type has been found.
-   Otherwise, the symbol was not found.  */
-
-extern int block_find_non_opaque_type_preferred (struct symbol *sym,
-						 void *data);
+					 const lookup_name_info &name,
+					 const domain_search_flags domain,
+					 struct symbol **stub);
 
 /* Given a vector of pairs, allocate and build an obstack allocated
    blockranges struct for a block.  */
 struct blockranges *make_blockranges (struct objfile *objfile,
 				      const std::vector<blockrange> &rangevec);
 
-#endif /* BLOCK_H */
+#endif /* GDB_BLOCK_H */

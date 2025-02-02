@@ -1,5 +1,5 @@
 /* POWER/PowerPC XCOFF linker support.
-   Copyright (C) 1995-2023 Free Software Foundation, Inc.
+   Copyright (C) 1995-2025 Free Software Foundation, Inc.
    Written by Ian Lance Taylor <ian@cygnus.com>, Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -439,37 +439,29 @@ _bfd_xcoff_canonicalize_dynamic_reloc (bfd *abfd,
 
       bfd_xcoff_swap_ldrel_in (abfd, elrel, &ldrel);
 
-      if (ldrel.l_symndx >= 3)
-	relbuf->sym_ptr_ptr = syms + (ldrel.l_symndx - 3);
-      else
+      if (ldrel.l_symndx + 2 < 5)
 	{
-	  const char *name;
-	  asection *sec;
-
-	  switch (ldrel.l_symndx)
-	    {
-	    case 0:
-	      name = ".text";
-	      break;
-	    case 1:
-	      name = ".data";
-	      break;
-	    case 2:
-	      name = ".bss";
-	      break;
-	    default:
-	      abort ();
-	      break;
-	    }
-
-	  sec = bfd_get_section_by_name (abfd, name);
+	  static const char stdsec[5][8]
+	    = { ".tbss", ".tdata", ".text", ".data", ".bss" };
+	  const char *name = stdsec[ldrel.l_symndx + 2];
+	  asection *sec = bfd_get_section_by_name (abfd, name);
 	  if (sec == NULL)
 	    {
 	      bfd_set_error (bfd_error_bad_value);
 	      return -1;
 	    }
 
-	  relbuf->sym_ptr_ptr = sec->symbol_ptr_ptr;
+	  relbuf->sym_ptr_ptr = &sec->symbol;
+	}
+      else if (ldrel.l_symndx - 3 < ldhdr.l_nsyms)
+	relbuf->sym_ptr_ptr = syms + (ldrel.l_symndx - 3);
+      else
+	{
+	  _bfd_error_handler
+	    /* xgettext:c-format */
+	    (_("%pB: warning: illegal symbol index %lu in relocs"),
+	     abfd, (unsigned long) ldrel.l_symndx);
+	  relbuf->sym_ptr_ptr = &bfd_abs_section_ptr->symbol;
 	}
 
       relbuf->address = ldrel.l_vaddr;
@@ -3998,6 +3990,7 @@ xcoff_build_loader_section (struct xcoff_loader_info *ldinfo)
   lsec->contents = bfd_zalloc (output_bfd, lsec->size);
   if (lsec->contents == NULL)
     return false;
+  lsec->alloced = 1;
 
   /* Set up the header.  */
   bfd_xcoff_swap_ldhdr_out (output_bfd, ldhdr, lsec->contents);
@@ -4070,6 +4063,7 @@ bfd_xcoff_build_dynamic_sections (bfd *output_bfd,
       sec->contents = bfd_zalloc (output_bfd, sec->size);
       if (sec->contents == NULL)
 	return false;
+      sec->alloced = 1;
     }
   sec = xcoff_hash_table (info)->toc_section;
   if (sec->size > 0)
@@ -4077,6 +4071,7 @@ bfd_xcoff_build_dynamic_sections (bfd *output_bfd,
       sec->contents = bfd_zalloc (output_bfd, sec->size);
       if (sec->contents == NULL)
 	return false;
+      sec->alloced = 1;
     }
   sec = xcoff_hash_table (info)->descriptor_section;
   if (sec->size > 0)
@@ -4084,6 +4079,7 @@ bfd_xcoff_build_dynamic_sections (bfd *output_bfd,
       sec->contents = bfd_zalloc (output_bfd, sec->size);
       if (sec->contents == NULL)
 	return false;
+      sec->alloced = 1;
     }
 
   /* Now that we've done garbage collection, decide which symbols to keep,
@@ -4939,7 +4935,7 @@ bfd_xcoff_build_stubs (struct bfd_link_info *info)
       stub_sec->contents = bfd_zalloc (htab->params->stub_bfd, size);
       if (stub_sec->contents == NULL && size != 0)
 	return false;
-
+      stub_sec->alloced = 1;
     }
 
   /* Build the stubs as directed by the stub hash table.  */
@@ -5097,7 +5093,7 @@ xcoff_create_ldrel (bfd *output_bfd, struct xcoff_final_link_info *flinfo,
       ldrel.l_symndx = h->ldindx;
     }
   else
-    ldrel.l_symndx = -(bfd_size_type) 1;
+    abort ();
 
   ldrel.l_rtype = (irel->r_size << 8) | irel->r_type;
   ldrel.l_rsecnm = output_section->target_index;
@@ -5441,7 +5437,7 @@ xcoff_link_input_bfd (struct xcoff_final_link_info *flinfo,
 		      pos = obj_sym_filepos (output_bfd);
 		      pos += flinfo->last_file_index * osymesz;
 		      if (bfd_seek (output_bfd, pos, SEEK_SET) != 0
-			  || (bfd_bwrite (outsym, osymesz, output_bfd)
+			  || (bfd_write (outsym, osymesz, output_bfd)
 			      != osymesz))
 			return false;
 		    }
@@ -5482,7 +5478,13 @@ xcoff_link_input_bfd (struct xcoff_final_link_info *flinfo,
 		   && isym.n_sclass != C_DECL
 		   && isym.n_scnum > 0)
 	    {
-	      isym.n_scnum = (*csectpp)->output_section->target_index;
+	      if (*sym_hash != NULL
+		  && ((*sym_hash)->root.type == bfd_link_hash_defined
+		      || (*sym_hash)->root.type == bfd_link_hash_defweak)
+		  && (*sym_hash)->root.u.def.section == bfd_abs_section_ptr)
+		isym.n_scnum = N_ABS;
+	      else
+		isym.n_scnum = (*csectpp)->output_section->target_index;
 	      isym.n_value += ((*csectpp)->output_section->vma
 			       + (*csectpp)->output_offset
 			       - (*csectpp)->vma);
@@ -5648,7 +5650,7 @@ xcoff_link_input_bfd (struct xcoff_final_link_info *flinfo,
 			  pos = enclosing->line_filepos;
 			  amt = linesz * enc_count;
 			  if (bfd_seek (input_bfd, pos, SEEK_SET) != 0
-			      || (bfd_bread (flinfo->linenos, amt, input_bfd)
+			      || (bfd_read (flinfo->linenos, amt, input_bfd)
 				  != amt))
 			    return false;
 			  oline = enclosing;
@@ -5680,8 +5682,8 @@ xcoff_link_input_bfd (struct xcoff_final_link_info *flinfo,
 			     + o->output_section->lineno_count * linesz);
 		      amt = linesz * *lineno_counts;
 		      if (bfd_seek (output_bfd, pos, SEEK_SET) != 0
-			  || bfd_bwrite (flinfo->linenos + linoff,
-					 amt, output_bfd) != amt)
+			  || bfd_write (flinfo->linenos + linoff, amt,
+					output_bfd) != amt)
 			return false;
 		      o->output_section->lineno_count += *lineno_counts;
 
@@ -5771,7 +5773,7 @@ xcoff_link_input_bfd (struct xcoff_final_link_info *flinfo,
       file_ptr pos = obj_sym_filepos (output_bfd) + syment_base * osymesz;
       bfd_size_type amt = outsym - flinfo->outsyms;
       if (bfd_seek (output_bfd, pos, SEEK_SET) != 0
-	  || bfd_bwrite (flinfo->outsyms, amt, output_bfd) != amt)
+	  || bfd_write (flinfo->outsyms, amt, output_bfd) != amt)
 	return false;
 
       BFD_ASSERT ((obj_raw_syment_count (output_bfd)
@@ -6216,7 +6218,7 @@ xcoff_find_tc0 (bfd *output_bfd, struct xcoff_final_link_info *flinfo)
   pos += obj_raw_syment_count (output_bfd) * bfd_coff_symesz (output_bfd);
   size = 2 * bfd_coff_symesz (output_bfd);
   if (bfd_seek (output_bfd, pos, SEEK_SET) != 0
-      || bfd_bwrite (flinfo->outsyms, size, output_bfd) != size)
+      || bfd_write (flinfo->outsyms, size, output_bfd) != size)
     return false;
   obj_raw_syment_count (output_bfd) += 2;
 
@@ -6520,7 +6522,7 @@ xcoff_write_global_symbol (struct bfd_hash_entry *bh, void * inf)
 		      * bfd_coff_symesz (output_bfd));
 	      amt = outsym - flinfo->outsyms;
 	      if (bfd_seek (output_bfd, pos, SEEK_SET) != 0
-		  || bfd_bwrite (flinfo->outsyms, amt, output_bfd) != amt)
+		  || bfd_write (flinfo->outsyms, amt, output_bfd) != amt)
 		return false;
 	      obj_raw_syment_count (output_bfd) +=
 		(outsym - flinfo->outsyms) / bfd_coff_symesz (output_bfd);
@@ -6780,7 +6782,7 @@ xcoff_write_global_symbol (struct bfd_hash_entry *bh, void * inf)
   pos += obj_raw_syment_count (output_bfd) * bfd_coff_symesz (output_bfd);
   amt = outsym - flinfo->outsyms;
   if (bfd_seek (output_bfd, pos, SEEK_SET) != 0
-      || bfd_bwrite (flinfo->outsyms, amt, output_bfd) != amt)
+      || bfd_write (flinfo->outsyms, amt, output_bfd) != amt)
     return false;
   obj_raw_syment_count (output_bfd) +=
     (outsym - flinfo->outsyms) / bfd_coff_symesz (output_bfd);
@@ -7076,6 +7078,8 @@ _bfd_xcoff_bfd_final_link (bfd *abfd, struct bfd_link_info *info)
 
 	  /* Reset the section indices after inserting the new
 	     sections.  */
+	  if (xcoff_data (abfd)->coff.section_by_target_index)
+	    htab_empty (xcoff_data (abfd)->coff.section_by_target_index);
 	  indx = 0;
 	  for (o = abfd->sections; o != NULL; o = o->next)
 	    {
@@ -7336,7 +7340,7 @@ _bfd_xcoff_bfd_final_link (bfd *abfd, struct bfd_link_info *info)
 			     (void *) flinfo.outsyms);
       pos = obj_sym_filepos (abfd) + flinfo.last_file_index * symesz;
       if (bfd_seek (abfd, pos, SEEK_SET) != 0
-	  || bfd_bwrite (flinfo.outsyms, symesz, abfd) != symesz)
+	  || bfd_write (flinfo.outsyms, symesz, abfd) != symesz)
 	goto error_return;
     }
 
@@ -7429,7 +7433,7 @@ _bfd_xcoff_bfd_final_link (bfd *abfd, struct bfd_link_info *info)
 
       rel_size = relsz * o->reloc_count;
       if (bfd_seek (abfd, o->rel_filepos, SEEK_SET) != 0
-	  || bfd_bwrite ((void *) external_relocs, rel_size, abfd) != rel_size)
+	  || bfd_write (external_relocs, rel_size, abfd) != rel_size)
 	goto error_return;
     }
 
@@ -7511,7 +7515,7 @@ _bfd_xcoff_bfd_final_link (bfd *abfd, struct bfd_link_info *info)
 	    _bfd_stringtab_size (flinfo.strtab) + STRING_SIZE_SIZE,
 	    strbuf);
   amt = STRING_SIZE_SIZE;
-  if (bfd_bwrite (strbuf, amt, abfd) != amt)
+  if (bfd_write (strbuf, amt, abfd) != amt)
     goto error_return;
   if (! _bfd_stringtab_emit (abfd, flinfo.strtab))
     goto error_return;

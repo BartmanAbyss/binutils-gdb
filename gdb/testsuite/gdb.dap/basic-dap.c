@@ -1,4 +1,4 @@
-/* Copyright 2022-2023 Free Software Foundation, Inc.
+/* Copyright 2022-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,10 +35,18 @@ address_breakpoint_here ()
 {
 }
 
-int main ()
+int
+line_breakpoint_here ()
 {
-  do_not_stop_here ();
+  do_not_stop_here ();		/* FIRST */
   function_breakpoint_here ();
   address_breakpoint_here ();
   return 0;			/* BREAK */
+}
+
+
+int
+main ()
+{
+  return line_breakpoint_here ();
 }

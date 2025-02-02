@@ -1,7 +1,6 @@
-
 /* Internal type definitions for GDB.
 
-   Copyright (C) 1992-2023 Free Software Foundation, Inc.
+   Copyright (C) 1992-2024 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support, using pieces from other GDB modules.
 
@@ -20,8 +19,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#if !defined (GDBTYPES_H)
-#define GDBTYPES_H 1
+#ifndef GDB_GDBTYPES_H
+#define GDB_GDBTYPES_H
 
 /* * \page gdbtypes GDB Types
 
@@ -44,18 +43,13 @@
    written such that they can be used as both rvalues and lvalues.
  */
 
-#include "hashtab.h"
 #include "gdbsupport/array-view.h"
-#include "gdbsupport/gdb-hashtab.h"
-#include "gdbsupport/gdb_optional.h"
-#include "gdbsupport/offset-type.h"
+#include <optional>
 #include "gdbsupport/enum-flags.h"
-#include "gdbsupport/underlying.h"
-#include "gdbsupport/print-utils.h"
-#include "gdbsupport/function-view.h"
 #include "dwarf2.h"
 #include "gdbsupport/gdb_obstack.h"
 #include "gmp-utils.h"
+#include "gdbsupport/unordered_map.h"
 
 /* Forward declarations for prototypes.  */
 struct field;
@@ -65,15 +59,6 @@ struct language_defn;
 struct dwarf2_per_cu_data;
 struct dwarf2_per_objfile;
 struct dwarf2_property_baton;
-
-/* Some macros for char-based bitfields.  */
-
-#define B_SET(a,x)	((a)[(x)>>3] |= (1 << ((x)&7)))
-#define B_CLR(a,x)	((a)[(x)>>3] &= ~(1 << ((x)&7)))
-#define B_TST(a,x)	((a)[(x)>>3] & (1 << ((x)&7)))
-#define B_TYPE		unsigned char
-#define	B_BYTES(x)	( 1 + ((x)>>3) )
-#define	B_CLRALL(a,x)	memset ((a), 0, B_BYTES(x))
 
 /* * Different kinds of data types are distinguished by the `code'
    field.  */
@@ -220,7 +205,7 @@ struct variant_part;
    control other variant parts as well.  This struct corresponds to
    DW_TAG_variant in DWARF.  */
 
-struct variant : allocate_on_obstack
+struct variant : allocate_on_obstack<variant>
 {
   /* * The discriminant ranges for this variant.  */
   gdb::array_view<discriminant_range> discriminants;
@@ -252,7 +237,7 @@ struct variant : allocate_on_obstack
    and holds an array of variants.  This struct corresponds to
    DW_TAG_variant_part in DWARF.  */
 
-struct variant_part : allocate_on_obstack
+struct variant_part : allocate_on_obstack<variant_part>
 {
   /* * The index of the discriminant field in the outer type.  This is
      an index into the type's array of fields.  If this is -1, there
@@ -280,6 +265,7 @@ enum dynamic_prop_kind
   PROP_VARIANT_PARTS, /* Variant parts.  */
   PROP_TYPE,	   /* Type.  */
   PROP_VARIABLE_NAME, /* Variable name.  */
+  PROP_OPTIMIZED_OUT, /* Optimized out.  */
 };
 
 union dynamic_prop_data
@@ -327,6 +313,18 @@ struct dynamic_prop
     m_kind = PROP_UNDEFINED;
   }
 
+  void set_optimized_out ()
+  {
+    m_kind = PROP_OPTIMIZED_OUT;
+  }
+
+  /* Return true if this property is "available", at least in theory
+     -- meaning it is neither undefined nor optimized out.  */
+  bool is_available () const
+  {
+    return m_kind != PROP_UNDEFINED && m_kind != PROP_OPTIMIZED_OUT;
+  }
+
   LONGEST const_val () const
   {
     gdb_assert (m_kind == PROP_CONST);
@@ -339,6 +337,11 @@ struct dynamic_prop
     m_kind = PROP_CONST;
     m_data.const_val = const_val;
   }
+
+  /* Return true if this property has a constant value, false
+     otherwise.  */
+  bool is_constant () const
+  { return m_kind == PROP_CONST; }
 
   const dwarf2_property_baton *baton () const
   {
@@ -537,6 +540,16 @@ union field_location
   struct dwarf2_locexpr_baton *dwarf_block;
 };
 
+/* Accessibility of a member.  */
+enum class accessibility : unsigned char
+{
+  /* It's important that this be 0 so that fields default to
+     public.  */
+  PUBLIC = 0,
+  PROTECTED = 1,
+  PRIVATE = 2,
+};
+
 struct field
 {
   struct type *type () const
@@ -557,6 +570,31 @@ struct field
   void set_name (const char *name)
   {
     m_name = name;
+  }
+
+  bool is_artificial () const
+  {
+    return m_artificial;
+  }
+
+  void set_is_artificial (bool is_artificial)
+  {
+    m_artificial = is_artificial;
+  }
+
+  unsigned int bitsize () const
+  {
+    return m_bitsize;
+  }
+
+  void set_bitsize (unsigned int bitsize)
+  {
+    m_bitsize = bitsize;
+  }
+
+  bool is_packed () const
+  {
+    return m_bitsize != 0;
   }
 
   /* Return true if this field is static; false if not.  */
@@ -638,6 +676,45 @@ struct field
     m_loc.dwarf_block = dwarf_block;
   }
 
+  /* Set the field's accessibility.  */
+  void set_accessibility (accessibility acc)
+  { m_accessibility = acc; }
+
+  /* Fetch the field's accessibility.  */
+  enum accessibility accessibility () const
+  { return m_accessibility; }
+
+  /* True if this field is 'public'.  */
+  bool is_public () const
+  { return m_accessibility == accessibility::PUBLIC; }
+
+  /* True if this field is 'private'.  */
+  bool is_private () const
+  { return m_accessibility == accessibility::PRIVATE; }
+
+  /* True if this field is 'protected'.  */
+  bool is_protected () const
+  { return m_accessibility == accessibility::PROTECTED; }
+
+  /* True if this field is 'virtual'.  */
+  bool is_virtual () const
+  { return m_virtual; }
+
+  /* Set the field's "virtual" flag.  */
+  void set_virtual ()
+  { m_virtual = true; }
+
+  /* True if this field is 'ignored'.  */
+  bool is_ignored () const
+  { return m_ignored; }
+
+  /* Set the field's "ignored" flag.  Note that the 'ignored' bit is
+     deprecated.  It was used by some unknown stabs generator, and has
+     been replaced by the optimized-out approach -- however, it
+     remains because the stabs reader was never updated.  */
+  void set_ignored ()
+  { m_ignored = true; }
+
   union field_location m_loc;
 
   /* * For a function or member type, this is 1 if the argument is
@@ -645,11 +722,19 @@ struct field
      to the user.  For TYPE_CODE_RANGE it is set if the specific
      bound is not defined.  */
 
-  unsigned int artificial : 1;
+  unsigned int m_artificial : 1;
+
+  /* Whether the field is 'virtual'.  */
+  bool m_virtual : 1;
+  /* Whether the field is 'ignored'.  */
+  bool m_ignored : 1;
 
   /* * Discriminant for union field_location.  */
 
   ENUM_BITFIELD(field_loc_kind) m_loc_kind : 3;
+
+  /* Accessibility of the field.  */
+  enum accessibility m_accessibility;
 
   /* * Size of this field, in bits, or zero if not packed.
      If non-zero in an array type, indicates the element size in
@@ -657,7 +742,7 @@ struct field
      For an unpacked field, the field's type's length
      says how many bytes the field occupies.  */
 
-  unsigned int bitsize : 28;
+  unsigned int m_bitsize;
 
   /* * In a struct or union type, type of this field.
      - In a function or member type, type of this argument.
@@ -680,6 +765,13 @@ struct range_bounds
       return this->stride.const_val () * 8;
     else
       return this->stride.const_val ();
+  }
+
+  /* Return true if either bounds is optimized out.  */
+  bool optimized_out () const
+  {
+    return (low.kind () == PROP_OPTIMIZED_OUT
+	    || high.kind () == PROP_OPTIMIZED_OUT);
   }
 
   /* * Low bound of range.  */
@@ -827,6 +919,10 @@ struct main_type
      union is being used for this type, if any.  */
 
   ENUM_BITFIELD(type_specific_kind) type_specific_field : 3;
+
+  /* The language for this type.  */
+
+  ENUM_BITFIELD(language) m_lang : LANGUAGE_BITS;
 
   /* * Number of fields described for this type.  This field appears
      at this location because it packs nicely here.  */
@@ -987,6 +1083,14 @@ struct type
     this->main_type->flds_bnds.fields = fields;
   }
 
+  /* Allocate the fields array of this type, with NFIELDS elements.  If INIT,
+     zero-initialize the allocated memory.  */
+  void alloc_fields (unsigned int nfields, bool init = true);
+
+  /* Allocate the fields array of this type, and copy the fields from SRC.  */
+  void copy_fields (struct type *src);
+  void copy_fields (std::vector<struct field> &src);
+
   type *index_type () const
   {
     return this->field (0).type ();
@@ -1045,10 +1149,16 @@ struct type
     this->main_type->flds_bnds.bounds = bounds;
   }
 
+  /* Return true if this type's bounds were optimized out.  */
+  bool bound_optimized_out () const
+  {
+    return bounds ()->optimized_out ();
+  }
+
   ULONGEST bit_stride () const
   {
-    if (this->code () == TYPE_CODE_ARRAY && this->field (0).bitsize != 0)
-      return this->field (0).bitsize;
+    if (this->code () == TYPE_CODE_ARRAY && this->field (0).bitsize () != 0)
+      return this->field (0).bitsize ();
     return this->bounds ()->bit_stride ();
   }
 
@@ -1391,6 +1501,19 @@ struct type
     return this->code () == TYPE_CODE_PTR || TYPE_IS_REFERENCE (this);
   }
 
+  /* Return true if this type is "string-like", according to its
+     defining language.  */
+  bool is_string_like ();
+
+  /* Return true if this type is "array-like".  This includes arrays,
+     but also some forms of structure type that are recognized as
+     representations of arrays by the type's language.  */
+  bool is_array_like ();
+
+  /* Return the language that this type came from.  */
+  enum language language () const
+  { return main_type->m_lang; }
+
   /* * Type that is a pointer to this type.
      NULL if no such pointer-to type is known yet.
      The debugger may add the address of such a type
@@ -1509,8 +1632,6 @@ struct fn_field
 
   unsigned int is_const:1;
   unsigned int is_volatile:1;
-  unsigned int is_private:1;
-  unsigned int is_protected:1;
   unsigned int is_artificial:1;
 
   /* * A stub method only has some fields valid (but they are enough
@@ -1531,9 +1652,8 @@ struct fn_field
 
   ENUM_BITFIELD (dwarf_defaulted_attribute) defaulted : 2;
 
-  /* * Unused.  */
-
-  unsigned int dummy:6;
+  /* Accessibility of the field.  */
+  enum accessibility accessibility;
 
   /* * Index into that baseclass's virtual function table, minus 2;
      else if static: VOFFSET_STATIC; else: 0.  */
@@ -1555,11 +1675,8 @@ struct decl_field
 
   struct type *type;
 
-  /* * True if this field was declared protected, false otherwise.  */
-  unsigned int is_protected : 1;
-
-  /* * True if this field was declared private, false otherwise.  */
-  unsigned int is_private : 1;
+  /* Accessibility of the field.  */
+  enum accessibility accessibility;
 };
 
 /* * C++ language-specific information for TYPE_CODE_STRUCT and
@@ -1616,42 +1733,6 @@ struct cplus_struct_type
     /* * The base class which defined the virtual function table pointer.  */
 
     struct type *vptr_basetype;
-
-    /* * For derived classes, the number of base classes is given by
-       n_baseclasses and virtual_field_bits is a bit vector containing
-       one bit per base class.  If the base class is virtual, the
-       corresponding bit will be set.
-       I.E, given:
-
-       class A{};
-       class B{};
-       class C : public B, public virtual A {};
-
-       B is a baseclass of C; A is a virtual baseclass for C.
-       This is a C++ 2.0 language feature.  */
-
-    B_TYPE *virtual_field_bits;
-
-    /* * For classes with private fields, the number of fields is
-       given by nfields and private_field_bits is a bit vector
-       containing one bit per field.
-
-       If the field is private, the corresponding bit will be set.  */
-
-    B_TYPE *private_field_bits;
-
-    /* * For classes with protected fields, the number of fields is
-       given by nfields and protected_field_bits is a bit vector
-       containing one bit per field.
-
-       If the field is private, the corresponding bit will be set.  */
-
-    B_TYPE *protected_field_bits;
-
-    /* * For classes with fields to be ignored, either this is
-       optimized out or this field has length 0.  */
-
-    B_TYPE *ignore_field_bits;
 
     /* * For classes, structures, and unions, a description of each
        field, which consists of an overloaded name, followed by the
@@ -1893,48 +1974,11 @@ extern void set_type_vptr_basetype (struct type *, struct type *);
 #define TYPE_BASECLASS_NAME(thistype,index) (thistype->field (index).name ())
 #define TYPE_BASECLASS_BITPOS(thistype,index) (thistype->field (index).loc_bitpos ())
 #define BASETYPE_VIA_PUBLIC(thistype, index) \
-  ((!TYPE_FIELD_PRIVATE(thistype, index)) && (!TYPE_FIELD_PROTECTED(thistype, index)))
+  ((thistype)->field (index).is_public ())
 #define TYPE_CPLUS_DYNAMIC(thistype) TYPE_CPLUS_SPECIFIC (thistype)->is_dynamic
 
 #define BASETYPE_VIA_VIRTUAL(thistype, index) \
-  (TYPE_CPLUS_SPECIFIC(thistype)->virtual_field_bits == NULL ? 0 \
-    : B_TST(TYPE_CPLUS_SPECIFIC(thistype)->virtual_field_bits, (index)))
-
-#define FIELD_ARTIFICIAL(thisfld) ((thisfld).artificial)
-#define FIELD_BITSIZE(thisfld) ((thisfld).bitsize)
-
-#define TYPE_FIELD_ARTIFICIAL(thistype, n) FIELD_ARTIFICIAL((thistype)->field (n))
-#define TYPE_FIELD_BITSIZE(thistype, n) FIELD_BITSIZE((thistype)->field (n))
-#define TYPE_FIELD_PACKED(thistype, n) (FIELD_BITSIZE((thistype)->field (n))!=0)
-
-#define TYPE_FIELD_PRIVATE_BITS(thistype) \
-  TYPE_CPLUS_SPECIFIC(thistype)->private_field_bits
-#define TYPE_FIELD_PROTECTED_BITS(thistype) \
-  TYPE_CPLUS_SPECIFIC(thistype)->protected_field_bits
-#define TYPE_FIELD_IGNORE_BITS(thistype) \
-  TYPE_CPLUS_SPECIFIC(thistype)->ignore_field_bits
-#define TYPE_FIELD_VIRTUAL_BITS(thistype) \
-  TYPE_CPLUS_SPECIFIC(thistype)->virtual_field_bits
-#define SET_TYPE_FIELD_PRIVATE(thistype, n) \
-  B_SET (TYPE_CPLUS_SPECIFIC(thistype)->private_field_bits, (n))
-#define SET_TYPE_FIELD_PROTECTED(thistype, n) \
-  B_SET (TYPE_CPLUS_SPECIFIC(thistype)->protected_field_bits, (n))
-#define SET_TYPE_FIELD_IGNORE(thistype, n) \
-  B_SET (TYPE_CPLUS_SPECIFIC(thistype)->ignore_field_bits, (n))
-#define SET_TYPE_FIELD_VIRTUAL(thistype, n) \
-  B_SET (TYPE_CPLUS_SPECIFIC(thistype)->virtual_field_bits, (n))
-#define TYPE_FIELD_PRIVATE(thistype, n) \
-  (TYPE_CPLUS_SPECIFIC(thistype)->private_field_bits == NULL ? 0 \
-    : B_TST(TYPE_CPLUS_SPECIFIC(thistype)->private_field_bits, (n)))
-#define TYPE_FIELD_PROTECTED(thistype, n) \
-  (TYPE_CPLUS_SPECIFIC(thistype)->protected_field_bits == NULL ? 0 \
-    : B_TST(TYPE_CPLUS_SPECIFIC(thistype)->protected_field_bits, (n)))
-#define TYPE_FIELD_IGNORE(thistype, n) \
-  (TYPE_CPLUS_SPECIFIC(thistype)->ignore_field_bits == NULL ? 0 \
-    : B_TST(TYPE_CPLUS_SPECIFIC(thistype)->ignore_field_bits, (n)))
-#define TYPE_FIELD_VIRTUAL(thistype, n) \
-  (TYPE_CPLUS_SPECIFIC(thistype)->virtual_field_bits == NULL ? 0 \
-    : B_TST(TYPE_CPLUS_SPECIFIC(thistype)->virtual_field_bits, (n)))
+  ((thistype)->field (index).is_virtual ())
 
 #define TYPE_FN_FIELDLISTS(thistype) TYPE_CPLUS_SPECIFIC(thistype)->fn_fieldlists
 #define TYPE_FN_FIELDLIST(thistype, n) TYPE_CPLUS_SPECIFIC(thistype)->fn_fieldlists[n]
@@ -1955,8 +1999,10 @@ extern void set_type_vptr_basetype (struct type *, struct type *);
 #define TYPE_FN_FIELD_ARGS(thisfn, n) (((thisfn)[n].type)->fields ())
 #define TYPE_FN_FIELD_CONST(thisfn, n) ((thisfn)[n].is_const)
 #define TYPE_FN_FIELD_VOLATILE(thisfn, n) ((thisfn)[n].is_volatile)
-#define TYPE_FN_FIELD_PRIVATE(thisfn, n) ((thisfn)[n].is_private)
-#define TYPE_FN_FIELD_PROTECTED(thisfn, n) ((thisfn)[n].is_protected)
+#define TYPE_FN_FIELD_PRIVATE(thisfn, n) \
+  ((thisfn)[n].accessibility == accessibility::PRIVATE)
+#define TYPE_FN_FIELD_PROTECTED(thisfn, n) \
+  ((thisfn)[n].accessibility == accessibility::PROTECTED)
 #define TYPE_FN_FIELD_ARTIFICIAL(thisfn, n) ((thisfn)[n].is_artificial)
 #define TYPE_FN_FIELD_STUB(thisfn, n) ((thisfn)[n].is_stub)
 #define TYPE_FN_FIELD_CONSTRUCTOR(thisfn, n) ((thisfn)[n].is_constructor)
@@ -1979,9 +2025,9 @@ extern void set_type_vptr_basetype (struct type *, struct type *);
 #define TYPE_TYPEDEF_FIELD_COUNT(thistype) \
   TYPE_CPLUS_SPECIFIC (thistype)->typedef_field_count
 #define TYPE_TYPEDEF_FIELD_PROTECTED(thistype, n) \
-  TYPE_TYPEDEF_FIELD (thistype, n).is_protected
+  (TYPE_TYPEDEF_FIELD (thistype, n).accessibility == accessibility::PROTECTED)
 #define TYPE_TYPEDEF_FIELD_PRIVATE(thistype, n)        \
-  TYPE_TYPEDEF_FIELD (thistype, n).is_private
+  (TYPE_TYPEDEF_FIELD (thistype, n).accessibility == accessibility::PRIVATE)
 
 #define TYPE_NESTED_TYPES_ARRAY(thistype)	\
   TYPE_CPLUS_SPECIFIC (thistype)->nested_types
@@ -1994,9 +2040,11 @@ extern void set_type_vptr_basetype (struct type *, struct type *);
 #define TYPE_NESTED_TYPES_COUNT(thistype) \
   TYPE_CPLUS_SPECIFIC (thistype)->nested_types_count
 #define TYPE_NESTED_TYPES_FIELD_PROTECTED(thistype, n) \
-  TYPE_NESTED_TYPES_FIELD (thistype, n).is_protected
+  (TYPE_NESTED_TYPES_FIELD (thistype, n).accessibility \
+   == accessibility::PROTECTED)
 #define TYPE_NESTED_TYPES_FIELD_PRIVATE(thistype, n)	\
-  TYPE_NESTED_TYPES_FIELD (thistype, n).is_private
+  (TYPE_NESTED_TYPES_FIELD (thistype, n).accessibility \
+   == accessibility::PRIVATE)
 
 #define TYPE_IS_OPAQUE(thistype) \
   ((((thistype)->code () == TYPE_CODE_STRUCT) \
@@ -2197,14 +2245,16 @@ class type_allocator
 public:
 
   /* Create new types on OBJFILE.  */
-  explicit type_allocator (objfile *objfile)
-    : m_is_objfile (true)
+  type_allocator (objfile *objfile, enum language lang)
+    : m_is_objfile (true),
+      m_lang (lang)
   {
     m_data.objfile = objfile;
   }
 
   /* Create new types on GDBARCH.  */
   explicit type_allocator (gdbarch *gdbarch)
+    : m_lang (language_minimal)
   {
     m_data.gdbarch = gdbarch;
   }
@@ -2224,6 +2274,7 @@ public:
      is passed, overwrite TYPE.  */
   explicit type_allocator (struct type *type,
 			   type_allocator_kind kind = SAME)
+    : m_lang (type->language ())
   {
     if (kind == SAME)
       {
@@ -2244,7 +2295,8 @@ public:
 
   /* Create new types on the same obstack as TYPE.  */
   explicit type_allocator (const struct type *type)
-    : m_is_objfile (type->is_objfile_owned ())
+    : m_is_objfile (type->is_objfile_owned ()),
+      m_lang (type->language ())
   {
     if (type->is_objfile_owned ())
       m_data.objfile = type->objfile_owner ();
@@ -2281,6 +2333,8 @@ private:
   /* True if this allocator uses the type field above, indicating that
      the "allocation" should be done in-place.  */
   bool m_smash = false;
+  /* The language for types created by this allocator.  */
+  enum language m_lang;
 };
 
 /* Allocate a TYPE_CODE_INT type structure using ALLOC.  BIT is the
@@ -2334,7 +2388,7 @@ extern struct type *init_pointer_type (type_allocator &alloc, int bit,
 				       const char *name,
 				       struct type *target_type);
 
-extern struct type *init_fixed_point_type (struct objfile *, int, int,
+extern struct type *init_fixed_point_type (type_allocator &, int, int,
 					   const char *);
 
 /* Helper functions to construct a struct or record type.  An
@@ -2424,7 +2478,7 @@ struct struct_elt
 
    TYPE can be either a struct or union, or a pointer or reference to
    a struct or union.  If it is a pointer or reference, its target
-   type is automatically used.  Thus '.' and '->' are interchangable,
+   type is automatically used.  Thus '.' and '->' are interchangeable,
    as specified for the definitions of the expression element types
    STRUCTOP_STRUCT and STRUCTOP_PTR.
 
@@ -2441,7 +2495,7 @@ extern struct_elt lookup_struct_elt (struct type *, const char *, int);
 
    TYPE can be either a struct or union, or a pointer or reference to
    a struct or union.  If it is a pointer or reference, its target
-   type is automatically used.  Thus '.' and '->' are interchangable,
+   type is automatically used.  Thus '.' and '->' are interchangeable,
    as specified for the definitions of the expression element types
    STRUCTOP_STRUCT and STRUCTOP_PTR.
 
@@ -2573,7 +2627,7 @@ extern struct type *resolve_dynamic_type
    See the caveat in 'resolve_dynamic_type' to understand a scenario
    where an apparently-resolved type may still be considered
    "dynamic".  */
-extern int is_dynamic_type (struct type *type);
+extern bool is_dynamic_type (struct type *type);
 
 extern struct type *check_typedef (struct type *);
 
@@ -2581,8 +2635,18 @@ extern void check_stub_method_group (struct type *, int);
 
 extern char *gdb_mangle_name (struct type *, int, int);
 
-extern struct type *lookup_typename (const struct language_defn *,
-				     const char *, const struct block *, int);
+/* Lookup a typedef or primitive type named NAME, visible in lexical block
+   BLOCK.  If NOERR is nonzero, return zero if NAME is not suitably
+   defined.
+
+   If this function finds a suitable type then check_typedef is called on
+   the type, this ensures that if the type being returned is a typedef
+   then the length of the type will be correct.  The original typedef will
+   still be returned, not the result of calling check_typedef.  */
+
+extern struct type *lookup_typename (const struct language_defn *language,
+				     const char *name,
+				     const struct block *block, int noerr);
 
 extern struct type *lookup_template_type (const char *, struct type *,
 					  const struct block *);
@@ -2599,11 +2663,11 @@ extern bool get_discrete_bounds (struct type *type, LONGEST *lowp,
 
 /* If TYPE's low bound is a known constant, return it, else return nullopt.  */
 
-extern gdb::optional<LONGEST> get_discrete_low_bound (struct type *type);
+extern std::optional<LONGEST> get_discrete_low_bound (struct type *type);
 
 /* If TYPE's high bound is a known constant, return it, else return nullopt.  */
 
-extern gdb::optional<LONGEST> get_discrete_high_bound (struct type *type);
+extern std::optional<LONGEST> get_discrete_high_bound (struct type *type);
 
 /* Assuming TYPE is a simple, non-empty array type, compute its upper
    and lower bound.  Save the low bound into LOW_BOUND if not NULL.
@@ -2615,7 +2679,7 @@ extern gdb::optional<LONGEST> get_discrete_high_bound (struct type *type);
 extern bool get_array_bounds (struct type *type, LONGEST *low_bound,
 			      LONGEST *high_bound);
 
-extern gdb::optional<LONGEST> discrete_position (struct type *type,
+extern std::optional<LONGEST> discrete_position (struct type *type,
 						 LONGEST val);
 
 extern int class_types_same_p (const struct type *, const struct type *);
@@ -2691,7 +2755,8 @@ extern int compare_badness (const badness_vector &,
 			    const badness_vector &);
 
 extern badness_vector rank_function (gdb::array_view<type *> parms,
-				     gdb::array_view<value *> args);
+				     gdb::array_view<value *> args,
+				     bool varargs = false);
 
 extern struct rank rank_one_type (struct type *, struct type *,
 				  struct value *);
@@ -2718,10 +2783,10 @@ extern int class_or_union_p (const struct type *);
 
 extern void maintenance_print_type (const char *, int);
 
-extern htab_up create_copied_types_hash ();
+using copied_types_hash_t = gdb::unordered_map<type *, type *>;
 
 extern struct type *copy_type_recursive (struct type *type,
-					 htab_t copied_types);
+					 copied_types_hash_t &copied_types);
 
 extern struct type *copy_type (const struct type *type);
 
@@ -2760,4 +2825,4 @@ extern unsigned int overload_debug;
 
 extern bool is_nocall_function (const struct type *type);
 
-#endif /* GDBTYPES_H */
+#endif /* GDB_GDBTYPES_H */

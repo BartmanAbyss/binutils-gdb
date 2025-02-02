@@ -1,6 +1,6 @@
 /* CLI colorizing
 
-   Copyright (C) 2018-2023 Free Software Foundation, Inc.
+   Copyright (C) 2018-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "cli/cli-cmds.h"
 #include "cli/cli-decode.h"
 #include "cli/cli-setshow.h"
@@ -42,20 +41,6 @@ bool source_styling = true;
    consulted when cli_styling is true.  */
 
 bool disassembler_styling = true;
-
-/* Name of colors; must correspond to ui_file_style::basic_color.  */
-static const char * const cli_colors[] = {
-  "none",
-  "black",
-  "red",
-  "green",
-  "yellow",
-  "blue",
-  "magenta",
-  "cyan",
-  "white",
-  nullptr
-};
 
 /* Names of intensities; must correspond to
    ui_file_style::intensity.  */
@@ -89,6 +74,10 @@ cli_style_option highlight_style ("highlight", ui_file_style::RED);
 /* See cli-style.h.  */
 
 cli_style_option title_style ("title", ui_file_style::BOLD);
+
+/* See cli-style.h.  */
+
+cli_style_option command_style ("command", ui_file_style::BOLD);
 
 /* See cli-style.h.  */
 
@@ -127,13 +116,17 @@ cli_style_option disasm_comment_style ("comment", ui_file_style::WHITE,
 
 /* See cli-style.h.  */
 
+cli_style_option line_number_style ("line-number", ui_file_style::DIM);
+
+/* See cli-style.h.  */
+
 cli_style_option::cli_style_option (const char *name,
 				    ui_file_style::basic_color fg,
 				    ui_file_style::intensity intensity)
   : changed (name),
     m_name (name),
-    m_foreground (cli_colors[fg - ui_file_style::NONE]),
-    m_background (cli_colors[0]),
+    m_foreground (fg),
+    m_background (ui_file_style::NONE),
     m_intensity (cli_intensities[intensity])
 {
 }
@@ -144,23 +137,10 @@ cli_style_option::cli_style_option (const char *name,
 				    ui_file_style::intensity i)
   : changed (name),
     m_name (name),
-    m_foreground (cli_colors[0]),
-    m_background (cli_colors[0]),
+    m_foreground (ui_file_style::NONE),
+    m_background (ui_file_style::NONE),
     m_intensity (cli_intensities[i])
 {
-}
-
-/* Return the color number corresponding to COLOR.  */
-
-static int
-color_number (const char *color)
-{
-  for (int i = 0; i < ARRAY_SIZE (cli_colors); ++i)
-    {
-      if (color == cli_colors[i])
-	return i - 1;
-    }
-  gdb_assert_not_reached ("color not found");
 }
 
 /* See cli-style.h.  */
@@ -168,8 +148,6 @@ color_number (const char *color)
 ui_file_style
 cli_style_option::style () const
 {
-  int fg = color_number (m_foreground);
-  int bg = color_number (m_background);
   ui_file_style::intensity intensity = ui_file_style::NORMAL;
 
   for (int i = 0; i < ARRAY_SIZE (cli_intensities); ++i)
@@ -181,7 +159,7 @@ cli_style_option::style () const
 	}
     }
 
-  return ui_file_style (fg, bg, intensity);
+  return ui_file_style (m_foreground, m_background, intensity);
 }
 
 /* See cli-style.h.  */
@@ -254,9 +232,8 @@ cli_style_option::add_setshow_commands (enum command_class theclass,
 
   set_show_commands commands;
 
-  commands = add_setshow_enum_cmd
-    ("foreground", theclass, cli_colors,
-     &m_foreground,
+  commands = add_setshow_color_cmd
+    ("foreground", theclass, &m_foreground,
      _("Set the foreground color for this property."),
      _("Show the foreground color for this property."),
      nullptr,
@@ -266,9 +243,8 @@ cli_style_option::add_setshow_commands (enum command_class theclass,
   commands.set->set_context (this);
   commands.show->set_context (this);
 
-  commands = add_setshow_enum_cmd
-    ("background", theclass, cli_colors,
-     &m_background,
+  commands = add_setshow_color_cmd
+    ("background", theclass, &m_background,
      _("Set the background color for this property."),
      _("Show the background color for this property."),
      nullptr,
@@ -436,6 +412,13 @@ readability."),
 				    &style_set_list, &style_show_list,
 				    false);
 
+  command_style.add_setshow_commands (no_class, _("\
+Command display styling.\n\
+Configure the colors and display intensity for GDB commands mentioned\n\
+in the output."),
+				      &style_set_list, &style_show_list,
+				      false);
+
   highlight_style.add_setshow_commands (no_class, _("\
 Highlight display styling.\n\
 Configure highlight colors and display intensity\n\
@@ -529,6 +512,14 @@ then this style has no effect."),
 					     &style_disasm_set_list,
 					     &style_disasm_show_list,
 					     false);
+
+  line_number_style.add_setshow_commands (no_class, _("\
+Line number display styling.\n\
+Configure colors and display intensity for line numbers\n\
+The \"line-number\" style is used when GDB displays line numbers\n\
+coming from your source code."),
+				       &style_set_list, &style_show_list,
+				       false);
 
   /* Setup 'disassembler address' style and 'disassembler symbol' style,
      these are aliases for 'address' and 'function' styles respectively.  */

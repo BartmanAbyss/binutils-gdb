@@ -1,5 +1,5 @@
 /* tc-m32r.c -- Assembler for the Renesas M32R.
-   Copyright (C) 1996-2023 Free Software Foundation, Inc.
+   Copyright (C) 1996-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -189,7 +189,7 @@ allow_m32rx (int on)
 
 #define M32R_SHORTOPTS "O::K:"
 
-const char *md_shortopts = M32R_SHORTOPTS;
+const char md_shortopts[] = M32R_SHORTOPTS;
 
 enum md_option_enums
 {
@@ -212,7 +212,7 @@ enum md_option_enums
   OPTION_NO_WARN_UNMATCHED
 };
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   {"m32r",  no_argument, NULL, OPTION_M32R},
   {"m32rx", no_argument, NULL, OPTION_M32RX},
@@ -243,7 +243,7 @@ struct option md_longopts[] =
   {NULL, no_argument, NULL, 0}
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 static void
 little (int on)
@@ -725,7 +725,6 @@ md_begin (void)
   scom_section.flags          = SEC_IS_COMMON | SEC_SMALL_DATA;
   scom_section.output_section = & scom_section;
   scom_section.symbol         = & scom_symbol;
-  scom_section.symbol_ptr_ptr = & scom_section.symbol;
   scom_symbol                 = * bfd_com_section_ptr->symbol;
   scom_symbol.name            = ".scommon";
   scom_symbol.section         = & scom_section;
@@ -1483,8 +1482,8 @@ m32r_scomm (int ignore ATTRIBUTE_UNUSED)
 
   /* Just after name is now '\0'.  */
   p = input_line_pointer;
-  *p = c;
-  SKIP_WHITESPACE_AFTER_NAME ();
+  restore_line_pointer (c);
+  SKIP_WHITESPACE ();
   if (*input_line_pointer != ',')
     {
       as_bad (_("Expected comma after symbol-name: rest of line ignored."));
@@ -2194,9 +2193,8 @@ tc_gen_reloc (asection * section, fixS * fixP)
   arelent * reloc;
   bfd_reloc_code_real_type code;
 
-  reloc = XNEW (arelent);
-
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixP->fx_addsy);
   reloc->address = fixP->fx_frag->fr_address + fixP->fx_where;
 
@@ -2269,7 +2267,7 @@ printf(" => %s",bfd_get_reloc_code_name(code));
 printf(" => %s\n",reloc->howto->name);
 #endif
 
- if (reloc->howto == (reloc_howto_type *) NULL)
+ if (reloc->howto == NULL)
     {
       as_bad_where (fixP->fx_file, fixP->fx_line,
             _("internal error: can't export reloc type %d (`%s')"),
@@ -2335,13 +2333,13 @@ m32r_parse_name (char const *name,
       /* If we have an absolute symbol or a
 	 reg, then we know its value now.  */
       segment = S_GET_SEGMENT (exprP->X_add_symbol);
-      if (mode != expr_defer && segment == absolute_section)
+      if (!expr_defer_p (mode) && segment == absolute_section)
 	{
 	  exprP->X_op = O_constant;
 	  exprP->X_add_number = S_GET_VALUE (exprP->X_add_symbol);
 	  exprP->X_add_symbol = NULL;
 	}
-      else if (mode != expr_defer && segment == reg_section)
+      else if (!expr_defer_p (mode) && segment == reg_section)
 	{
 	  exprP->X_op = O_register;
 	  exprP->X_add_number = S_GET_VALUE (exprP->X_add_symbol);

@@ -1,6 +1,6 @@
 /* Perform non-arithmetic operations on values, for GDB.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "event-top.h"
+#include "extract-store-integer.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "value.h"
@@ -27,7 +28,7 @@
 #include "target.h"
 #include "demangle.h"
 #include "language.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "regcache.h"
 #include "cp-abi.h"
 #include "block.h"
@@ -39,7 +40,6 @@
 #include "observable.h"
 #include "objfiles.h"
 #include "extension.h"
-#include "gdbtypes.h"
 #include "gdbsupport/byte-vector.h"
 #include "typeprint.h"
 
@@ -52,7 +52,7 @@ static struct value *search_struct_field (const char *, struct value *,
 					  struct type *, int);
 
 static struct value *search_struct_method (const char *, struct value **,
-					   gdb::optional<gdb::array_view<value *>>,
+					   std::optional<gdb::array_view<value *>>,
 					   LONGEST, int *, struct type *);
 
 static int find_oload_champ_namespace (gdb::array_view<value *> args,
@@ -118,15 +118,9 @@ find_function_in_inferior (const char *name, struct objfile **objf_p)
 {
   struct block_symbol sym;
 
-  sym = lookup_symbol (name, 0, VAR_DOMAIN, 0);
+  sym = lookup_symbol (name, nullptr, SEARCH_TYPE_DOMAIN, nullptr);
   if (sym.symbol != NULL)
     {
-      if (sym.symbol->aclass () != LOC_BLOCK)
-	{
-	  error (_("\"%s\" exists in this program but is not a function."),
-		 name);
-	}
-
       if (objf_p)
 	*objf_p = sym.symbol->objfile ();
 
@@ -134,8 +128,8 @@ find_function_in_inferior (const char *name, struct objfile **objf_p)
     }
   else
     {
-      struct bound_minimal_symbol msymbol = 
-	lookup_bound_minimal_symbol (name);
+      bound_minimal_symbol msymbol
+	= lookup_minimal_symbol (current_program_space, name);
 
       if (msymbol.minsym != NULL)
 	{
@@ -417,7 +411,8 @@ value_cast (struct type *type, struct value *arg2)
      In this case we want to preserve the LVAL of ARG2 as this allows the
      resulting value to be used in more places.  We do this by calling
      VALUE_COPY if appropriate.  */
-  if (types_deeply_equal (arg2->type (), type))
+  if (types_deeply_equal (make_unqualified_type (arg2->type ()),
+			  make_unqualified_type (type)))
     {
       /* If the types are exactly equal then we can avoid creating a new
 	 value completely.  */
@@ -603,15 +598,13 @@ value_cast (struct type *type, struct value *arg2)
 	 pointers and four byte addresses.  */
 
       int addr_bit = gdbarch_addr_bit (type2->arch ());
-      LONGEST longest = value_as_long (arg2);
+      gdb_mpz longest = value_as_mpz (arg2);
 
-      if (addr_bit < sizeof (LONGEST) * HOST_CHAR_BIT)
-	{
-	  if (longest >= ((LONGEST) 1 << addr_bit)
-	      || longest <= -((LONGEST) 1 << addr_bit))
-	    warning (_("value truncated"));
-	}
-      return value_from_longest (to_type, longest);
+      gdb_mpz addr_val = gdb_mpz (1) << addr_bit;
+      if (longest >= addr_val || longest <= -addr_val)
+	warning (_("value truncated"));
+
+      return value_from_mpz (to_type, longest);
     }
   else if (code1 == TYPE_CODE_METHODPTR && code2 == TYPE_CODE_INT
 	   && value_as_long (arg2) == 0)
@@ -702,10 +695,17 @@ value_reinterpret_cast (struct type *type, struct value *arg)
       || (dest_code == TYPE_CODE_MEMBERPTR && arg_code == TYPE_CODE_INT)
       || (dest_code == TYPE_CODE_INT && arg_code == TYPE_CODE_MEMBERPTR)
       || (dest_code == arg_code
-	  && (dest_code == TYPE_CODE_PTR
-	      || dest_code == TYPE_CODE_METHODPTR
+	  && (dest_code == TYPE_CODE_METHODPTR
 	      || dest_code == TYPE_CODE_MEMBERPTR)))
     result = value_cast (dest_type, arg);
+  else if (dest_code == TYPE_CODE_PTR && arg_code == TYPE_CODE_PTR)
+    {
+      /* Don't do any up- or downcasting.  */
+      result = arg->copy ();
+      result->deprecated_set_type (dest_type);
+      result->set_enclosing_type (dest_type);
+      result->set_pointed_to_offset (0);
+    }
   else
     error (_("Invalid reinterpret_cast"));
 
@@ -858,7 +858,7 @@ value_dynamic_cast (struct type *type, struct value *arg)
 
   /* If the classes are the same, just return the argument.  */
   if (class_types_same_p (class_type, arg_type))
-    return value_cast (type, arg);
+    return value_cast (type, original_arg);
 
   /* If the target type is a unique base class of the argument's
      declared type, just cast it.  */
@@ -890,14 +890,18 @@ value_dynamic_cast (struct type *type, struct value *arg)
       && resolved_type->target_type ()->code () == TYPE_CODE_VOID)
     return value_at_lazy (type, addr);
 
-  tem = value_at (type, addr);
-  type = tem->type ();
+  tem = value_at (resolved_type->target_type (), addr);
+  type = (is_ref
+	  ? lookup_reference_type (tem->type (), resolved_type->code ())
+	  : lookup_pointer_type (tem->type ()));
 
   /* The first dynamic check specified in 5.2.7.  */
   if (is_public_ancestor (arg_type, resolved_type->target_type ()))
     {
       if (class_types_same_p (rtti_type, resolved_type->target_type ()))
-	return tem;
+	return (is_ref
+		? value_ref (tem, resolved_type->code ())
+		: value_addr (tem));
       result = NULL;
       if (dynamic_cast_check_1 (resolved_type->target_type (),
 				tem->contents_for_printing ().data (),
@@ -980,7 +984,7 @@ value_one (struct type *type)
    e.g. in case the type is a variable length array.  */
 
 static struct value *
-get_value_at (struct type *type, CORE_ADDR addr, frame_info_ptr frame,
+get_value_at (struct type *type, CORE_ADDR addr, const frame_info_ptr &frame,
 	      int lazy)
 {
   struct value *val;
@@ -1033,7 +1037,7 @@ value_at_non_lval (struct type *type, CORE_ADDR addr)
    e.g. in case the type is a variable length array.  */
 
 struct value *
-value_at_lazy (struct type *type, CORE_ADDR addr, frame_info_ptr frame)
+value_at_lazy (struct type *type, CORE_ADDR addr, const frame_info_ptr &frame)
 {
   return get_value_at (type, addr, frame, 1);
 }
@@ -1191,26 +1195,13 @@ value_assign (struct value *toval, struct value *fromval)
 
     case lval_register:
       {
-	frame_info_ptr frame;
-	struct gdbarch *gdbarch;
-	int value_reg;
+	frame_info_ptr next_frame = frame_find_by_id (toval->next_frame_id ());
+	int value_reg = toval->regnum ();
 
-	/* Figure out which frame this register value is in.  The value
-	   holds the frame_id for the next frame, that is the frame this
-	   register value was unwound from.
-
-	   Below we will call put_frame_register_bytes which requires that
-	   we pass it the actual frame in which the register value is
-	   valid, i.e. not the next frame.  */
-	frame = frame_find_by_id (VALUE_NEXT_FRAME_ID (toval));
-	frame = get_prev_frame_always (frame);
-
-	value_reg = VALUE_REGNUM (toval);
-
-	if (!frame)
+	if (next_frame == nullptr)
 	  error (_("Value being assigned to is no longer active."));
 
-	gdbarch = get_frame_arch (frame);
+	gdbarch *gdbarch = frame_unwind_arch (next_frame);
 
 	if (toval->bitsize ())
 	  {
@@ -1230,9 +1221,9 @@ value_assign (struct value *toval, struct value *fromval)
 		       "don't fit in a %d bit word."),
 		     (int) sizeof (LONGEST) * HOST_CHAR_BIT);
 
-	    if (!get_frame_register_bytes (frame, value_reg, offset,
-					   {buffer, changed_len},
-					   &optim, &unavail))
+	    if (!get_frame_register_bytes (next_frame, value_reg, offset,
+					   { buffer, changed_len }, &optim,
+					   &unavail))
 	      {
 		if (optim)
 		  throw_error (OPTIMIZED_OUT_ERROR,
@@ -1245,28 +1236,29 @@ value_assign (struct value *toval, struct value *fromval)
 	    modify_field (type, buffer, value_as_long (fromval),
 			  toval->bitpos (), toval->bitsize ());
 
-	    put_frame_register_bytes (frame, value_reg, offset,
-				      {buffer, changed_len});
+	    put_frame_register_bytes (next_frame, value_reg, offset,
+				      { buffer, changed_len });
 	  }
 	else
 	  {
-	    if (gdbarch_convert_register_p (gdbarch, VALUE_REGNUM (toval),
-					    type))
+	    if (gdbarch_convert_register_p (gdbarch, toval->regnum (), type))
 	      {
 		/* If TOVAL is a special machine register requiring
 		   conversion of program values to a special raw
 		   format.  */
-		gdbarch_value_to_register (gdbarch, frame,
-					   VALUE_REGNUM (toval), type,
+		gdbarch_value_to_register (gdbarch,
+					   get_prev_frame_always (next_frame),
+					   toval->regnum (), type,
 					   fromval->contents ().data ());
 	      }
 	    else
-	      put_frame_register_bytes (frame, value_reg,
+	      put_frame_register_bytes (next_frame, value_reg,
 					toval->offset (),
 					fromval->contents ());
 	  }
 
-	gdb::observers::register_changed.notify (frame, value_reg);
+	gdb::observers::register_changed.notify
+	  (get_prev_frame_always (next_frame), value_reg);
 	break;
       }
 
@@ -1280,7 +1272,7 @@ value_assign (struct value *toval, struct value *fromval)
 	    break;
 	  }
       }
-      /* Fall through.  */
+      [[fallthrough]];
 
     default:
       error (_("Left operand of assignment is not an lvalue."));
@@ -1347,7 +1339,7 @@ value_assign (struct value *toval, struct value *fromval)
 
   /* We copy over the enclosing type and pointed-to offset from FROMVAL
      in the case of pointer types.  For object types, the enclosing type
-     and embedded offset must *not* be copied: the target object refered
+     and embedded offset must *not* be copied: the target object referred
      to by TOVAL retains its original dynamic type after assignment.  */
   if (type->code () == TYPE_CODE_PTR)
     {
@@ -1364,6 +1356,8 @@ struct value *
 value_repeat (struct value *arg1, int count)
 {
   struct value *val;
+
+  arg1 = coerce_ref (arg1);
 
   if (arg1->lval () != lval_memory)
     error (_("Only values in memory can be extended with '@'."));
@@ -1418,14 +1412,13 @@ address_of_variable (struct symbol *var, const struct block *b)
     {
     case lval_register:
       {
-	frame_info_ptr frame;
 	const char *regname;
 
-	frame = frame_find_by_id (VALUE_NEXT_FRAME_ID (val));
-	gdb_assert (frame);
+	frame_info_ptr frame = frame_find_by_id (val->next_frame_id ());
+	gdb_assert (frame != nullptr);
 
-	regname = gdbarch_register_name (get_frame_arch (frame),
-					 VALUE_REGNUM (val));
+	regname
+	  = gdbarch_register_name (get_frame_arch (frame), val->regnum ());
 	gdb_assert (regname != nullptr && *regname != '\0');
 
 	error (_("Address requested for identifier "
@@ -1493,7 +1486,7 @@ value_coerce_to_target (struct value *val)
    nonzero lower bound.
 
    FIXME: A previous comment here indicated that this routine should
-   be substracting the array's lower bound.  It's not clear to me that
+   be subtracting the array's lower bound.  It's not clear to me that
    this is correct.  Given an array subscripting operation, it would
    certainly work to do the adjustment here, essentially computing:
 
@@ -1684,17 +1677,16 @@ value_ind (struct value *arg1)
 /* Create a value for an array by allocating space in GDB, copying the
    data into that space, and then setting up an array value.
 
-   The array bounds are set from LOWBOUND and HIGHBOUND, and the array
-   is populated from the values passed in ELEMVEC.
+   The array bounds are set from LOWBOUND and the size of ELEMVEC, and
+   the array is populated from the values passed in ELEMVEC.
 
    The element type of the array is inherited from the type of the
    first element, and all elements must have the same size (though we
    don't currently enforce any restriction on their types).  */
 
 struct value *
-value_array (int lowbound, int highbound, struct value **elemvec)
+value_array (int lowbound, gdb::array_view<struct value *> elemvec)
 {
-  int nelem;
   int idx;
   ULONGEST typelength;
   struct value *val;
@@ -1703,28 +1695,23 @@ value_array (int lowbound, int highbound, struct value **elemvec)
   /* Validate that the bounds are reasonable and that each of the
      elements have the same size.  */
 
-  nelem = highbound - lowbound + 1;
-  if (nelem <= 0)
-    {
-      error (_("bad array bounds (%d, %d)"), lowbound, highbound);
-    }
   typelength = type_length_units (elemvec[0]->enclosing_type ());
-  for (idx = 1; idx < nelem; idx++)
+  for (struct value *other : elemvec.slice (1))
     {
-      if (type_length_units (elemvec[idx]->enclosing_type ())
-	  != typelength)
+      if (type_length_units (other->enclosing_type ()) != typelength)
 	{
 	  error (_("array elements must all be the same size"));
 	}
     }
 
   arraytype = lookup_array_range_type (elemvec[0]->enclosing_type (),
-				       lowbound, highbound);
+				       lowbound,
+				       lowbound + elemvec.size () - 1);
 
   if (!current_language->c_style_arrays_p ())
     {
       val = value::allocate (arraytype);
-      for (idx = 0; idx < nelem; idx++)
+      for (idx = 0; idx < elemvec.size (); idx++)
 	elemvec[idx]->contents_copy (val, idx * typelength, 0, typelength);
       return val;
     }
@@ -1733,44 +1720,43 @@ value_array (int lowbound, int highbound, struct value **elemvec)
      copying in each element.  */
 
   val = value::allocate (arraytype);
-  for (idx = 0; idx < nelem; idx++)
+  for (idx = 0; idx < elemvec.size (); idx++)
     elemvec[idx]->contents_copy (val, idx * typelength, 0, typelength);
   return val;
 }
 
+/* See value.h.  */
+
 struct value *
-value_cstring (const char *ptr, ssize_t len, struct type *char_type)
+value_cstring (const gdb_byte *ptr, ssize_t count, struct type *char_type)
 {
   struct value *val;
   int lowbound = current_language->string_lower_bound ();
-  ssize_t highbound = len / char_type->length ();
+  ssize_t highbound = count + 1;
   struct type *stringtype
     = lookup_array_range_type (char_type, lowbound, highbound + lowbound - 1);
 
   val = value::allocate (stringtype);
+  ssize_t len = count * char_type->length ();
   memcpy (val->contents_raw ().data (), ptr, len);
+  /* Write the terminating null-character.  */
+  memset (val->contents_raw ().data () + len, 0, char_type->length ());
   return val;
 }
 
-/* Create a value for a string constant by allocating space in the
-   inferior, copying the data into that space, and returning the
-   address with type TYPE_CODE_STRING.  PTR points to the string
-   constant data; LEN is number of characters.
-
-   Note that string types are like array of char types with a lower
-   bound of zero and an upper bound of LEN - 1.  Also note that the
-   string may contain embedded null bytes.  */
+/* See value.h.  */
 
 struct value *
-value_string (const char *ptr, ssize_t len, struct type *char_type)
+value_string (const gdb_byte *ptr, ssize_t count, struct type *char_type)
 {
   struct value *val;
   int lowbound = current_language->string_lower_bound ();
-  ssize_t highbound = len / char_type->length ();
+  ssize_t highbound = count;
   struct type *stringtype
     = lookup_string_range_type (char_type, lowbound, highbound + lowbound - 1);
 
   val = value::allocate (stringtype);
+  ssize_t len = count * char_type->length ();
   memcpy (val->contents_raw ().data (), ptr, len);
   return val;
 }
@@ -2203,7 +2189,7 @@ search_struct_field (const char *name, struct value *arg1,
 
 static struct value *
 search_struct_method (const char *name, struct value **arg1p,
-		      gdb::optional<gdb::array_view<value *>> args,
+		      std::optional<gdb::array_view<value *>> args,
 		      LONGEST offset, int *static_memfuncp,
 		      struct type *type)
 {
@@ -2339,7 +2325,7 @@ search_struct_method (const char *name, struct value **arg1p,
 
 struct value *
 value_struct_elt (struct value **argp,
-		  gdb::optional<gdb::array_view<value *>> args,
+		  std::optional<gdb::array_view<value *>> args,
 		  const char *name, int *static_memfuncp, const char *err)
 {
   struct type *t;
@@ -2827,7 +2813,7 @@ find_overload_match (gdb::array_view<value *> args,
 		   case where a xmethod is better than the source
 		   method, except when the xmethod match quality is
 		   non-standard.  */
-		/* FALLTHROUGH */
+		[[fallthrough]];
 	      case 1: /* Src method and ext method are incompatible.  */
 		/* If ext method match is not standard, then let source method
 		   win.  Otherwise, fallthrough to let xmethod win.  */
@@ -2839,7 +2825,7 @@ find_overload_match (gdb::array_view<value *> args,
 		    method_match_quality = src_method_match_quality;
 		    break;
 		  }
-		/* FALLTHROUGH */
+		[[fallthrough]];
 	      case 2: /* Ext method is champion.  */
 		method_oload_champ = ext_method_oload_champ;
 		method_badness = ext_method_badness;
@@ -3231,6 +3217,7 @@ find_oload_champ (gdb::array_view<value *> args,
     {
       int jj;
       int static_offset = 0;
+      bool varargs = false;
       std::vector<type *> parm_types;
 
       if (xmethods != NULL)
@@ -3243,9 +3230,13 @@ find_oload_champ (gdb::array_view<value *> args,
 	    {
 	      nparms = TYPE_FN_FIELD_TYPE (methods, ix)->num_fields ();
 	      static_offset = oload_method_static_p (methods, ix);
+	      varargs = TYPE_FN_FIELD_TYPE (methods, ix)->has_varargs ();
 	    }
 	  else
-	    nparms = functions[ix]->type ()->num_fields ();
+	    {
+	      nparms = functions[ix]->type ()->num_fields ();
+	      varargs = functions[ix]->type ()->has_varargs ();
+	    }
 
 	  parm_types.reserve (nparms);
 	  for (jj = 0; jj < nparms; jj++)
@@ -3260,7 +3251,8 @@ find_oload_champ (gdb::array_view<value *> args,
       /* Compare parameter types to supplied argument types.  Skip
 	 THIS for static methods.  */
       bv = rank_function (parm_types,
-			  args.slice (static_offset));
+			  args.slice (static_offset),
+			  varargs);
 
       if (overload_debug)
 	{
@@ -3471,7 +3463,7 @@ compare_parameters (struct type *t1, struct type *t2, int skip_artificial)
 {
   int start = 0;
 
-  if (t1->num_fields () > 0 && TYPE_FIELD_ARTIFICIAL (t1, 0))
+  if (t1->num_fields () > 0 && t1->field (0).is_artificial ())
     ++start;
 
   /* If skipping artificial fields, find the first real field
@@ -3479,7 +3471,7 @@ compare_parameters (struct type *t1, struct type *t2, int skip_artificial)
   if (skip_artificial)
     {
       while (start < t1->num_fields ()
-	     && TYPE_FIELD_ARTIFICIAL (t1, start))
+	     && t1->field (start).is_artificial ())
 	++start;
     }
 
@@ -3588,7 +3580,7 @@ value_struct_elt_for_reference (struct type *domain, int offset,
 		v = value_addr (v);
 	      return v;
 	    }
-	  if (TYPE_FIELD_PACKED (t, i))
+	  if (t->field (i).is_packed ())
 	    error (_("pointers to bitfield members not allowed"));
 
 	  if (want_address)
@@ -3720,7 +3712,7 @@ value_struct_elt_for_reference (struct type *domain, int offset,
 	    {
 	      struct symbol *s = 
 		lookup_symbol (TYPE_FN_FIELD_PHYSNAME (f, j),
-			       0, VAR_DOMAIN, 0).symbol;
+			       0, SEARCH_FUNCTION_DOMAIN, 0).symbol;
 
 	      if (s == NULL)
 		return NULL;
@@ -3751,7 +3743,7 @@ value_struct_elt_for_reference (struct type *domain, int offset,
 	    {
 	      struct symbol *s = 
 		lookup_symbol (TYPE_FN_FIELD_PHYSNAME (f, j),
-			       0, VAR_DOMAIN, 0).symbol;
+			       0, SEARCH_FUNCTION_DOMAIN, 0).symbol;
 
 	      if (s == NULL)
 		return NULL;
@@ -3831,7 +3823,7 @@ value_maybe_namespace_elt (const struct type *curtype,
   struct value *result;
 
   sym = cp_lookup_symbol_namespace (namespace_name, name,
-				    get_selected_block (0), VAR_DOMAIN);
+				    get_selected_block (0), SEARCH_VFT);
 
   if (sym.symbol == NULL)
     return NULL;

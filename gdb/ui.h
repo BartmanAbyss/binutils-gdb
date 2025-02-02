@@ -1,4 +1,4 @@
-/* Copyright (C) 2023 Free Software Foundation, Inc.
+/* Copyright (C) 2023-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -15,12 +15,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef UI_H
-#define UI_H
+#ifndef GDB_UI_H
+#define GDB_UI_H
 
 #include "gdbsupport/event-loop.h"
 #include "gdbsupport/intrusive_list.h"
 #include "gdbsupport/next-iterator.h"
+#include "gdbsupport/scoped_restore.h"
 
 struct interp;
 
@@ -135,6 +136,11 @@ struct ui
   /* See enum prompt_state's description.  */
   enum prompt_state prompt_state = PROMPT_NEEDED;
 
+  /* Whether the prompt should be kept blocked.  This is useful to not
+     unblock the prompt too early in the context of nested command
+     execution.  */
+  bool keep_prompt_blocked = false;
+
   /* The fields below that start with "m_" are "private".  They're
      meant to be accessed through wrapper macros that make them look
      like globals.  */
@@ -224,4 +230,4 @@ ui_range all_uis ()
   return ui_range (ui_list);
 }
 
-#endif /* UI_H */
+#endif /* GDB_UI_H */

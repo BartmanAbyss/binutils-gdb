@@ -1,6 +1,6 @@
 # gas target specific configuration file.  This is a -*- sh -*- file.
 #
-#   Copyright (C) 2012-2023 Free Software Foundation, Inc.
+#   Copyright (C) 2012-2025 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -66,6 +66,7 @@ case ${cpu} in
   ia64)			cpu_type=ia64 ;;
   ip2k)			cpu_type=ip2k endian=big ;;
   iq2000)		cpu_type=iq2000 endian=big ;;
+  kvx)			cpu_type=kvx endian=little ;;
   lm32)			cpu_type=lm32 ;;
   loongarch32)		cpu_type=loongarch arch=loongarch32;;
   loongarch64)		cpu_type=loongarch arch=loongarch64;;
@@ -133,6 +134,7 @@ case ${generic_target} in
     case ${cpu}-${os} in
       aarch64*-linux-gnu_ilp32)		arch=aarch64:32 ;;
     esac ;;
+  aarch64*-*-gnu*)			fmt=elf em=gnu ;;
   aarch64*-*-netbsd*)			fmt=elf em=nbsd;;
   aarch64*-*-nto*)			fmt=elf;;
   aarch64*-*-openbsd*)			fmt=elf;;
@@ -270,7 +272,6 @@ case ${generic_target} in
 
   ia64-*-elf*)				fmt=elf ;;
   ia64-*-*vms*)				fmt=elf em=vms ;;
-  ia64-*-aix*)				fmt=elf em=ia64aix ;;
   ia64-*-linux-*)			fmt=elf em=linux ;;
   ia64-*-hpux*)				fmt=elf em=hpux ;;
   ia64-*-netbsd*)			fmt=elf em=nbsd ;;
@@ -278,6 +279,9 @@ case ${generic_target} in
   ip2k-*-*)				fmt=elf ;;
 
   iq2000-*-elf)				fmt=elf ;;
+
+  kvx-*-*)				fmt=elf ;;
+  kvx-*-linux*)				fmt=elf em=linux ;;
 
   lm32-*-*)				fmt=elf ;;
 
@@ -342,8 +346,6 @@ case ${generic_target} in
 
   nds32-*-elf*)				fmt=elf ;;
   nds32-*-linux*)			fmt=elf em=linux ;;
-
-  nios2*-linux*)			fmt=elf em=linux ;;
 
   ns32k-pc532-mach*)			fmt=aout em=pc532mach ;;
   ns32k-pc532-ux*)			fmt=aout em=pc532mach ;;
@@ -447,7 +449,7 @@ case ${generic_target} in
 esac
 
 case ${cpu_type} in
-  aarch64 | alpha | arm | csky | i386 | ia64 | microblaze | mips | ns32k | \
+  aarch64 | alpha | arm | csky | i386 | ia64 | kvx | microblaze | mips | ns32k | \
   or1k | or1knd | pdp11 | ppc | riscv | sh | sparc | z80 | z8k | loongarch)
     bfd_gas=yes
     ;;

@@ -2,7 +2,7 @@
 
 # Architecture commands for GDB, the GNU debugger.
 #
-# Copyright (C) 1998-2023 Free Software Foundation, Inc.
+# Copyright (C) 1998-2024 Free Software Foundation, Inc.
 #
 # This file is part of GDB.
 #
@@ -50,6 +50,7 @@ def not_info(c: Component):
 
 with open("gdbarch-gen.h", "w") as f:
     print(copyright, file=f)
+    print(file=f)
     print(file=f)
     print(file=f)
     print("/* The following are pre-initialized by GDBARCH.  */", file=f)
@@ -118,8 +119,9 @@ with open("gdbarch-gen.h", "w") as f:
                 file=f,
             )
 
-with open("gdbarch.c", "w") as f:
+with open("gdbarch-gen.c", "w") as f:
     print(copyright, file=f)
+    print(file=f)
     print(file=f)
     print("/* Maintain the struct gdbarch object.  */", file=f)
     print(file=f)
@@ -231,7 +233,7 @@ with open("gdbarch.c", "w") as f:
                 print(f"  if (gdbarch->{c.name} == {init_value})", file=f)
                 print(f"""    log.puts ("\\n\\t{c.name}");""", file=f)
         else:
-            print(f"  /* Skip verify of {c.name}, invalid_p == 0 */", file=f)
+            print(f"  /* Skip verify of {c.name}, invalid_p == 0.  */", file=f)
     print("  if (!log.empty ())", file=f)
     print(
         """    internal_error (_("verify_gdbarch: the following are invalid ...%s"),""",
@@ -359,7 +361,7 @@ with open("gdbarch.c", "w") as f:
                 print("  /* Check variable changed from its initial value.  */", file=f)
                 print(f"  gdb_assert (gdbarch->{c.name} != {init_value});", file=f)
             else:
-                print(f"  /* Skip verify of {c.name}, invalid_p == 0 */", file=f)
+                print(f"  /* Skip verify of {c.name}, invalid_p == 0.  */", file=f)
             print("  if (gdbarch_debug >= 2)", file=f)
             print(
                 f"""    gdb_printf (gdb_stdlog, "gdbarch_{c.name} called\\n");""",

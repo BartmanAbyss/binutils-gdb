@@ -1,6 +1,6 @@
 ## Process this file with automake to generate Makefile.in
 #
-#   Copyright (C) 2012-2023 Free Software Foundation, Inc.
+#   Copyright (C) 2012-2025 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -140,7 +140,7 @@ CFILES = \
 	is-ranlib.c is-strip.c maybe-ranlib.c maybe-strip.c \
 	nm.c not-ranlib.c not-strip.c \
 	objcopy.c objdump.c prdbg.c \
-	od-elf32_avr.c od-macho.c od-xcoff.c \
+	od-elf32_avr.c od-macho.c od-pe.c od-xcoff.c \
 	rclex.c rdcoff.c rddbg.c readelf.c rename.c \
 	resbin.c rescoff.c resrc.c resres.c \
 	size.c srconv.c stabs.c strings.c sysdump.c \
@@ -214,7 +214,7 @@ check-DEJAGNU: site.exp
 		CC="$(CC)" CFLAGS="$(CFLAGS)" \
 		CC_FOR_BUILD="$(CC_FOR_BUILD)" \
 		CC_FOR_TARGET="$(CC_FOR_TARGET)" \
-		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET) -O0" \
+		CFLAGS_FOR_TARGET="$(filter-out -ffile-prefix-map=%,$(CFLAGS_FOR_TARGET)) -O0" \
 		$(RUNTESTFLAGS); \
 	else echo "WARNING: could not find \`runtest'" 1>&2; :;\
 	fi
@@ -270,7 +270,7 @@ strip_new_SOURCES = objcopy.c is-strip.c rename.c $(WRITE_DEBUG_SRCS) $(BULIBS)
 nm_new_SOURCES = nm.c demanguse.c $(BULIBS)
 
 objdump_SOURCES = objdump.c dwarf.c prdbg.c demanguse.c $(DEBUG_SRCS) $(BULIBS) $(ELFLIBS)
-EXTRA_objdump_SOURCES = od-xcoff.c
+EXTRA_objdump_SOURCES = od-elf32_avr.c od-macho.c od-xcoff.c od-pe.c
 objdump_LDADD = $(OBJDUMP_PRIVATE_OFILES) $(OPCODES) $(LIBCTF) $(BFDLIB) $(LIBIBERTY) $(LIBINTL) $(DEBUGINFOD_LIBS) $(LIBSFRAME)
 
 objdump.@OBJEXT@:objdump.c
@@ -328,13 +328,13 @@ sysinfo$(EXEEXT_FOR_BUILD): sysinfo.@OBJEXT@ syslex_wrap.@OBJEXT@
 	$(AM_V_CCLD)$(CC_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(LDFLAGS_FOR_BUILD) -o $@ sysinfo.@OBJEXT@ syslex_wrap.@OBJEXT@
 
 syslex_wrap.@OBJEXT@: syslex_wrap.c syslex.c sysinfo.h config.h
-	$(AM_V_CC)$(CC_FOR_BUILD) -c -I. -I$(srcdir) $(AM_CFLAGS_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(NO_WERROR) $(srcdir)/syslex_wrap.c
+	$(AM_V_CC)$(CC_FOR_BUILD) -c -I. -I$(srcdir) $(AM_CFLAGS_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(CPPFLAGS_FOR_BUILD) $(NO_WERROR) $(srcdir)/syslex_wrap.c
 
 sysinfo.@OBJEXT@: sysinfo.c
 	$(AM_V_CC)if [ -r sysinfo.c ]; then \
-	  $(CC_FOR_BUILD) -c -I. $(AM_CFLAGS_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(NO_WERROR) sysinfo.c ; \
+	  $(CC_FOR_BUILD) -c -I. $(AM_CFLAGS_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(CPPFLAGS_FOR_BUILD) $(NO_WERROR) sysinfo.c ; \
 	else \
-	  $(CC_FOR_BUILD) -c -I. $(AM_CFLAGS_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(NO_WERROR) $(srcdir)/sysinfo.c ; \
+	  $(CC_FOR_BUILD) -c -I. $(AM_CFLAGS_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(CPPFLAGS_FOR_BUILD) $(NO_WERROR) $(srcdir)/sysinfo.c ; \
 	fi
 
 bin2c$(EXEEXT_FOR_BUILD): bin2c.c

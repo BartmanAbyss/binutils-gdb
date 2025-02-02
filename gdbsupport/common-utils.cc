@@ -1,6 +1,6 @@
 /* Shared general utility routines for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "common-defs.h"
 #include "common-utils.h"
 #include "host-defs.h"
 #include "gdbsupport/gdb-safe-ctype.h"
@@ -220,6 +219,27 @@ extract_string_maybe_quoted (const char **arg)
     }
 
   *arg = p;
+  return result;
+}
+
+/* See gdbsupport/common-utils.h.  */
+
+std::string
+make_quoted_string (const char *str)
+{
+  gdb_assert (str != nullptr);
+
+  std::string result;
+
+  for (; *str != '\0'; ++str)
+    {
+      const char ch = *str;
+
+      if (strchr ("\"' \t\n", ch) != nullptr)
+       result.push_back ('\\');
+      result.push_back (ch);
+    }
+
   return result;
 }
 

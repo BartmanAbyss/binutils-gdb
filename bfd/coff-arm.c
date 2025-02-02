@@ -1,5 +1,5 @@
 /* BFD back-end for ARM COFF files.
-   Copyright (C) 1990-2023 Free Software Foundation, Inc.
+   Copyright (C) 1990-2025 Free Software Foundation, Inc.
    Written by Cygnus Support.
 
    This file is part of BFD, the Binary File Descriptor library.
@@ -1809,6 +1809,7 @@ bfd_arm_allocate_interworking_sections (struct bfd_link_info * info)
 
       s->size = globals->arm_glue_size;
       s->contents = foo;
+      s->alloced = 1;
     }
 
   if (globals->thumb_glue_size != 0)
@@ -1824,6 +1825,7 @@ bfd_arm_allocate_interworking_sections (struct bfd_link_info * info)
 
       s->size = globals->thumb_glue_size;
       s->contents = foo;
+      s->alloced = 1;
     }
 
   return true;

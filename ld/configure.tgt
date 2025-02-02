@@ -1,6 +1,6 @@
 # configure.tgt
 #
-#   Copyright (C) 2013-2023 Free Software Foundation, Inc.
+#   Copyright (C) 2013-2025 Free Software Foundation, Inc.
 #
 # This file is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -55,6 +55,7 @@ if test "${ac_default_ld_warn_rwx_segments}" = unset; then
     cris-*-* | crisv32-*-* | \
     hppa*-*-* | \
     mips*-*-* | \
+    microblaze*-*-* | \
     sparc*-*-* | \
     v850*-*-*)
       ac_default_ld_warn_rwx_segments=0
@@ -114,6 +115,11 @@ aarch64_be-*-linux*)	targ_emul=aarch64linuxb
 aarch64-*-linux*)	targ_emul=aarch64linux
 			targ_extra_libpath="aarch64linuxb aarch64linux32 aarch64linux32b armelfb_linux_eabi armelf_linux_eabi"
 			targ_extra_emuls="aarch64elf aarch64elf32 aarch64elf32b aarch64elfb armelf armelfb $targ_extra_libpath"
+			;;
+# This has to come after aarch64-*-linux* for aarch64-*-linux-gnu to hit the Linux branch.
+aarch64-*-gnu*)
+			targ_emul=aarch64gnu
+			targ_extra_emuls="aarch64elf aarch64elfb armelf armelfb"
 			;;
 aarch64-*-haiku*)	targ_emul=aarch64haiku
 			targ_extra_emuls="aarch64elf aarch64elf32 aarch64elf32b aarch64elfb armelf armelfb armelf_haiku $targ_extra_libpath"
@@ -252,7 +258,7 @@ arm*-*-haiku*)		targ_emul=armelf_haiku
 			targ_extra_emuls=armelf
 			;;
 avr-*-*)		targ_emul=avr2
-			targ_extra_emuls="avr1 avr25 avr3 avr31 avr35 avr4 avr5 avr51 avr6 avrxmega1 avrxmega2 avrxmega3 avrxmega4 avrxmega5 avrxmega6 avrxmega7 avrtiny"
+			targ_extra_emuls="avr1 avr25 avr3 avr31 avr35 avr4 avr5 avr51 avr6 avrxmega1 avrxmega2 avrxmega2_flmap avrxmega3 avrxmega4 avrxmega4_flmap avrxmega5 avrxmega6 avrxmega7 avrtiny"
 			;;
 bfin-*-elf | bfin-*-rtems*)
 			targ_emul=elf32bfin
@@ -473,6 +479,12 @@ lm32-*-*linux*)		targ_emul=elf32lm32fd
 lm32-*-*)		targ_emul=elf32lm32
 			targ_extra_emuls="elf32lm32fd"
 			;;
+kvx-*-linux*)		targ_emul=elf64kvx_linux
+			targ_extra_emuls="elf64kvx"
+			;;
+kvx-*-*)		targ_emul=elf64kvx;
+			targ_extra_emuls="elf64kvx_linux elf32kvx"
+			;;
 m32c-*-elf)
 			targ_emul=elf32m32c
 			;;
@@ -580,19 +592,21 @@ mips*-*-vxworks*)	targ_emul=elf32ebmipvxworks
 			;;
 mips*-*-windiss)	targ_emul=elf32mipswindiss
 			;;
-mips*64*el-*-linux-gnuabi64)	targ_emul=elf64ltsmip
-			targ_extra_emuls="elf32btsmipn32 elf32ltsmipn32 elf32ltsmip elf32btsmip elf64btsmip"
+mips64*el-*-linux-gnuabi64)
+			targ_emul=elf64ltsmip
+			targ_extra_emuls="elf64btsmip elf32ltsmipn32 elf32btsmipn32 elf32ltsmip elf32btsmip"
 			targ_extra_libpath=$targ_extra_emuls
 			;;
-mips*64*el-*-linux-*)	targ_emul=elf32ltsmipn32
+mips64*el-*-linux-*)	targ_emul=elf32ltsmipn32
 			targ_extra_emuls="elf32btsmipn32 elf32ltsmip elf32btsmip elf64ltsmip elf64btsmip"
 			targ_extra_libpath=$targ_extra_emuls
 			;;
-mips*64*-*-linux-gnuabi64)	targ_emul=elf64btsmip
-			targ_extra_emuls="elf32btsmipn32 elf32ltsmipn32 elf32btsmip elf32ltsmip elf64ltsmip"
+mips64*-*-linux-gnuabi64)
+			targ_emul=elf64btsmip
+			targ_extra_emuls="elf64ltsmip elf32btsmipn32 elf32ltsmipn32 elf32btsmip elf32ltsmip"
 			targ_extra_libpath=$targ_extra_emuls
 			;;
-mips*64*-*-linux-*)	targ_emul=elf32btsmipn32
+mips64*-*-linux-*)	targ_emul=elf32btsmipn32
 			targ_extra_emuls="elf32ltsmipn32 elf32btsmip elf32ltsmip elf64btsmip elf64ltsmip"
 			targ_extra_libpath=$targ_extra_emuls
 			;;
@@ -655,10 +669,6 @@ nds32*be-*-elf*)	targ_emul=nds32belf
 nds32*le-*-linux-gnu*)	targ_emul=nds32elf_linux
 			;;
 nds32*be-*-linux-gnu*)	targ_emul=nds32belf_linux
-			;;
-nios2*-*-linux*)	targ_emul=nios2linux
-			;;
-nios2*-*-*)		targ_emul=nios2elf
 			;;
 ns32k-pc532-mach* | ns32k-pc532-ux*)  targ_emul=pc532macha
 			targ_extra_ofiles=
@@ -1099,7 +1109,7 @@ case "${target}" in
   ;;
 
 *-*-freebsd*)
-  NATIVE_LIB_DIRS='/lib /usr/lib /usr/local/lib'
+  NATIVE_LIB_DIRS='/lib /usr/lib /usr/local/lib /usr/lib32'
   ;;
 
 hppa*64*-*-hpux11*)

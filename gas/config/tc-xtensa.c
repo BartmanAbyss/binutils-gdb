@@ -1,5 +1,5 @@
 /* tc-xtensa.c -- Assemble Xtensa instructions.
-   Copyright (C) 2003-2023 Free Software Foundation, Inc.
+   Copyright (C) 2003-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -735,9 +735,9 @@ enum
   option_abi_call0,
 };
 
-const char *md_shortopts = "";
+const char md_shortopts[] = "";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   { "density", no_argument, NULL, option_density },
   { "no-density", no_argument, NULL, option_no_density },
@@ -820,8 +820,7 @@ struct option md_longopts[] =
   { NULL, no_argument, NULL, 0 }
 };
 
-size_t md_longopts_size = sizeof md_longopts;
-
+const size_t md_longopts_size = sizeof md_longopts;
 
 int
 md_parse_option (int c, const char *arg)
@@ -1573,8 +1572,8 @@ xtensa_literal_pseudo (int ignored ATTRIBUTE_UNUSED)
   c = get_symbol_name (&base_name);
   /* Just after name is now '\0'.  */
   p = input_line_pointer;
-  *p = c;
-  SKIP_WHITESPACE_AFTER_NAME ();
+  restore_line_pointer (c);
+  SKIP_WHITESPACE ();
 
   if (*input_line_pointer != ',' && *input_line_pointer != ':')
     {
@@ -6159,8 +6158,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
 {
   arelent *reloc;
 
-  reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
 
@@ -6176,8 +6175,6 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
       as_bad_where (fixp->fx_file, fixp->fx_line,
 		    _("cannot represent `%s' relocation in object file"),
 		    bfd_get_reloc_code_name (fixp->fx_r_type));
-      free (reloc->sym_ptr_ptr);
-      free (reloc);
       return NULL;
     }
 
@@ -7869,8 +7866,9 @@ dump_litpools (void)
 		count++;
 	      litfrag = litfrag->fr_next;
 	    }
-	  printf("   %ld <%d:%d> (%d) [%d]: ",
-		 lpf->addr, lpf->priority, lpf->original_priority,
+	  printf("   %" PRId64 " <%d:%d> (%d) [%d]: ",
+		 (int64_t) lpf->addr,
+		 lpf->priority, lpf->original_priority,
 		 lpf->fragP->fr_line, count);
 	  /* dump_frag(lpf->fragP);  */
 	}
@@ -8978,16 +8976,15 @@ static void
 xtensa_add_config_info (void)
 {
   asection *info_sec;
-  char *data, *p;
+  char data[100];
+  char *p;
   int sz;
 
   info_sec = subseg_new (".xtensa.info", 0);
   bfd_set_section_flags (info_sec, SEC_HAS_CONTENTS | SEC_READONLY);
 
-  data = XNEWVEC (char, 100);
-  sprintf (data, "USE_ABSOLUTE_LITERALS=%d\nABI=%d\n",
-	   XSHAL_USE_ABSOLUTE_LITERALS, xtensa_abi_choice ());
-  sz = strlen (data) + 1;
+  sz = 1 + sprintf (data, "USE_ABSOLUTE_LITERALS=%d\nABI=%d\n",
+		    XSHAL_USE_ABSOLUTE_LITERALS, xtensa_abi_choice ());
 
   /* Add enough null terminators to pad to a word boundary.  */
   do
@@ -9014,8 +9011,6 @@ xtensa_add_config_info (void)
   /* Finally, write the descriptor.  */
   p = frag_more (sz);
   memcpy (p, data, sz);
-
-  free (data);
 }
 
 
@@ -11720,10 +11715,11 @@ cache_literal_section (bool use_abs_literals)
 	       | (linkonce ? (SEC_LINK_ONCE | SEC_LINK_DUPLICATES_DISCARD) : 0)
 	       | (use_abs_literals ? SEC_DATA : SEC_CODE));
 
-      elf_group_name (seg) = group_name;
-
       bfd_set_section_flags (seg, flags);
       bfd_set_section_alignment (seg, 2);
+
+      if (group_name)
+	elf_set_group_name (seg, group_name);
     }
 
   *pcached = seg;
@@ -11791,6 +11787,37 @@ get_frag_is_literal (const fragS *fragP)
   return fragP->tc_frag_data.is_literal;
 }
 
+static asection *
+xtensa_make_property_section (asection *sec, const char *base_name)
+{
+  char *prop_sec_name;
+  asection *prop_sec;
+
+  /* Check if the section already exists.  */
+  prop_sec_name = xtensa_property_section_name (sec, base_name,
+						elf32xtensa_separate_props);
+  prop_sec = bfd_get_section_by_name_if (sec->owner, prop_sec_name,
+					 match_section_group,
+					 (void *) elf_group_name (sec));
+  /* If not, create it.  */
+  if (! prop_sec)
+    {
+      flagword flags = (SEC_RELOC | SEC_HAS_CONTENTS | SEC_READONLY);
+      flags |= (bfd_section_flags (sec)
+		& (SEC_LINK_ONCE | SEC_LINK_DUPLICATES));
+
+      prop_sec = bfd_make_section_anyway_with_flags
+	(sec->owner, strdup (prop_sec_name), flags);
+      if (! prop_sec)
+	return 0;
+
+      if (elf_group_name (sec))
+	elf_set_group_name (prop_sec, elf_group_name (sec));
+    }
+
+  free (prop_sec_name);
+  return prop_sec;
+}
 
 static void
 xtensa_create_property_segments (frag_predicate property_function,

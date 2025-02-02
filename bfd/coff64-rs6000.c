@@ -1,5 +1,5 @@
 /* BFD back-end for IBM RS/6000 "XCOFF64" files.
-   Copyright (C) 2000-2023 Free Software Foundation, Inc.
+   Copyright (C) 2000-2025 Free Software Foundation, Inc.
    Written Clinton Popetz.
    Contributed by Cygnus Support.
 
@@ -1829,8 +1829,7 @@ xcoff64_slurp_armap (bfd *abfd)
     return false;
 
   /* The symbol table starts with a normal archive header.  */
-  if (bfd_bread (&hdr, (bfd_size_type) SIZEOF_AR_HDR_BIG, abfd)
-      != SIZEOF_AR_HDR_BIG)
+  if (bfd_read (&hdr, SIZEOF_AR_HDR_BIG, abfd) != SIZEOF_AR_HDR_BIG)
     return false;
 
   /* Skip the name (normally empty).  */
@@ -1901,13 +1900,12 @@ xcoff64_slurp_armap (bfd *abfd)
 static bfd_cleanup
 xcoff64_archive_p (bfd *abfd)
 {
-  struct artdata *tdata_hold;
   char magic[SXCOFFARMAG];
   /* This is the new format.  */
   struct xcoff_ar_file_hdr_big hdr;
   size_t amt = SXCOFFARMAG;
 
-  if (bfd_bread (magic, amt, abfd) != amt)
+  if (bfd_read (magic, amt, abfd) != amt)
     {
       if (bfd_get_error () != bfd_error_system_call)
 	bfd_set_error (bfd_error_wrong_format);
@@ -1925,37 +1923,29 @@ xcoff64_archive_p (bfd *abfd)
 
   /* Now read the rest of the file header.  */
   amt = SIZEOF_AR_FILE_HDR_BIG - SXCOFFARMAG;
-  if (bfd_bread (&hdr.memoff, amt, abfd) != amt)
+  if (bfd_read (&hdr.memoff, amt, abfd) != amt)
     {
       if (bfd_get_error () != bfd_error_system_call)
 	bfd_set_error (bfd_error_wrong_format);
       return NULL;
     }
 
-  tdata_hold = bfd_ardata (abfd);
+  amt = sizeof (struct artdata) + sizeof (struct xcoff_artdata);
+  bfd_ardata (abfd) = bfd_zalloc (abfd, amt);
+  if (bfd_ardata (abfd) == NULL)
+    return NULL;
 
-  amt = sizeof (struct artdata);
-  bfd_ardata (abfd) = (struct artdata *) bfd_zalloc (abfd, amt);
-  if (bfd_ardata (abfd) == (struct artdata *) NULL)
-    goto error_ret_restore;
+  bfd_ardata (abfd)->tdata = (void *) ((struct artdata *) bfd_ardata (abfd) + 1);
 
   bfd_ardata (abfd)->first_file_filepos = bfd_scan_vma (hdr.firstmemoff,
 							(const char **) NULL,
 							10);
 
-  amt = sizeof (struct xcoff_artdata);
-  bfd_ardata (abfd)->tdata = bfd_zalloc (abfd, amt);
-  if (bfd_ardata (abfd)->tdata == NULL)
-    goto error_ret;
-
   memcpy (&x_artdata (abfd)->u.bhdr, &hdr, SIZEOF_AR_FILE_HDR_BIG);
 
   if (! xcoff64_slurp_armap (abfd))
     {
-    error_ret:
       bfd_release (abfd, bfd_ardata (abfd));
-    error_ret_restore:
-      bfd_ardata (abfd) = tdata_hold;
       return NULL;
     }
 
@@ -2233,7 +2223,10 @@ xcoff64_generate_rtinit (bfd *abfd, const char *init, const char *fini,
 
   string_table = (bfd_byte *) bfd_zmalloc (string_table_size);
   if (string_table == NULL)
-    return false;
+    {
+      free (data_buffer);
+      return false;
+    }
 
   val = string_table_size;
   bfd_put_32 (abfd, val, &string_table[0]);
@@ -2384,20 +2377,23 @@ xcoff64_generate_rtinit (bfd *abfd, const char *init, const char *fini,
   filehdr.f_symptr = data_scnhdr.s_relptr + data_scnhdr.s_nreloc * RELSZ;
 
   bfd_coff_swap_filehdr_out (abfd, &filehdr, filehdr_ext);
-  bfd_bwrite (filehdr_ext, FILHSZ, abfd);
   bfd_coff_swap_scnhdr_out (abfd, &text_scnhdr, &scnhdr_ext[SCNHSZ * 0]);
   bfd_coff_swap_scnhdr_out (abfd, &data_scnhdr, &scnhdr_ext[SCNHSZ * 1]);
   bfd_coff_swap_scnhdr_out (abfd, &bss_scnhdr, &scnhdr_ext[SCNHSZ * 2]);
-  bfd_bwrite (scnhdr_ext, 3 * SCNHSZ, abfd);
-  bfd_bwrite (data_buffer, data_buffer_size, abfd);
-  bfd_bwrite (reloc_ext, data_scnhdr.s_nreloc * RELSZ, abfd);
-  bfd_bwrite (syment_ext, filehdr.f_nsyms * SYMESZ, abfd);
-  bfd_bwrite (string_table, string_table_size, abfd);
+  bool ret = true;
+  if (bfd_write (filehdr_ext, FILHSZ, abfd) != FILHSZ
+      || bfd_write (scnhdr_ext, 3 * SCNHSZ, abfd) != 3 * SCNHSZ
+      || bfd_write (data_buffer, data_buffer_size, abfd) != data_buffer_size
+      || (bfd_write (reloc_ext, data_scnhdr.s_nreloc * RELSZ, abfd)
+	  != data_scnhdr.s_nreloc * RELSZ)
+      || (bfd_write (syment_ext, filehdr.f_nsyms * SYMESZ, abfd)
+	  != (bfd_size_type) filehdr.f_nsyms * SYMESZ)
+      || bfd_write (string_table, string_table_size, abfd) != string_table_size)
+    ret = false;
 
+  free (string_table);
   free (data_buffer);
-  data_buffer = NULL;
-
-  return true;
+  return ret;
 }
 
 /* The typical dynamic reloc.  */
@@ -2618,11 +2614,10 @@ const bfd_target rs6000_xcoff64_vec =
     },
 
     /* Generic */
-    _bfd_coff_close_and_cleanup,
-    _bfd_bool_bfd_true,
+    coff_close_and_cleanup,
+    coff_bfd_free_cached_info,
     coff_new_section_hook,
     _bfd_generic_get_section_contents,
-    _bfd_generic_get_section_contents_in_window,
 
     /* Copy */
     _bfd_xcoff_copy_private_bfd_data,
@@ -2891,11 +2886,10 @@ const bfd_target rs6000_xcoff64_aix_vec =
     },
 
     /* Generic */
-    _bfd_coff_close_and_cleanup,
-    _bfd_bool_bfd_true,
+    coff_close_and_cleanup,
+    coff_bfd_free_cached_info,
     coff_new_section_hook,
     _bfd_generic_get_section_contents,
-    _bfd_generic_get_section_contents_in_window,
 
     /* Copy */
     _bfd_xcoff_copy_private_bfd_data,

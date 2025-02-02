@@ -1,6 +1,6 @@
 /* Print in infix form a struct expression.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,14 +17,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "expression.h"
 #include "value.h"
 #include "language.h"
 #include "parser-defs.h"
-#include "user-regs.h"		/* For user_reg_map_regnum_to_name.  */
+#include "user-regs.h"
 #include "target.h"
 #include "block.h"
 #include "objfiles.h"

@@ -1,6 +1,6 @@
 /* Renesas M32C target-dependent code for GDB, the GNU debugger.
 
-   Copyright (C) 2004-2023 Free Software Foundation, Inc.
+   Copyright (C) 2004-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "sim/sim-m32c.h"
 #include "gdbtypes.h"
 #include "regcache.h"
@@ -977,7 +977,8 @@ make_regs (struct gdbarch *arch)
   set_gdbarch_register_name (arch, m32c_register_name);
   set_gdbarch_register_type (arch, m32c_register_type);
   set_gdbarch_pseudo_register_read (arch, m32c_pseudo_register_read);
-  set_gdbarch_pseudo_register_write (arch, m32c_pseudo_register_write);
+  set_gdbarch_deprecated_pseudo_register_write (arch,
+						m32c_pseudo_register_write);
   set_gdbarch_register_sim_regno (arch, m32c_register_sim_regno);
   set_gdbarch_stab_reg_to_regnum (arch, m32c_debug_info_reg_to_regnum);
   set_gdbarch_dwarf2_reg_to_regnum (arch, m32c_debug_info_reg_to_regnum);
@@ -1853,7 +1854,7 @@ m32c_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR ip)
 /* Stack unwinding.  */
 
 static struct m32c_prologue *
-m32c_analyze_frame_prologue (frame_info_ptr this_frame,
+m32c_analyze_frame_prologue (const frame_info_ptr &this_frame,
 			     void **this_prologue_cache)
 {
   if (! *this_prologue_cache)
@@ -1877,7 +1878,7 @@ m32c_analyze_frame_prologue (frame_info_ptr this_frame,
 
 
 static CORE_ADDR
-m32c_frame_base (frame_info_ptr this_frame,
+m32c_frame_base (const frame_info_ptr &this_frame,
 		void **this_prologue_cache)
 {
   struct m32c_prologue *p
@@ -1917,7 +1918,7 @@ m32c_frame_base (frame_info_ptr this_frame,
 
 
 static void
-m32c_this_id (frame_info_ptr this_frame,
+m32c_this_id (const frame_info_ptr &this_frame,
 	      void **this_prologue_cache,
 	      struct frame_id *this_id)
 {
@@ -1930,7 +1931,7 @@ m32c_this_id (frame_info_ptr this_frame,
 
 
 static struct value *
-m32c_prev_register (frame_info_ptr this_frame,
+m32c_prev_register (const frame_info_ptr &this_frame,
 		    void **this_prologue_cache, int regnum)
 {
   gdbarch *arch = get_frame_arch (this_frame);
@@ -1954,15 +1955,16 @@ m32c_prev_register (frame_info_ptr this_frame,
 }
 
 
-static const struct frame_unwind m32c_unwind = {
+static const struct frame_unwind_legacy m32c_unwind (
   "m32c prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   m32c_this_id,
   m32c_prev_register,
   NULL,
   default_frame_sniffer
-};
+);
 
 
 /* Inferior calls.  */
@@ -2211,8 +2213,8 @@ m32c_return_value (struct gdbarch *gdbarch,
 	  /* Everything else is passed in mem0, using as many bytes as
 	     needed.  This is not what the Renesas tools do, but it's
 	     what GCC does at the moment.  */
-	  struct bound_minimal_symbol mem0
-	    = lookup_minimal_symbol ("mem0", NULL, NULL);
+	  bound_minimal_symbol mem0
+	    = lookup_minimal_symbol (current_program_space, "mem0");
 
 	  if (! mem0.minsym)
 	    error (_("The return value is stored in memory at 'mem0', "
@@ -2243,8 +2245,8 @@ m32c_return_value (struct gdbarch *gdbarch,
 	  /* Everything else is passed in mem0, using as many bytes as
 	     needed.  This is not what the Renesas tools do, but it's
 	     what GCC does at the moment.  */
-	  struct bound_minimal_symbol mem0
-	    = lookup_minimal_symbol ("mem0", NULL, NULL);
+	  bound_minimal_symbol mem0
+	    = lookup_minimal_symbol (current_program_space, "mem0");
 
 	  if (! mem0.minsym)
 	    error (_("The return value is stored in memory at 'mem0', "
@@ -2308,7 +2310,7 @@ m32c_return_value (struct gdbarch *gdbarch,
    code sequence seems more fragile.  */
 
 static CORE_ADDR
-m32c_skip_trampoline_code (frame_info_ptr frame, CORE_ADDR stop_pc)
+m32c_skip_trampoline_code (const frame_info_ptr &frame, CORE_ADDR stop_pc)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
   m32c_gdbarch_tdep *tdep = gdbarch_tdep<m32c_gdbarch_tdep> (gdbarch);
@@ -2420,11 +2422,9 @@ m32c_m16c_address_to_pointer (struct gdbarch *gdbarch,
     {
       const char *func_name;
       char *tramp_name;
-      struct bound_minimal_symbol tramp_msym;
 
       /* Try to find a linker symbol at this address.  */
-      struct bound_minimal_symbol func_msym
-	= lookup_minimal_symbol_by_pc (addr);
+      bound_minimal_symbol func_msym = lookup_minimal_symbol_by_pc (addr);
 
       if (! func_msym.minsym)
 	error (_("Cannot convert code address %s to function pointer:\n"
@@ -2437,7 +2437,8 @@ m32c_m16c_address_to_pointer (struct gdbarch *gdbarch,
       strcat (tramp_name, ".plt");
 
       /* Try to find a linker symbol for the trampoline.  */
-      tramp_msym = lookup_minimal_symbol (tramp_name, NULL, NULL);
+      bound_minimal_symbol tramp_msym
+	= lookup_minimal_symbol (current_program_space, tramp_name);
 
       /* We've either got another copy of the name now, or don't need
 	 the name any more.  */
@@ -2501,7 +2502,7 @@ m32c_m16c_pointer_to_address (struct gdbarch *gdbarch,
     {
       /* See if there is a minimal symbol at that address whose name is
 	 "NAME.plt".  */
-      struct bound_minimal_symbol ptr_msym = lookup_minimal_symbol_by_pc (ptr);
+      bound_minimal_symbol ptr_msym = lookup_minimal_symbol_by_pc (ptr);
 
       if (ptr_msym.minsym)
 	{
@@ -2511,7 +2512,6 @@ m32c_m16c_pointer_to_address (struct gdbarch *gdbarch,
 	  if (len > 4
 	      && strcmp (ptr_msym_name + len - 4, ".plt") == 0)
 	    {
-	      struct bound_minimal_symbol func_msym;
 	      /* We have a .plt symbol; try to find the symbol for the
 		 corresponding function.
 
@@ -2521,8 +2521,8 @@ m32c_m16c_pointer_to_address (struct gdbarch *gdbarch,
 	      char *func_name = (char *) xmalloc (len - 4 + 1);
 	      memcpy (func_name, ptr_msym_name, len - 4);
 	      func_name[len - 4] = '\0';
-	      func_msym
-		= lookup_minimal_symbol (func_name, NULL, NULL);
+	      bound_minimal_symbol func_msym
+		= lookup_minimal_symbol (current_program_space, func_name);
 
 	      /* If we do have such a symbol, return its value as the
 		 function's true address.  */
@@ -2556,7 +2556,7 @@ m32c_virtual_frame_pointer (struct gdbarch *gdbarch, CORE_ADDR pc,
   CORE_ADDR func_addr, func_end;
   struct m32c_prologue p;
 
-  struct regcache *regcache = get_current_regcache ();
+  regcache *regcache = get_thread_regcache (inferior_thread ());
   m32c_gdbarch_tdep *tdep = gdbarch_tdep<m32c_gdbarch_tdep> (gdbarch);
   
   if (!find_pc_partial_function (pc, &name, &func_addr, &func_end))

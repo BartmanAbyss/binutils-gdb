@@ -1,4 +1,4 @@
-/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2025 Free Software Foundation, Inc.
    Contributed by Oracle.
 
    This file is part of GNU Binutils.
@@ -29,8 +29,6 @@
 #define SUNPERF_VERNUM_LEAST    12
 
 #include "Emsgnum.h" /* for COL_ERROR_*, etc. symbols */
-
-#define SP_REMOTE_PROTOCOL_VERSION "12.4.1"
 
 #define SP_GROUP_HEADER         "#analyzer experiment group"
 

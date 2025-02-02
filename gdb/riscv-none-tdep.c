@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2020-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
 
 /* This file contain code that is specific for bare-metal RISC-V targets.  */
 
-#include "defs.h"
 #include "arch-utils.h"
 #include "regcache.h"
 #include "riscv-tdep.h"

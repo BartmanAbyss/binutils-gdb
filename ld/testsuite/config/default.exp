@@ -1,5 +1,5 @@
 # Basic expect script for LD Regression Tests
-#   Copyright (C) 1993-2023 Free Software Foundation, Inc.
+#   Copyright (C) 1993-2025 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -20,6 +20,23 @@
 #
 # Written by Jeffrey Wheat (cassidy@cygnus.com)
 #
+
+if [info exists env(LD_UNDER_TEST)] {
+    # LD_UNDER_TEST must be an absolute full path.
+    if {[file pathtype $env(LD_UNDER_TEST)] ne "absolute"} {
+	perror "**************************************************"
+	perror "Environment variable LD_UNDER_TEST ($env(LD_UNDER_TEST)) isn't an absolute full path."
+	perror "**************************************************"
+	exit 1
+    } elseif {![file exists $env(LD_UNDER_TEST)]} {
+	perror "**************************************************"
+	perror "Environment variable LD_UNDER_TEST ($env(LD_UNDER_TEST)) doesn't exist."
+	perror "**************************************************"
+	exit 1
+    }
+    set ld "$env(LD_UNDER_TEST)"
+    set LD "$ld"
+}
 
 if ![info exists ld] then {
     set ld [findfile $base_dir/ld-new $base_dir/ld-new [transform ld]]
@@ -64,12 +81,17 @@ remote_exec host "mkdir -p tmpdir"
 if {[info exists ld_testsuite_bindir]} {
     set gcc_B_opt "-B$ld_testsuite_bindir/"
 } else {
-    if {![file isdirectory tmpdir/ld]} then {
-	catch "exec mkdir tmpdir/ld" status
+    # Delete tmpdir/ld first to remove tmpdir/ld/ld created by the
+    # previous LD_UNDER_TEST runs.
+    file delete -force tmpdir/ld
+    catch "exec mkdir tmpdir/ld" status
+    if [info exists env(LD_UNDER_TEST)] {
+	catch "exec ln -s $env(LD_UNDER_TEST) tmpdir/ld/ld" status
+    } else {
 	catch "exec ln -s ../../ld-new tmpdir/ld/ld" status
-	catch "exec ln -s ld tmpdir/ld/collect-ld" status
-	catch "exec ln -s ../../../gas/as-new tmpdir/ld/as" status
     }
+    catch "exec ln -s ld tmpdir/ld/collect-ld" status
+    catch "exec ln -s ../../../gas/as-new tmpdir/ld/as" status
     set gcc_B_opt "-B[pwd]/tmpdir/ld/"
 }
 
@@ -360,6 +382,14 @@ if { ![info exists NO_DT_RELR_CC_LDFLAGS] } then {
     }
 }
 
+if { ![info exists NO_MEMORY_SEAL_LDFLAGS] } then {
+    if { [check_memory_seal_support] } then {
+	set NO_MEMORY_SEAL_LDFLAGS "-z nomemory-seal"
+    } else {
+	set NO_MEMORY_SEAL_LDFLAGS {}
+    }
+}
+
 # Set LD_CLASS to "64bit" for a 64-bit *host* linker.
 if { ![info exists LD_CLASS] } then {
     set REAL_LD [findfile $base_dir/.libs/ld-new .libs/ld-new $LD [transform ld]]
@@ -392,7 +422,7 @@ proc compiler_supports { flag args } {
 	}
 	close $f
 	set rfn [remote_download host $fn]
-	set avail [run_host_cmd_yesno "$CC_FOR_TARGET" "$flags $flag $rfn -o $rfno"]
+	set avail [run_host_noleak "$CC_FOR_TARGET" "$flags $flag $rfn -o $rfno"]
 	remote_file host delete $rfno
 	remote_file host delete $rfn
 	file delete $fn
@@ -459,6 +489,9 @@ if { ![info exists NOSANITIZE_CFLAGS] } then {
     }
 }
 
+append CFLAGS_FOR_TARGET " $NOSANITIZE_CFLAGS"
+append CXXFLAGS_FOR_TARGET " $NOSANITIZE_CFLAGS"
+
 if { ![info exists NOLTO_CFLAGS] } then {
     set NOLTO_CFLAGS ""
     if [compiler_supports "-fno-lto"] {
@@ -494,9 +527,9 @@ if { [check_compiler_available] } {
 	cyglto_plugin-0.dll
     }
     foreach plug $plugin_names {
-	set plug_so [run_host_cmd $CC_FOR_TARGET "--print-prog-name $plug"]
+	set plug_so [string trim [run_host_cmd $CC_FOR_TARGET "--print-prog-name $plug"]]
 	if { $plug_so eq $plug } then {
-	    set plug_so [run_host_cmd $CC_FOR_TARGET "--print-file-name $plug"]
+	    set plug_so [string trim [run_host_cmd $CC_FOR_TARGET "--print-file-name $plug"]]
 	}
 	if { $plug_so ne $plug } then {
 	    set plug_opt "--plugin $plug_so"

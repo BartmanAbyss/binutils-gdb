@@ -1,6 +1,6 @@
 /* Target-dependent code for the Matsushita MN10300 for GDB, the GNU debugger.
 
-   Copyright (C) 1996-2023 Free Software Foundation, Inc.
+   Copyright (C) 1996-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,12 +17,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "arch-utils.h"
 #include "dis-asm.h"
+#include "extract-store-integer.h"
 #include "gdbtypes.h"
 #include "regcache.h"
-#include "gdbcore.h"	/* For write_memory_unsigned_integer.  */
+#include "gdbcore.h"
 #include "value.h"
 #include "frame.h"
 #include "frame-unwind.h"
@@ -1042,7 +1042,7 @@ mn10300_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
    use the current frame PC as the limit, then
    invoke mn10300_analyze_prologue and return its result.  */
 static struct mn10300_prologue *
-mn10300_analyze_frame_prologue (frame_info_ptr this_frame,
+mn10300_analyze_frame_prologue (const frame_info_ptr &this_frame,
 			   void **this_prologue_cache)
 {
   if (!*this_prologue_cache)
@@ -1071,7 +1071,7 @@ mn10300_analyze_frame_prologue (frame_info_ptr this_frame,
 /* Given the next frame and a prologue cache, return this frame's
    base.  */
 static CORE_ADDR
-mn10300_frame_base (frame_info_ptr this_frame, void **this_prologue_cache)
+mn10300_frame_base (const frame_info_ptr &this_frame, void **this_prologue_cache)
 {
   struct mn10300_prologue *p
     = mn10300_analyze_frame_prologue (this_frame, this_prologue_cache);
@@ -1095,7 +1095,7 @@ mn10300_frame_base (frame_info_ptr this_frame, void **this_prologue_cache)
 }
 
 static void
-mn10300_frame_this_id (frame_info_ptr this_frame,
+mn10300_frame_this_id (const frame_info_ptr &this_frame,
 		       void **this_prologue_cache,
 		       struct frame_id *this_id)
 {
@@ -1106,7 +1106,7 @@ mn10300_frame_this_id (frame_info_ptr this_frame,
 }
 
 static struct value *
-mn10300_frame_prev_register (frame_info_ptr this_frame,
+mn10300_frame_prev_register (const frame_info_ptr &this_frame,
 			     void **this_prologue_cache, int regnum)
 {
   struct mn10300_prologue *p
@@ -1127,15 +1127,16 @@ mn10300_frame_prev_register (frame_info_ptr this_frame,
   return frame_unwind_got_register (this_frame, regnum, regnum);
 }
 
-static const struct frame_unwind mn10300_frame_unwind = {
+static const struct frame_unwind_legacy mn10300_frame_unwind (
   "mn10300 prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   mn10300_frame_this_id, 
   mn10300_frame_prev_register,
   NULL,
   default_frame_sniffer
-};
+);
 
 static void
 mn10300_frame_unwind_init (struct gdbarch *gdbarch)

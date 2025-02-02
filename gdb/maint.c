@@ -1,6 +1,6 @@
 /* Support for GDB maintenance commands.
 
-   Copyright (C) 1992-2023 Free Software Foundation, Inc.
+   Copyright (C) 1992-2024 Free Software Foundation, Inc.
 
    Written by Fred Fish at Cygnus Support.
 
@@ -20,19 +20,17 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 
-#include "defs.h"
 #include "arch-utils.h"
 #include <ctype.h>
 #include <cmath>
 #include <signal.h>
 #include "command.h"
-#include "gdbcmd.h"
 #include "symtab.h"
 #include "block.h"
 #include "gdbtypes.h"
 #include "demangle.h"
 #include "gdbcore.h"
-#include "expression.h"		/* For language.h */
+#include "expression.h"
 #include "language.h"
 #include "symfile.h"
 #include "objfiles.h"
@@ -46,6 +44,7 @@
 #include "cli/cli-decode.h"
 #include "cli/cli-utils.h"
 #include "cli/cli-setshow.h"
+#include "cli/cli-style.h"
 #include "cli/cli-cmds.h"
 
 static void maintenance_do_deprecate (const char *, int);
@@ -106,14 +105,16 @@ maintenance_demangler_warning (const char *args, int from_tty)
 static void
 maintenance_demangle (const char *args, int from_tty)
 {
-  gdb_printf (_("This command has been moved to \"demangle\".\n"));
+  gdb_printf (_("This command has been moved to \"%ps\".\n"),
+	      styled_string (command_style.style (), "demangle"));
 }
 
 static void
 maintenance_time_display (const char *args, int from_tty)
 {
   if (args == NULL || *args == '\0')
-    gdb_printf (_("\"maintenance time\" takes a numeric argument.\n"));
+    gdb_printf (_("\"%ps\" takes a numeric argument.\n"),
+		styled_string (command_style.style (), "maintenance time"));
   else
     set_per_command_time (strtol (args, NULL, 10));
 }
@@ -122,7 +123,8 @@ static void
 maintenance_space_display (const char *args, int from_tty)
 {
   if (args == NULL || *args == '\0')
-    gdb_printf ("\"maintenance space\" takes a numeric argument.\n");
+    gdb_printf ("\"%ps\" takes a numeric argument.\n",
+		styled_string (command_style.style (), "maintenance space"));
   else
     set_per_command_space (strtol (args, NULL, 10));
 }
@@ -459,8 +461,9 @@ maintenance_info_sections (const char *arg, int from_tty)
 				  ofile, arg);
     }
 
-  if (core_bfd)
-    maint_print_all_sections (_("Core file: "), core_bfd, nullptr, arg);
+  if (current_program_space->core_bfd () != nullptr)
+    maint_print_all_sections (_("Core file: "),
+			      current_program_space->core_bfd (), nullptr, arg);
 }
 
 /* Implement the "maintenance info target-sections" command.  */
@@ -470,7 +473,7 @@ maintenance_info_target_sections (const char *arg, int from_tty)
 {
   bfd *abfd = nullptr;
   int digits = 0;
-  const target_section_table *table
+  const std::vector<target_section> *table
     = target_get_section_table (current_inferior ()->top_target ());
   if (table == nullptr)
     return;
@@ -509,7 +512,7 @@ maintenance_info_target_sections (const char *arg, int from_tty)
 		  (8 + digits), "",
 		  hex_string_custom (sec.addr, addr_size),
 		  hex_string_custom (sec.endaddr, addr_size),
-		  sec.owner);
+		  sec.owner.v ());
     }
 }
 
@@ -547,7 +550,6 @@ maintenance_translate_address (const char *arg, int from_tty)
   CORE_ADDR address;
   struct obj_section *sect;
   const char *p;
-  struct bound_minimal_symbol sym;
 
   if (arg == NULL || *arg == 0)
     error (_("requires argument (address or section + address)"));
@@ -578,6 +580,7 @@ maintenance_translate_address (const char *arg, int from_tty)
 
   address = parse_and_eval_address (p);
 
+  bound_minimal_symbol sym;
   if (sect)
     sym = lookup_minimal_symbol_by_pc_section (address, sect);
   else
@@ -631,9 +634,11 @@ maintenance_deprecate (const char *args, int from_tty)
 {
   if (args == NULL || *args == '\0')
     {
-      gdb_printf (_("\"maintenance deprecate\" takes an argument,\n\
+      gdb_printf (_("\"%ps\" takes an argument,\n\
 the command you want to deprecate, and optionally the replacement command\n\
-enclosed in quotes.\n"));
+enclosed in quotes.\n"),
+		  styled_string (command_style.style (),
+				 "maintenance deprecate"));
     }
 
   maintenance_do_deprecate (args, 1);
@@ -645,8 +650,10 @@ maintenance_undeprecate (const char *args, int from_tty)
 {
   if (args == NULL || *args == '\0')
     {
-      gdb_printf (_("\"maintenance undeprecate\" takes an argument, \n\
-the command you want to undeprecate.\n"));
+      gdb_printf (_("\"%ps\" takes an argument, \n\
+the command you want to undeprecate.\n"),
+		  styled_string (command_style.style (),
+				 "maintenance undeprecate"));
     }
 
   maintenance_do_deprecate (args, 0);
@@ -791,7 +798,7 @@ extern char etext;
 
 static int profiling_state;
 
-EXTERN_C void _mcleanup (void);
+extern "C" void _mcleanup (void);
 
 static void
 mcleanup_wrapper (void)
@@ -800,7 +807,7 @@ mcleanup_wrapper (void)
     _mcleanup ();
 }
 
-EXTERN_C void monstartup (unsigned long, unsigned long);
+extern "C" void monstartup (unsigned long, unsigned long);
 extern int main (int, char **);
 
 static void
@@ -844,15 +851,24 @@ maintenance_set_profile_cmd (const char *args, int from_tty,
 
 static int n_worker_threads = -1;
 
-/* Update the thread pool for the desired number of threads.  */
-static void
+/* See maint.h.  */
+
+void
 update_thread_pool_size ()
 {
 #if CXX_STD_THREAD
   int n_threads = n_worker_threads;
 
   if (n_threads < 0)
-    n_threads = std::thread::hardware_concurrency ();
+    {
+      const int hardware_threads = std::thread::hardware_concurrency ();
+      /* Testing in PR gdb/29959 indicates that parallel efficiency drops
+	 between n_threads=5 to 8.  Therefore, use no more than 8 threads
+	 to avoid an excessive number of threads in the pool on many-core
+	 systems.  */
+      const int max_thread_count = 8;
+      n_threads = std::min (hardware_threads, max_thread_count);
+    }
 
   gdb::thread_pool::g_thread_pool->set_thread_count (n_threads);
 #endif
@@ -874,7 +890,7 @@ maintenance_show_worker_threads (struct ui_file *file, int from_tty,
   if (n_worker_threads == -1)
     {
       gdb_printf (file, _("The number of worker threads GDB "
-			  "can use is unlimited (currently %zu).\n"),
+			  "can use is the default (currently %zu).\n"),
 		  gdb::thread_pool::g_thread_pool->thread_count ());
       return;
     }
@@ -1259,7 +1275,7 @@ List GDB's internal section table.\n\
 \n\
 Print the current targets section list.  This is a sub-set of all\n\
 sections, from all objects currently loaded.  Usually the ALLOC\n\
-sectoins."),
+sections."),
 	   &maintenanceinfolist);
 
   add_basic_prefix_cmd ("print", class_maintenance,
@@ -1474,6 +1490,4 @@ such as demangling symbol names."),
 					     maintenance_selftest_option_defs,
 					     &set_selftest_cmdlist,
 					     &show_selftest_cmdlist);
-
-  update_thread_pool_size ();
 }

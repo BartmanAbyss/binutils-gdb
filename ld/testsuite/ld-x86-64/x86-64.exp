@@ -1,5 +1,5 @@
 # Expect script for ld-x86_64 tests
-#   Copyright (C) 2002-2023 Free Software Foundation, Inc.
+#   Copyright (C) 2002-2025 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -49,6 +49,7 @@ set x86_64tests {
      "--64" {tlslib.s} {} "libtlslib.so"}
     {"TLS -fpic and -fno-pic exec transitions"
      "-melf_x86_64 tmpdir/libtlslib.so --no-ld-generated-unwind-info \
+      -z nomark-plt \
       -z noseparate-code -z max-page-size=0x200000 --hash-style=sysv" ""
      "--64" {tlsbinpic.s tlsbin.s}
      {{readelf -WSsrl tlsbin.rd} {objdump -drj.text tlsbin.dd}
@@ -70,6 +71,7 @@ set x86_64tests {
       "tlsbindesc"}
     {"TLS with global dynamic and descriptors"
      "-shared -melf_x86_64 --no-ld-generated-unwind-info \
+      -z nomark-plt \
       -z noseparate-code -z max-page-size=0x200000 --hash-style=sysv" ""
      "--64" {tlsgdesc.s}
      {{readelf -WSsrl tlsgdesc.rd} {objdump -drj.text\ -Mintel64 tlsgdesc.dd}}
@@ -222,6 +224,7 @@ run_ld_link_tests [list \
     [list \
 	"TLS -fpic -shared transitions" \
 	"-shared -melf_x86_64 --no-ld-generated-unwind-info \
+	 -z nomark-plt \
 	 -z noseparate-code -z max-page-size=0x200000 --hash-style=sysv \
 	 $NO_DT_RELR_LDFLAGS" \
 	"" "--64" \
@@ -235,6 +238,7 @@ run_ld_link_tests [list \
     [list \
 	"TLS -fpic -shared transitions with r15 as GOT base" \
 	"-shared -melf_x86_64 --no-ld-generated-unwind-info \
+	 -z nomark-plt \
 	 -z noseparate-code -z max-page-size=0x200000 --hash-style=sysv \
 	 $NO_DT_RELR_LDFLAGS" \
 	 "" "--64 -mrelax-relocations=yes" \
@@ -248,6 +252,7 @@ run_ld_link_tests [list \
     [list \
 	"TLS descriptor -fpic -shared transitions" \
 	"-shared -melf_x86_64 --no-ld-generated-unwind-info \
+	 -z nomark-plt \
 	 -z noseparate-code -z max-page-size=0x200000 --hash-style=sysv \
 	 $NO_DT_RELR_LDFLAGS" \
 	"" "--64" \
@@ -258,6 +263,24 @@ run_ld_link_tests [list \
 	 {objdump -sj.tdata tlsdesc.td} \
 	 {objdump -drj.plt tlsdesc.pd}} \
 	 "libtlsdesc.so" \
+    ] \
+    [list \
+	"Generate x86-64-weakundef-1.so" \
+	"-shared -melf_x86_64" \
+	"" \
+	"--64" \
+	{weakundef-1a.s} \
+	{} \
+	"x86-64-weakundef-1.so" \
+    ] \
+    [list \
+	"Generate x86-64-weakundef-1" \
+	"-melf_x86_64" \
+	"tmpdir/x86-64-weakundef-1.so" \
+	"--64" \
+	{weakundef-1b.s} \
+	{{nm -n weakundef-1.nd}} \
+	"x86-64-weakundef-1" \
     ] \
 ]
 
@@ -298,6 +321,7 @@ run_dump_test "hidden2"
 run_dump_test "hidden3"
 run_dump_test "hidden4"
 run_dump_test "hidden5"
+run_dump_test "hidden6"
 run_dump_test "protected1"
 run_dump_test "protected2"
 run_dump_test "protected3"
@@ -505,10 +529,28 @@ run_dump_test "dt-relr-1a"
 run_dump_test "dt-relr-1a-x32"
 run_dump_test "dt-relr-1b"
 run_dump_test "dt-relr-1b-x32"
+run_dump_test "pr30787"
+run_dump_test "pr31047"
+run_dump_test "pr31047-x32"
+run_dump_test "pr31868a"
+run_dump_test "pr31868a-x32"
+run_dump_test "pr31868b"
+run_dump_test "pr31868b-x32"
+run_dump_test "pr31868c"
+run_dump_test "pr31868c-x32"
+run_dump_test "tlsie5"
+run_dump_test "tlsdesc3"
+run_dump_test "tlsdesc4"
+run_dump_test "tlsdesc5"
+run_dump_test "pr32191"
+run_dump_test "pr32191-x32"
 
 if { ![skip_sframe_tests] } {
     run_dump_test "sframe-simple-1"
     run_dump_test "sframe-plt-1"
+    run_dump_test "sframe-ibt-plt-1"
+    run_dump_test "sframe-pltgot-1"
+    run_dump_test "sframe-pltgot-2"
 }
 
 if ![istarget "x86_64-*-linux*"] {
@@ -604,7 +646,14 @@ run_dump_test "load1a"
 run_dump_test "load1b"
 run_dump_test "load1c"
 run_dump_test "load1d"
+run_dump_test "apx-load1a"
+run_dump_test "apx-load1b"
+run_dump_test "apx-load1c"
+run_dump_test "apx-load1d"
 run_dump_test "load2"
+run_dump_test "load3a"
+run_dump_test "load3b"
+run_dump_test "load4"
 run_dump_test "call1a"
 run_dump_test "call1b"
 run_dump_test "call1c"
@@ -680,8 +729,6 @@ run_dump_test "pr19609-3b"
 run_dump_test "pr19609-4a"
 run_dump_test "pr19609-4b"
 run_dump_test "pr19609-4c"
-run_dump_test "pr19609-4d"
-run_dump_test "pr19609-4e"
 run_dump_test "pr19609-5a"
 run_dump_test "pr19609-5b"
 run_dump_test "pr19609-5c"
@@ -738,9 +785,9 @@ proc undefined_weak {cflags ldflags} {
 
     if { [string match "*-fPIE*" $cflags]
 	 && ![string match "*nodynamic-undefined-weak*" $ldflags] } {
-	set weak_symbol "Weak defined"
+	set weak_symbol "Weak defined\n"
     } else {
-	set weak_symbol "Weak undefined"
+	set weak_symbol "Weak undefined\n"
     }
 
     run_cc_link_tests [list \
@@ -1092,86 +1139,6 @@ if { [isnative] && [check_compiler_available] } {
 	    "property-2.so" \
 	] \
 	[list \
-	    "Build property 3" \
-	    "" \
-	    "-Wa,-mx86-used-note=yes" \
-	    {pass.c property-stack.S property-x86-1.S} \
-	    {{readelf {-n} property-3.r}} \
-	    "property-3" \
-	] \
-	[list \
-	    "Build property 3 (.o)" \
-	    "-r -nostdlib" \
-	    "-Wa,-mx86-used-note=yes" \
-	    {pass.c property-x86-1.S property-stack.S} \
-	    {{readelf {-n} property-3a.r}} \
-	    "property-3.o" \
-	] \
-	[list \
-	    "Build property 3 (.so)" \
-	    "-shared" \
-	    "-fPIC -Wa,-mx86-used-note=yes" \
-	    {property-x86-1.S pass.c property-stack.S} \
-	    {{readelf {-n} property-3.r}} \
-	    "property-3.so" \
-	] \
-	[list \
-	    "Build property 4" \
-	    "" \
-	    "-Wa,-mx86-used-note=yes" \
-	    {pass.c property-stack.S property-x86-1.S property-x86-2.S} \
-	    {{readelf {-n} property-4.r}} \
-	    "property-4" \
-	] \
-	[list \
-	    "Build property 4 (.o)" \
-	    "-r -nostdlib" \
-	    "-Wa,-mx86-used-note=yes" \
-	    {pass.c property-x86-2.S property-x86-1.S property-stack.S} \
-	    {{readelf {-n} property-4a.r}} \
-	    "property-4.o" \
-	] \
-	[list \
-	    "Build property 4 (.so)" \
-	    "-shared" \
-	    "-fPIC -Wa,-mx86-used-note=yes" \
-	    {property-x86-2.S property-x86-1.S pass.c property-stack.S} \
-	    {{readelf {-n} property-4.r}} \
-	    "property-4.so" \
-	] \
-	[list \
-	    "Build property 4 (-Wl,-z,stack-size=0)" \
-	    "-Wl,-z,stack-size=0" \
-	    "-Wa,-mx86-used-note=yes" \
-	    {pass.c property-stack.S property-x86-1.S property-x86-2.S} \
-	    {{readelf {-n} property-4.r}} \
-	    "property-4" \
-	] \
-	[list \
-	    "Build property 5" \
-	    "-Wl,-z,stack-size=0x900000" \
-	    "-Wa,-mx86-used-note=yes" \
-	    {pass.c property-stack.S property-x86-1.S property-x86-2.S} \
-	    {{readelf {-n} property-5.r}} \
-	    "property-5" \
-	] \
-	[list \
-	    "Build property 5 (.o)" \
-	    "-r -nostdlib -Wl,-z,stack-size=0x900000" \
-	    "-Wa,-mx86-used-note=yes" \
-	    {pass.c property-x86-2.S property-x86-1.S property-stack.S} \
-	    {{readelf {-n} property-5a.r}} \
-	    "property-5.o" \
-	] \
-	[list \
-	    "Build property 5 (.so)" \
-	    "-shared -Wl,-z,stack-size=0x900000" \
-	    "-fPIC -Wa,-mx86-used-note=yes" \
-	    {property-x86-2.S property-x86-1.S pass.c property-stack.S} \
-	    {{readelf {-n} property-5.r}} \
-	    "property-5.so" \
-	] \
-	[list \
 	    "Build property-6.so" \
 	    "-shared" \
 	    "-fPIC -Wa,-mx86-used-note=yes" \
@@ -1259,7 +1226,7 @@ if { [isnative] && [check_compiler_available] } {
 	] \
 	[list \
 	    "Build pr22393-3a.so" \
-	    "-shared -Wl,-z,separate-code,-z,max-page-size=0x1000" \
+	    "-shared -Wl,-z,separate-code,-z,max-page-size=0x1000,--no-rosegment" \
 	    "-fPIC -Wa,-mx86-used-note=yes" \
 	    {pr22393-3a.c} \
 	    {{readelf -lW pr22393-3a.rd} \
@@ -1268,7 +1235,7 @@ if { [isnative] && [check_compiler_available] } {
 	] \
 	[list \
 	    "Build pr22393-3a-now.so" \
-	    "-shared -Wl,-z,separate-code,-z,now,-z,max-page-size=0x1000" \
+	    "-shared -Wl,-z,separate-code,-z,now,-z,max-page-size=0x1000,--no-rosegment" \
 	    "-fPIC -Wa,-mx86-used-note=yes" \
 	    {pr22393-3a.c} \
 	    {{readelf -lW pr22393-3a.rd} \
@@ -1277,7 +1244,7 @@ if { [isnative] && [check_compiler_available] } {
 	] \
 	[list \
 	    "Build pr22393-3" \
-	    "$NOPIE_LDFLAGS -Wl,-z,separate-code,-z,max-page-size=0x1000,--no-as-needed tmpdir/pr22393-3a.so" \
+	    "$NOPIE_LDFLAGS -Wl,-z,separate-code,-z,max-page-size=0x1000,--no-rosegment,--no-as-needed tmpdir/pr22393-3a.so" \
 	    "$NOPIE_CFLAGS -Wa,-mx86-used-note=yes" \
 	    {pr22393-3b.c} \
 	    {{readelf -lW pr22393-3a.rd} \
@@ -1286,7 +1253,7 @@ if { [isnative] && [check_compiler_available] } {
 	] \
 	[list \
 	    "Build pr22393-3 (PIE)" \
-	    "-pie -Wl,-z,separate-code,-z,max-page-size=0x1000,--no-as-needed tmpdir/pr22393-3a-now.so" \
+	    "-pie -Wl,-z,separate-code,-z,max-page-size=0x1000,--no-rosegment,--no-as-needed tmpdir/pr22393-3a-now.so" \
 	    "-fPIE -Wa,-mx86-used-note=yes" \
 	    {pr22393-3b.c} \
 	    {{readelf -lW pr22393-3a.rd} \
@@ -1295,7 +1262,7 @@ if { [isnative] && [check_compiler_available] } {
 	] \
 	[list \
 	    "Build pr22393-3 (static)" \
-	    "-static -Wl,-z,separate-code,-z,max-page-size=0x1000" \
+	    "-static -Wl,-z,separate-code,-z,max-page-size=0x1000,--no-rosegment" \
 	    "-Wa,-mx86-used-note=yes" \
 	    {pr22393-3a.c pr22393-3b.c} \
 	    {{readelf -lW pr22393-3a.rd} \
@@ -1445,6 +1412,14 @@ if { [isnative] && [check_compiler_available] } {
 	    { protected-data-2a.S } \
 	    {{readelf -n indirect-extern-access.rd}}  \
 	    "libprotected-data-2b.so" \
+	] \
+	[list \
+	    "Build pr32067" \
+	    "-Wl,--oformat,binary -nostdlib -nostartfiles" \
+	    "" \
+	    { start.s pr32067.s } \
+	    {} \
+	    "pr32067" \
 	] \
     ]
 
@@ -1953,6 +1928,22 @@ if { [isnative] && [check_compiler_available] } {
 	    "pass.out" \
 	    "-fPIE" \
 	] \
+	[list \
+	    "Run pr32189" \
+	    "$NOPIE_LDFLAGS -nostdlib -nostartfiles" \
+	    "" \
+	    { pr32189.s } \
+	    "pr32189" \
+	    "pass.out" \
+	] \
+	[list \
+	    "Run plt3" \
+	    "$NOPIE_LDFLAGS -nostdlib -nostartfiles" \
+	    "" \
+	    { plt3.s } \
+	    "plt3" \
+	    "pass.out" \
+	] \
     ]
 
     # Run-time tests which require working ifunc attribute support.
@@ -2171,12 +2162,103 @@ run_ld_link_tests [list \
     [list \
 	"basic PLT generation (-z now)" \
 	"-z now -melf_x86_64 --hash-style=sysv tmpdir/libpltlib.so \
+	 -z nomark-plt \
 	 -z noseparate-code -z max-page-size=0x200000" \
 	"" \
 	"--64" \
 	{plt2.s} \
 	{{readelf -SW plt2.rd} {objdump -dwr plt2.dd}} \
 	"plt2" \
+    ] \
+    [list \
+	"Build property 3" \
+	"-m elf_x86_64" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-stk.s property-x86-1.s} \
+	{{readelf -n property-3.r}} \
+	"property-3" \
+    ] \
+    [list \
+	"Build property 3 (.o)" \
+	"-m elf_x86_64 -r" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-x86-1.s property-stk.s} \
+	{{readelf -n property-3a.r}} \
+	"property-3.o" \
+    ] \
+    [list \
+	"Build property 3 (.so)" \
+	"-m elf_x86_64 -shared" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-x86-1.s property-stk.s} \
+	{{readelf -n property-3.r}} \
+	"property-3.so" \
+    ] \
+    [list \
+	"Build property 4" \
+	"-m elf_x86_64" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-stk.s property-x86-1.s property-x86-2.s} \
+	{{readelf -n property-4.r}} \
+	"property-4" \
+    ] \
+    [list \
+	"Build property 4 (.o)" \
+	"-m elf_x86_64 -r" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-x86-2.s property-x86-1.s property-stk.s} \
+	{{readelf {-n} property-4a.r}} \
+	"property-4.o" \
+    ] \
+    [list \
+	"Build property 4 (.so)" \
+	"-m elf_x86_64 -shared" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-x86-2.s property-x86-1.s property-stk.s} \
+	{{readelf -n property-4.r}} \
+	"property-4.so" \
+    ] \
+    [list \
+	"Build property 4 (-z stack-size=0)" \
+	"-m elf_x86_64 -z stack-size=0" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-stk.s property-x86-1.s property-x86-2.s} \
+	{{readelf -n property-4.r}} \
+	"property-4" \
+    ] \
+    [list \
+	"Build property 5" \
+	"-m elf_x86_64 -z stack-size=0x900000" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-stk.s property-x86-1.s property-x86-2.s} \
+	{{readelf -n property-5.r}} \
+	"property-5" \
+    ] \
+    [list \
+	"Build property 5 (.o)" \
+	"-m elf_x86_64 -r -z stack-size=0x900000" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-x86-2.s property-x86-1.s property-stk.s} \
+	{{readelf {-n} property-5a.r}} \
+	"property-5.o" \
+    ] \
+    [list \
+	"Build property 5 (.so)" \
+	"-m elf_x86_64 -shared -z stack-size=0x900000" \
+	"" \
+	"--64 -defsym __64_bit__=1 -mx86-used-note=yes" \
+	{property-x86-2.s property-x86-1.s property-stk.s} \
+	{{readelf -n property-5.r}} \
+	"property-5.so" \
     ] \
     [list \
 	"Build pr21626.so" \
@@ -2227,5 +2309,34 @@ run_dump_test "ibt-plt-3a-x32"
 run_dump_test "ibt-plt-3b-x32"
 run_dump_test "ibt-plt-3c-x32"
 run_dump_test "ibt-plt-3d-x32"
+
+# Skip -z mark-plt tests on MUSL.
+if { [istarget "x86_64-*-musl*"]} {
+    set ASFLAGS "$saved_ASFLAGS"
+    return
+}
+
+run_dump_test "mark-plt-1a"
+run_dump_test "mark-plt-1b"
+run_dump_test "mark-plt-1c"
+run_dump_test "mark-plt-1d"
+run_dump_test "mark-plt-1a-x32"
+run_dump_test "mark-plt-1b-x32"
+run_dump_test "mark-plt-1c-x32"
+run_dump_test "mark-plt-1d-x32"
+
+if { [check_compiler_available] } {
+    run_cc_link_tests [list \
+	[list \
+	    "Build mark-plt-1.so" \
+	    "-shared -Wl,--no-as-needed,-z,mark-plt,-z,pack-relative-relocs" \
+	    "-fPIC" \
+	    { mark-plt-1.s } \
+	    {{readelf {-W --version-info} mark-plt-1a.rd} \
+	     {readelf {-W --version-info} mark-plt-1b.rd}} \
+	    "mark-plt-1.so" \
+	] \
+    ]
+}
 
 set ASFLAGS "$saved_ASFLAGS"

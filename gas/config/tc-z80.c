@@ -1,5 +1,5 @@
 /* tc-z80.c -- Assemble code for the Zilog Z80, Z180, EZ80 and ASCII R800
-   Copyright (C) 2005-2023 Free Software Foundation, Inc.
+   Copyright (C) 2005-2025 Free Software Foundation, Inc.
    Contributed by Arnold Metselaar <arnold_m@operamail.com>
 
    This file is part of GAS, the GNU Assembler.
@@ -34,7 +34,7 @@ const char EXP_CHARS[] = "eE\0";
 const char FLT_CHARS[] = "RrDdFfSsHh\0";
 
 /* For machine specific options.  */
-const char * md_shortopts = ""; /* None yet.  */
+const char md_shortopts[] = ""; /* None yet.  */
 
 enum options
 {
@@ -80,7 +80,7 @@ enum options
 #define INS_UNDOC (INS_IDX_HALF | INS_IN_F_C)
 #define INS_UNPORT (INS_OUT_C_0 | INS_SLI | INS_ROT_II_LD)
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   { "march",     required_argument, NULL, OPTION_MARCH},
   { "z80",       no_argument, NULL, OPTION_MACH_Z80},
@@ -115,7 +115,7 @@ struct option md_longopts[] =
   { NULL, no_argument, NULL, 0 }
 } ;
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 extern int coff_flags;
 /* Instruction classes that silently assembled.  */
@@ -926,6 +926,7 @@ parse_exp_not_indexed (const char *s, expressionS *op)
     }
   input_line_pointer = (char*) s ;
   expression (op);
+  resolve_register (op);
   switch (op->X_op)
     {
     case O_absent:
@@ -1142,10 +1143,11 @@ emit_data_val (expressionS * val, int size)
 	  but it does help to maintain compatibility with earlier versions
 	  of the assembler.  */
       if (! val->X_extrabit
-	  && is_overflow (val->X_add_number, size*8))
-	as_warn ( _("%d-bit overflow (%+ld)"), size*8, val->X_add_number);
+	  && is_overflow (val->X_add_number, size * 8))
+	as_warn ( _("%d-bit overflow (%+" PRId64 ")"), size * 8,
+		  (int64_t) val->X_add_number);
       for (i = 0; i < size; ++i)
-	p[i] = (char)(val->X_add_number >> (i*8));
+	p[i] = (val->X_add_number >> (i * 8)) & 0xff;
       return;
     }
 
@@ -1249,9 +1251,11 @@ emit_byte (expressionS * val, bfd_reloc_code_real_type r_type)
       if ((val->X_add_number < -128) || (val->X_add_number >= 128))
 	{
 	  if (r_type == BFD_RELOC_Z80_DISP8)
-	    as_bad (_("index overflow (%+ld)"), val->X_add_number);
+	    as_bad (_("index overflow (%+" PRId64 ")"),
+		    (int64_t) val->X_add_number);
 	  else
-	    as_bad (_("offset overflow (%+ld)"), val->X_add_number);
+	    as_bad (_("offset overflow (%+" PRId64 ")"),
+		    (int64_t) val->X_add_number);
 	}
     }
   else
@@ -3479,15 +3483,6 @@ area (int arg)
     psect (arg);
 }
 
-/* Handle the .bss pseudo-op.  */
-
-static void
-s_bss (int ignore ATTRIBUTE_UNUSED)
-{
-  subseg_set (bss_section, 0);
-  demand_empty_rest_of_line ();
-}
-
 /* Port specific pseudo ops.  */
 const pseudo_typeS md_pseudo_table[] =
 {
@@ -3503,7 +3498,6 @@ const pseudo_typeS md_pseudo_table[] =
   { ".hd64", set_inss, INS_Z180},
   { ".z80", set_inss, INS_Z80},
   { ".z80n", set_inss, INS_Z80N},
-  { "bss", s_bss, 0},
   { "db" , emit_data, 1},
   { "d24", z80_cons, 3},
   { "d32", z80_cons, 4},
@@ -3865,12 +3859,12 @@ tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED , fixS *fixp)
       return NULL;
     }
 
-  reloc               = XNEW (arelent);
-  reloc->sym_ptr_ptr  = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
-  reloc->address      = fixp->fx_frag->fr_address + fixp->fx_where;
-  reloc->addend       = fixp->fx_offset;
-  reloc->howto        = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);
+  reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
+  reloc->addend = fixp->fx_offset;
+  reloc->howto = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);
   if (reloc->howto == NULL)
     {
       as_bad_where (fixp->fx_file, fixp->fx_line,

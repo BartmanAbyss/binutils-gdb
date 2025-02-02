@@ -1,5 +1,5 @@
 /* tc-i386.c -- Assemble Intel syntax code for ix86/x86-64
-   Copyright (C) 2009-2023 Free Software Foundation, Inc.
+   Copyright (C) 2009-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -169,6 +169,10 @@ operatorT i386_operator (const char *name, unsigned int operands, char *pc)
       return O_illegal;
     }
 
+  /* See the quotation related comment in i386_parse_name().  */
+  if (*pc == '"')
+    return O_absent;
+
   for (j = 0; i386_operators[j].name; ++j)
     if (strcasecmp (i386_operators[j].name, name) == 0)
       {
@@ -184,15 +188,12 @@ operatorT i386_operator (const char *name, unsigned int operands, char *pc)
 
   if (i386_types[j].name && *pc == ' ')
     {
+      const char *start = ++input_line_pointer;
       char *pname;
-      char c;
+      char c = get_symbol_name (&pname);
 
-      ++input_line_pointer;
-      c = get_symbol_name (&pname);
-
-      if (strcasecmp (pname, "ptr") == 0)
+      if (strcasecmp (pname, "ptr") == 0 && (c != '"' || pname == start))
 	{
-	  /* FIXME: What if c == '"' ?  */
 	  pname[-1] = *pc;
 	  *pc = c;
 	  if (intel_syntax > 0 || operands != 1)
@@ -200,15 +201,26 @@ operatorT i386_operator (const char *name, unsigned int operands, char *pc)
 	  return i386_types[j].op;
 	}
 
-      if (strcasecmp (pname, "bcst") == 0)
+      if (strcasecmp (pname, "bcst") == 0 && (c != '"' || pname == start))
 	{
-	  /* FIXME: Again, what if c == '"' ?  */
 	  pname[-1] = *pc;
 	  *pc = c;
 	  if (intel_syntax > 0 || operands != 1
 	      || i386_types[j].sz[0] > 8
 	      || (i386_types[j].sz[0] & (i386_types[j].sz[0] - 1)))
 	    return O_illegal;
+	  switch (pp.encoding)
+	    {
+	    case encoding_default:
+	    case encoding_egpr:
+	      pp.encoding = encoding_evex;
+	      break;
+	    case encoding_evex:
+	    case encoding_evex512:
+	      break;
+	    default:
+	      return O_illegal;
+	    }
 	  if (!i.broadcast.bytes && !i.broadcast.type)
 	    {
 	      i.broadcast.bytes = i386_types[j].sz[0];
@@ -224,13 +236,15 @@ operatorT i386_operator (const char *name, unsigned int operands, char *pc)
   return O_absent;
 }
 
-static int i386_intel_parse_name (const char *name, expressionS *e)
+static int i386_intel_parse_name (const char *name,
+				  expressionS *e,
+				  enum expr_mode mode)
 {
   unsigned int j;
 
   if (! strcmp (name, "$"))
     {
-      current_location (e);
+      current_location (e, mode);
       return 1;
     }
 
@@ -340,7 +354,7 @@ i386_intel_simplify_register (expressionS *e)
     intel_state.base = i386_regtab + reg_num;
   else if (!intel_state.index)
     {
-      const insn_template *t = current_templates->start;
+      const insn_template *t = current_templates.start;
 
       if (intel_state.in_scale
 	  || i386_regtab[reg_num].reg_type.bitfield.baseindex
@@ -364,21 +378,25 @@ i386_intel_simplify_register (expressionS *e)
   return 2;
 }
 
-static int i386_intel_simplify (expressionS *);
-
-static INLINE int i386_intel_simplify_symbol(symbolS *sym)
+static int
+i386_intel_simplify_symbol (symbolS *sym)
 {
-  int ret = i386_intel_simplify (symbol_get_value_expression (sym));
+  if (symbol_resolving_p (sym))
+    return 1;
 
+  symbol_mark_resolving (sym);
+  int ret = i386_intel_simplify (symbol_get_value_expression (sym));
   if (ret == 2)
-  {
-    S_SET_SEGMENT(sym, absolute_section);
-    ret = 1;
-  }
+    {
+      S_SET_SEGMENT (sym, absolute_section);
+      ret = 1;
+    }
+  symbol_clear_resolving (sym);
   return ret;
 }
 
-static int i386_intel_simplify (expressionS *e)
+static int
+i386_intel_simplify (expressionS *e)
 {
   const reg_entry *the_reg = (this_operand >= 0
 			      ? i.op[this_operand].regs : NULL);
@@ -609,7 +627,7 @@ i386_intel_operand (char *operand_string, int got_a_float)
       if (i.imm_operands)
 	{
 	  as_bad (_("`%s': RC/SAE operand must precede immediate operands"),
-		  insn_name (current_templates->start));
+		  insn_name (current_templates.start));
 	  return 0;
 	}
 
@@ -633,6 +651,7 @@ i386_intel_operand (char *operand_string, int got_a_float)
   input_line_pointer = buf = xstrdup (operand_string);
 
   intel_syntax = -1;
+  expr_mode = expr_operator_none;
   memset (&exp, 0, sizeof(exp));
   exp_seg = expression (&exp);
   ret = i386_intel_simplify (&exp);
@@ -681,7 +700,7 @@ i386_intel_operand (char *operand_string, int got_a_float)
     return 0;
 
   if (intel_state.op_modifier != O_absent
-      && current_templates->start->mnem_off != MN_lea)
+      && current_templates.start->mnem_off != MN_lea)
     {
       i.types[this_operand].bitfield.unspecified = 0;
 
@@ -696,22 +715,22 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	  i.types[this_operand].bitfield.word = 1;
 	  if (got_a_float == 2)	/* "fi..." */
 	    suffix = SHORT_MNEM_SUFFIX;
-	  else if (current_templates->start->mnem_off != MN_lar
-		   && current_templates->start->mnem_off != MN_lsl
-		   && current_templates->start->mnem_off != MN_arpl)
+	  else if (current_templates.start->mnem_off != MN_lar
+		   && current_templates.start->mnem_off != MN_lsl
+		   && current_templates.start->mnem_off != MN_arpl)
 	    suffix = WORD_MNEM_SUFFIX;
 	  break;
 
 	case O_dword_ptr:
 	  i.types[this_operand].bitfield.dword = 1;
-	  if ((insn_name (current_templates->start)[0] == 'l'
-	       && insn_name (current_templates->start)[2] == 's'
-	       && insn_name (current_templates->start)[3] == 0)
-	      || current_templates->start->mnem_off == MN_bound)
+	  if ((insn_name (current_templates.start)[0] == 'l'
+	       && insn_name (current_templates.start)[2] == 's'
+	       && insn_name (current_templates.start)[3] == 0)
+	      || current_templates.start->mnem_off == MN_bound)
 	    suffix = WORD_MNEM_SUFFIX;
 	  else if (flag_code != CODE_32BIT
-		   && (current_templates->start->opcode_modifier.jump == JUMP
-		       || current_templates->start->opcode_modifier.jump
+		   && (current_templates.start->opcode_modifier.jump == JUMP
+		       || current_templates.start->opcode_modifier.jump
 			  == JUMP_DWORD))
 	    {
 	      i.far_branch = true;
@@ -725,11 +744,11 @@ i386_intel_operand (char *operand_string, int got_a_float)
 
 	case O_fword_ptr:
 	  i.types[this_operand].bitfield.fword = 1;
-	  if (current_templates->start->mnem_off == MN_les
-	      || current_templates->start->mnem_off == MN_lds
-	      || current_templates->start->mnem_off == MN_lss
-	      || current_templates->start->mnem_off == MN_lfs
-	      || current_templates->start->mnem_off == MN_lgs)
+	  if (current_templates.start->mnem_off == MN_les
+	      || current_templates.start->mnem_off == MN_lds
+	      || current_templates.start->mnem_off == MN_lss
+	      || current_templates.start->mnem_off == MN_lfs
+	      || current_templates.start->mnem_off == MN_lgs)
 	    suffix = LONG_MNEM_SUFFIX;
 	  else if (!got_a_float)
 	    {
@@ -741,7 +760,7 @@ i386_intel_operand (char *operand_string, int got_a_float)
 
 	case O_qword_ptr: /* O_mmword_ptr */
 	  i.types[this_operand].bitfield.qword = 1;
-	  if (current_templates->start->mnem_off == MN_bound
+	  if (current_templates.start->mnem_off == MN_bound
 	      || got_a_float == 1)	/* "f..." */
 	    suffix = LONG_MNEM_SUFFIX;
 	  else
@@ -753,10 +772,10 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	  if (got_a_float)
 	    break;
 	  if (flag_code == CODE_64BIT
-	      && (current_templates->start->operand_types[0].bitfield.fword
-		  || current_templates->start->operand_types[0].bitfield.tbyte
-		  || current_templates->start->opcode_modifier.jump == JUMP_DWORD
-		  || current_templates->start->opcode_modifier.jump == JUMP))
+	      && (current_templates.start->operand_types[0].bitfield.fword
+		  || current_templates.start->operand_types[0].bitfield.tbyte
+		  || current_templates.start->opcode_modifier.jump == JUMP_DWORD
+		  || current_templates.start->opcode_modifier.jump == JUMP))
 	    suffix = QWORD_MNEM_SUFFIX; /* l[fgs]s, [ls][gi]dt, call, jmp */
 	  else
 	    i.types[this_operand].bitfield.byte = 1; /* cause an error */
@@ -767,10 +786,20 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	  break;
 
 	case O_ymmword_ptr:
+	  if (vector_size < VSZ256)
+	    {
+	      as_bad (_("256-bit operands disabled"));
+	      return 0;
+	    }
 	  i.types[this_operand].bitfield.ymmword = 1;
 	  break;
 
 	case O_zmmword_ptr:
+	  if (vector_size < VSZ512)
+	    {
+	      as_bad (_("512-bit operands disabled"));
+	      return 0;
+	    }
 	  i.types[this_operand].bitfield.zmmword = 1;
 	  break;
 
@@ -778,8 +807,8 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	  i.far_branch = true;
 	  /* FALLTHROUGH */
 	case O_near_ptr:
-	  if (current_templates->start->opcode_modifier.jump != JUMP
-	      && current_templates->start->opcode_modifier.jump != JUMP_DWORD)
+	  if (current_templates.start->opcode_modifier.jump != JUMP
+	      && current_templates.start->opcode_modifier.jump != JUMP_DWORD)
 	    {
 	      /* cause an error */
 	      i.types[this_operand].bitfield.byte = 1;
@@ -798,17 +827,18 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	 REX.W) is going to be derived from it.  For this we check whether the
 	 given suffix is valid for any of the candidate templates.  */
       if (suffix && suffix != i.suffix
-	  && current_templates->start->mnem_off != MN_bound)
+	  && current_templates.start->mnem_off != MN_bound)
 	{
 	  const insn_template *t;
 
-	  for (t = current_templates->start; t < current_templates->end; ++t)
+	  for (t = current_templates.start; t < current_templates.end; ++t)
 	    {
 	      /* Operands haven't been swapped yet.  */
 	      unsigned int op = t->operands - 1 - this_operand;
 
 	      /* Easy checks to skip templates which won't match anyway.  */
-	      if (this_operand >= t->operands || t->opcode_modifier.attsyntax)
+	      if (this_operand >= t->operands
+		  || t->opcode_modifier.dialect >= ATT_SYNTAX)
 		continue;
 
 	      switch (suffix)
@@ -863,7 +893,7 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	      break;
 	    }
 
-	  if (t == current_templates->end)
+	  if (t == current_templates.end)
 	    suffix = 0;
 	}
 
@@ -877,9 +907,8 @@ i386_intel_operand (char *operand_string, int got_a_float)
     }
 
   /* Operands for jump/call need special consideration.  */
-  if (current_templates->start->opcode_modifier.jump == JUMP
-      || current_templates->start->opcode_modifier.jump == JUMP_DWORD
-      || current_templates->start->opcode_modifier.jump == JUMP_INTERSEGMENT)
+  if (current_templates.start->opcode_modifier.jump
+      || current_templates.start->mnem_off == MN_jmpabs)
     {
       bool jumpabsolute = false;
 
@@ -989,7 +1018,7 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	    if (i.rounding.type == RC_NamesTable[j].type)
 	      break;
 	  as_bad (_("`%s': misplaced `{%s}'"),
-		  insn_name (current_templates->start), RC_NamesTable[j].name);
+		  insn_name (current_templates.start), RC_NamesTable[j].name);
 	  return 0;
 	}
     }
@@ -1015,9 +1044,7 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	     ljmp	0x9090,0x90909090
 	   */
 
-	  if ((current_templates->start->opcode_modifier.jump == JUMP_INTERSEGMENT
-	       || current_templates->start->opcode_modifier.jump == JUMP_DWORD
-	       || current_templates->start->opcode_modifier.jump == JUMP)
+	  if (current_templates.start->opcode_modifier.jump
 	      && this_operand == 1
 	      && intel_state.seg == NULL
 	      && i.mem_operands == 1
@@ -1098,7 +1125,7 @@ i386_intel_operand (char *operand_string, int got_a_float)
 	  else
 	    i.types[this_operand].bitfield.disp16 = 1;
 
-#if defined (OBJ_AOUT) || defined (OBJ_MAYBE_AOUT)
+#ifdef OBJ_AOUT
 	  /*
 	   * exp_seg is used only for verification in
 	   * i386_finalize_displacement, and we can end up seeing reg_section

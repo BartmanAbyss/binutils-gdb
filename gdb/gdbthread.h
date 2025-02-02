@@ -1,5 +1,5 @@
 /* Multi-process/thread control defs for GDB, the GNU debugger.
-   Copyright (C) 1987-2023 Free Software Foundation, Inc.
+   Copyright (C) 1987-2024 Free Software Foundation, Inc.
    Contributed by Lynx Real-Time Systems, Inc.  Los Gatos, CA.
    
 
@@ -18,8 +18,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef GDBTHREAD_H
-#define GDBTHREAD_H
+#ifndef GDB_GDBTHREAD_H
+#define GDB_GDBTHREAD_H
 
 struct symtab;
 
@@ -28,6 +28,7 @@ struct symtab;
 #include "ui-out.h"
 #include "btrace.h"
 #include "target/waitstatus.h"
+#include "target/target.h"
 #include "cli/cli-utils.h"
 #include "gdbsupport/refcounted-object.h"
 #include "gdbsupport/common-gdbthread.h"
@@ -35,6 +36,7 @@ struct symtab;
 #include "displaced-stepping.h"
 #include "gdbsupport/intrusive_list.h"
 #include "thread-fsm.h"
+#include "language.h"
 
 struct inferior;
 struct process_stratum_target;
@@ -171,6 +173,9 @@ struct thread_control_state
      command.  This is used to decide whether "set scheduler-locking
      step" behaves like "on" or "off".  */
   int stepping_command = 0;
+
+  /* True if the thread is evaluating a BP condition.  */
+  bool in_cond_eval = false;
 };
 
 /* Inferior thread specific part of `struct infcall_suspend_state'.  */
@@ -210,10 +215,10 @@ struct thread_suspend_state
 
      - If the thread is running, then this field has its value removed by
        calling stop_pc.reset() (see thread_info::set_executing()).
-       Attempting to read a gdb::optional with no value is undefined
-       behaviour and will trigger an assertion error when _GLIBCXX_DEBUG is
+       Attempting to read a std::optional with no value is undefined
+       behavior and will trigger an assertion error when _GLIBCXX_DEBUG is
        defined, which should make error easier to track down.  */
-  gdb::optional<CORE_ADDR> stop_pc;
+  std::optional<CORE_ADDR> stop_pc;
 };
 
 /* Base class for target-specific thread data.  */
@@ -221,6 +226,9 @@ struct private_thread_info
 {
   virtual ~private_thread_info () = 0;
 };
+
+/* Unique pointer wrapper for private_thread_info.  */
+using private_thread_info_up = std::unique_ptr<private_thread_info>;
 
 /* Threads are intrusively refcounted objects.  Being the
    user-selected thread is normally considered an implicit strong
@@ -239,10 +247,11 @@ struct private_thread_info
    strong reference, and is thus not accounted for in the thread's
    refcount.
 
-   The intrusive_list_node base links threads in a per-inferior list.  */
+   The intrusive_list_node base links threads in a per-inferior list.
+   We place it first in the inherit order to work around PR gcc/113599.  */
 
-class thread_info : public refcounted_object,
-		    public intrusive_list_node<thread_info>
+class thread_info : public intrusive_list_node<thread_info>,
+		    public refcounted_object
 {
 public:
   explicit thread_info (inferior *inf, ptid_t ptid);
@@ -470,6 +479,17 @@ public:
     m_thread_fsm = std::move (fsm);
   }
 
+  /* Record the thread options last set for this thread.  */
+
+  void set_thread_options (gdb_thread_options thread_options);
+
+  /* Get the thread options last set for this thread.  */
+
+  gdb_thread_options thread_options () const
+  {
+    return m_thread_options;
+  }
+
   int current_line = 0;
   struct symtab *current_symtab = NULL;
 
@@ -513,7 +533,7 @@ public:
   struct target_waitstatus pending_follow;
 
   /* True if this thread has been explicitly requested to stop.  */
-  int stop_requested = 0;
+  bool stop_requested = false;
 
   /* The initiating frame of a nexting operation, used for deciding
      which exceptions to intercept.  If it is null_frame_id no
@@ -522,7 +542,7 @@ public:
   struct frame_id initiating_frame = null_frame_id;
 
   /* Private data used by the target vector implementation.  */
-  std::unique_ptr<private_thread_info> priv;
+  private_thread_info_up priv;
 
   /* Branch trace information for this thread.  */
   struct btrace_thread_info btrace {};
@@ -577,6 +597,10 @@ private:
      left to do for the thread's execution command after the target
      stops.  Several execution commands use it.  */
   std::unique_ptr<struct thread_fsm> m_thread_fsm;
+
+  /* The thread options as last set with a call to
+     set_thread_options.  */
+  gdb_thread_options m_thread_options;
 };
 
 using thread_info_resumed_with_pending_wait_status_node
@@ -616,20 +640,34 @@ extern struct thread_info *add_thread_silent (process_stratum_target *targ,
 /* Same as add_thread, and sets the private info.  */
 extern struct thread_info *add_thread_with_info (process_stratum_target *targ,
 						 ptid_t ptid,
-						 private_thread_info *);
+						 private_thread_info_up);
 
 /* Delete thread THREAD and notify of thread exit.  If the thread is
    currently not deletable, don't actually delete it but still tag it
-   as exited and do the notification.  */
-extern void delete_thread (struct thread_info *thread);
+   as exited and do the notification.  EXIT_CODE is the thread's exit
+   code.  If SILENT, don't actually notify the CLI.  THREAD must not
+   be NULL or an assertion will fail.  */
+extern void delete_thread_with_exit_code (thread_info *thread,
+					  ULONGEST exit_code,
+					  bool silent = false);
+
+/* Delete thread THREAD and notify of thread exit.  If the thread is
+   currently not deletable, don't actually delete it but still tag it
+   as exited and do the notification.  THREAD must not be NULL or an
+   assertion will fail.  */
+extern void delete_thread (thread_info *thread);
 
 /* Like delete_thread, but be quiet about it.  Used when the process
    this thread belonged to has already exited, for example.  */
 extern void delete_thread_silent (struct thread_info *thread);
 
 /* Mark the thread exited, but don't delete it or remove it from the
-   inferior thread list.  */
-extern void set_thread_exited (thread_info *tp, bool silent);
+   inferior thread list.  EXIT_CODE is the thread's exit code, if
+   available.  If SILENT, then don't inform the CLI about the
+   exit.  */
+extern void set_thread_exited (thread_info *tp,
+			       std::optional<ULONGEST> exit_code = {},
+			       bool silent = false);
 
 /* Delete a step_resume_breakpoint from the thread database.  */
 extern void delete_step_resume_breakpoint (struct thread_info *);
@@ -764,7 +802,7 @@ extern int thread_count (process_stratum_target *proc_target);
 /* Return true if we have any thread in any inferior.  */
 extern bool any_thread_p ();
 
-/* Switch context to thread THR.  Also sets the STOP_PC global.  */
+/* Switch context to thread THR.  */
 extern void switch_to_thread (struct thread_info *thr);
 
 /* Switch context to no thread selected.  */
@@ -871,7 +909,7 @@ private:
   /* Save/restore the language as well, because selecting a frame
      changes the current language to the frame's language if "set
      language auto".  */
-  enum language m_lang;
+  scoped_restore_current_language m_lang;
 };
 
 /* Returns a pointer into the thread_info corresponding to
@@ -1025,7 +1063,7 @@ extern bool switch_to_thread_if_alive (thread_info *thr);
    exception if !FLAGS.SILENT and !FLAGS.CONT and CMD fails.  */
 
 extern void thread_try_catch_cmd (thread_info *thr,
-				  gdb::optional<int> ada_task,
+				  std::optional<int> ada_task,
 				  const char *cmd, int from_tty,
 				  const qcs_flags &flags);
 
@@ -1033,4 +1071,4 @@ extern void thread_try_catch_cmd (thread_info *thr,
 
 extern const char *thread_state_string (enum thread_state state);
 
-#endif /* GDBTHREAD_H */
+#endif /* GDB_GDBTHREAD_H */

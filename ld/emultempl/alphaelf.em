@@ -1,5 +1,5 @@
 # This shell script emits a C file. -*- C -*-
-#   Copyright (C) 2003-2023 Free Software Foundation, Inc.
+#   Copyright (C) 2003-2025 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -104,19 +104,13 @@ alpha_finish (void)
   if (limit_32bit)
     elf_elfheader (link_info.output_bfd)->e_flags |= EF_ALPHA_32BIT;
 
-  finish_default ();
+  ldelf_finish ();
 }
 EOF
 
 # Define some shell vars to insert bits of code into the standard elf
 # parse_args and list_options functions.
 #
-PARSE_AND_LIST_PROLOGUE='
-#define OPTION_TASO		300
-#define OPTION_SECUREPLT	(OPTION_TASO + 1)
-#define OPTION_NO_SECUREPLT	(OPTION_SECUREPLT + 1)
-'
-
 PARSE_AND_LIST_LONGOPTS='
   { "taso", no_argument, NULL, OPTION_TASO },
   { "secureplt", no_argument, NULL, OPTION_SECUREPLT },

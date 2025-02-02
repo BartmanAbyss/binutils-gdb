@@ -1,5 +1,5 @@
 /* tc-m68k.c -- Assemble for the m68k family
-   Copyright (C) 1987-2023 Free Software Foundation, Inc.
+   Copyright (C) 1987-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -455,7 +455,6 @@ static int reverse_16_bits (int in);
 static int reverse_8_bits (int in);
 static void install_gen_operand (int mode, int val);
 static void install_operand (int mode, int val);
-static void s_bss (int);
 static void s_data1 (int);
 static void s_data2 (int);
 static void s_even (int);
@@ -862,7 +861,6 @@ const pseudo_typeS md_pseudo_table[] =
 {
   {"data1", s_data1, 0},
   {"data2", s_data2, 0},
-  {"bss", s_bss, 0},
   {"even", s_even, 0},
   {"skip", s_space, 0},
   {"proc", s_proc, 0},
@@ -1284,8 +1282,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
 #undef F
 #undef MAP
 
-  reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   if (!fixp->fx_pcrel)
@@ -5494,16 +5492,6 @@ s_data2 (int ignore ATTRIBUTE_UNUSED)
 }
 
 static void
-s_bss (int ignore ATTRIBUTE_UNUSED)
-{
-  /* We don't support putting frags in the BSS segment, we fake it
-     by marking in_bss, then looking at s_skip for clues.  */
-
-  subseg_set (bss_section, 0);
-  demand_empty_rest_of_line ();
-}
-
-static void
 s_even (int ignore ATTRIBUTE_UNUSED)
 {
   int temp;
@@ -7353,9 +7341,9 @@ m68k_set_extension (char const *name, int allow_m, int silent)
    Invocation line includes a switch not recognized by the base assembler.
  */
 
-const char *md_shortopts = "lSA:m:kQ:V";
+const char md_shortopts[] = "lSA:m:kQ:V";
 
-struct option md_longopts[] = {
+const struct option md_longopts[] = {
 #define OPTION_PIC (OPTION_MD_BASE)
   {"pic", no_argument, NULL, OPTION_PIC},
 #define OPTION_REGISTER_PREFIX_OPTIONAL (OPTION_MD_BASE + 1)
@@ -7375,7 +7363,7 @@ struct option md_longopts[] = {
   {"pcrel", no_argument, NULL, OPTION_PCREL},
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c, const char *arg)

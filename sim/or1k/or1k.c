@@ -1,5 +1,5 @@
 /* OpenRISC simulator support code
-   Copyright (C) 2017-2023 Free Software Foundation, Inc.
+   Copyright (C) 2017-2024 Free Software Foundation, Inc.
 
    This file is part of GDB, the GNU debugger.
 
@@ -270,7 +270,7 @@ or1k32bf_nop (sim_cpu *current_cpu, USI uimm16)
 
     case NOP_EXIT:
       sim_io_printf (CPU_STATE (current_cpu), "exit(%d)\n", GET_H_GPR (3));
-      /* fall through */
+      ATTRIBUTE_FALLTHROUGH;
     case NOP_EXIT_SILENT:
       sim_engine_halt (sd, current_cpu, NULL, CPU_PC_GET (current_cpu),
 		       sim_exited, GET_H_GPR (3));

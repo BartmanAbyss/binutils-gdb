@@ -1,6 +1,6 @@
 /* Declarations for value printing routines for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,10 +17,21 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef VALPRINT_H
-#define VALPRINT_H
+#ifndef GDB_VALPRINT_H
+#define GDB_VALPRINT_H
 
 #include "cli/cli-option.h"
+
+/* Possibilities for prettyformat parameters to routines which print
+   things.  */
+
+enum val_prettyformat
+  {
+    Val_no_prettyformat = 0,
+    Val_prettyformat,
+    /* * Use the default setting which the user has specified.  */
+    Val_prettyformat_default
+  };
 
 /* This is used to pass formatting options to various value-printing
    functions.  */
@@ -326,4 +337,4 @@ extern void common_val_print_checked
    const struct value_print_options *options,
    const struct language_defn *language);
 
-#endif
+#endif /* GDB_VALPRINT_H */

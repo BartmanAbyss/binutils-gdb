@@ -1,6 +1,6 @@
 // layout.h -- lay out output file sections for gold  -*- C++ -*-
 
-// Copyright (C) 2006-2023 Free Software Foundation, Inc.
+// Copyright (C) 2006-2025 Free Software Foundation, Inc.
 // Written by Ian Lance Taylor <iant@google.com>.
 
 // This file is part of gold.
@@ -950,7 +950,8 @@ class Layout
   add_target_dynamic_tags(bool use_rel, const Output_data* plt_got,
 			  const Output_data* plt_rel,
 			  const Output_data_reloc_generic* dyn_rel,
-			  bool add_debug, bool dynrel_includes_plt);
+			  bool add_debug, bool dynrel_includes_plt,
+			  bool custom_relcount);
 
   // Add a target-specific dynamic tag with constant value.
   void

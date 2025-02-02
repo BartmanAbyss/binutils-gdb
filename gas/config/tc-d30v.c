@@ -1,5 +1,5 @@
 /* tc-d30v.c -- Assembler code for the Mitsubishi D30V
-   Copyright (C) 1997-2023 Free Software Foundation, Inc.
+   Copyright (C) 1997-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -27,7 +27,7 @@
 const char comment_chars[]        = ";";
 const char line_comment_chars[]   = "#";
 const char line_separator_chars[] = "";
-const char *md_shortopts          = "OnNcC";
+const char md_shortopts[]         = "OnNcC";
 const char EXP_CHARS[]            = "eE";
 const char FLT_CHARS[]            = "dD";
 
@@ -107,12 +107,12 @@ static symbolS *d30v_last_label;
 #define NOP_RIGHT  ((long long) NOP)
 #define NOP2 (FM00 | NOP_LEFT | NOP_RIGHT)
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   {NULL, no_argument, NULL, 0}
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 /* Opcode hash table.  */
 static htab_t d30v_hash;
@@ -1757,8 +1757,8 @@ arelent *
 tc_gen_reloc (asection *seg ATTRIBUTE_UNUSED, fixS *fixp)
 {
   arelent *reloc;
-  reloc = XNEW (arelent);
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
+  reloc = notes_alloc (sizeof (arelent));
+  reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   reloc->address = fixp->fx_frag->fr_address + fixp->fx_where;
   reloc->howto = bfd_reloc_type_lookup (stdoutput, fixp->fx_r_type);
@@ -2055,7 +2055,7 @@ static void
 s_d30v_text (int i)
 
 {
-  s_text (i);
+  obj_elf_text (i);
   d30v_last_label = NULL;
   d30v_current_align = 0;
   d30v_current_align_seg = now_seg;
@@ -2067,7 +2067,7 @@ s_d30v_text (int i)
 static void
 s_d30v_data (int i)
 {
-  s_data (i);
+  obj_elf_data (i);
   d30v_last_label = NULL;
   d30v_current_align = 0;
   d30v_current_align_seg = now_seg;

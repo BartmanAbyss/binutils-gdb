@@ -1,6 +1,6 @@
 /* Ada language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 1992-2023 Free Software Foundation, Inc.
+   Copyright (C) 1992-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -18,13 +18,15 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 
-#include "defs.h"
 #include <ctype.h>
+#include "event-top.h"
+#include "exceptions.h"
+#include "extract-store-integer.h"
 #include "gdbsupport/gdb_regex.h"
 #include "frame.h"
 #include "symtab.h"
 #include "gdbtypes.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "expression.h"
 #include "parser-defs.h"
 #include "language.h"
@@ -57,6 +59,7 @@
 #include "cli/cli-utils.h"
 #include "gdbsupport/function-view.h"
 #include "gdbsupport/byte-vector.h"
+#include "gdbsupport/selftest.h"
 #include <algorithm>
 #include "ada-exp.h"
 #include "charset.h"
@@ -97,12 +100,12 @@ static struct value *make_array_descriptor (struct type *, struct value *);
 static void ada_add_block_symbols (std::vector<struct block_symbol> &,
 				   const struct block *,
 				   const lookup_name_info &lookup_name,
-				   domain_enum, struct objfile *);
+				   domain_search_flags, struct objfile *);
 
 static void ada_add_all_symbols (std::vector<struct block_symbol> &,
 				 const struct block *,
 				 const lookup_name_info &lookup_name,
-				 domain_enum, int, int *);
+				 domain_search_flags, int, int *);
 
 static int is_nonfunction (const std::vector<struct block_symbol> &);
 
@@ -175,9 +178,6 @@ static LONGEST pos_atr (struct value *);
 
 static struct value *val_atr (struct type *, LONGEST);
 
-static struct symbol *standard_lookup (const char *, const struct block *,
-				       domain_enum);
-
 static struct value *ada_search_struct_field (const char *, struct value *, int,
 					      struct type *);
 
@@ -193,14 +193,16 @@ static int ada_is_direct_array_type (struct type *);
 static struct value *ada_index_struct_field (int, struct value *, int,
 					     struct type *);
 
-static void add_component_interval (LONGEST, LONGEST, std::vector<LONGEST> &);
-
-
 static struct type *ada_find_any_type (const char *name);
 
 static symbol_name_matcher_ftype *ada_get_symbol_name_matcher
   (const lookup_name_info &lookup_name);
 
+static int symbols_are_identical_enums
+  (const std::vector<struct block_symbol> &syms);
+
+static bool ada_identical_enum_types_p (struct type *type1,
+					struct type *type2);
 
 
 /* The character set used for source files.  */
@@ -330,7 +332,7 @@ struct cache_entry
   /* The name used to perform the lookup.  */
   std::string name;
   /* The namespace used during the lookup.  */
-  domain_enum domain = UNDEF_DOMAIN;
+  domain_search_flags domain = 0;
   /* The symbol returned by the lookup, or NULL if no matching symbol
      was found.  */
   struct symbol *sym = nullptr;
@@ -344,7 +346,7 @@ struct cache_entry
 struct cache_entry_search
 {
   const char *name;
-  domain_enum domain;
+  domain_search_flags domain;
 
   hashval_t hash () const
   {
@@ -673,11 +675,11 @@ ada_discrete_type_high_bound (struct type *type)
       {
 	const dynamic_prop &high = type->bounds ()->high;
 
-	if (high.kind () == PROP_CONST)
+	if (high.is_constant ())
 	  return high.const_val ();
 	else
 	  {
-	    gdb_assert (high.kind () == PROP_UNDEFINED);
+	    gdb_assert (!high.is_available ());
 
 	    /* This happens when trying to evaluate a type's dynamic bound
 	       without a live target.  There is nothing relevant for us to
@@ -708,11 +710,11 @@ ada_discrete_type_low_bound (struct type *type)
       {
 	const dynamic_prop &low = type->bounds ()->low;
 
-	if (low.kind () == PROP_CONST)
+	if (low.is_constant ())
 	  return low.const_val ();
 	else
 	  {
-	    gdb_assert (low.kind () == PROP_UNDEFINED);
+	    gdb_assert (!low.is_available ());
 
 	    /* This happens when trying to evaluate a type's dynamic bound
 	       without a live target.  There is nothing relevant for us to
@@ -790,18 +792,6 @@ ada_get_decoded_type (struct type *type)
 
 				/* Language Selection */
 
-/* If the main program is in Ada, return language_ada, otherwise return LANG
-   (the main program is in Ada iif the adainit symbol is found).  */
-
-static enum language
-ada_update_initial_language (enum language lang)
-{
-  if (lookup_minimal_symbol ("adainit", NULL, NULL).minsym != NULL)
-    return language_ada;
-
-  return lang;
-}
-
 /* If the main procedure is written in Ada, then return its name.
    The result is good until the next call.  Return NULL if the main
    procedure doesn't appear to be in Ada.  */
@@ -809,7 +799,6 @@ ada_update_initial_language (enum language lang)
 const char *
 ada_main_name ()
 {
-  struct bound_minimal_symbol msym;
   static gdb::unique_xmalloc_ptr<char> main_program_name;
 
   /* For Ada, the name of the main procedure is stored in a specific
@@ -817,7 +806,9 @@ ada_main_name ()
      extract its address, and then read that string.  If we didn't find
      that string, then most probably the main procedure is not written
      in Ada.  */
-  msym = lookup_minimal_symbol (ADA_MAIN_PROGRAM_SYMBOL_NAME, NULL, NULL);
+  bound_minimal_symbol msym
+    = lookup_minimal_symbol (current_program_space,
+			     ADA_MAIN_PROGRAM_SYMBOL_NAME);
 
   if (msym.minsym != NULL)
     {
@@ -825,6 +816,13 @@ ada_main_name ()
       if (main_program_name_addr == 0)
 	error (_("Invalid address for Ada main program name."));
 
+      /* Force trust_readonly, because we always want to fetch this
+	 string from the executable, not from inferior memory.  If the
+	 user changes the exec-file and invokes "start", we want to
+	 pick the "main" from the new executable, not one that may
+	 come from the still-live inferior.  */
+      scoped_restore save_trust_readonly
+	= make_scoped_restore (&trust_readonly, true);
       main_program_name = target_read_string (main_program_name_addr, 1024);
       return main_program_name.get ();
     }
@@ -1035,12 +1033,12 @@ find_case_fold_entry (uint32_t c)
    rather than emitting a warning.  Result good to next call.  */
 
 static const char *
-ada_fold_name (gdb::string_view name, bool throw_on_error = false)
+ada_fold_name (std::string_view name, bool throw_on_error = false)
 {
   static std::string fold_storage;
 
   if (!name.empty () && name[0] == '\'')
-    fold_storage = gdb::to_string (name.substr (1, name.size () - 2));
+    fold_storage = name.substr (1, name.size () - 2);
   else
     {
       /* Why convert to UTF-32 and implement our own case-folding,
@@ -1081,12 +1079,12 @@ ada_fold_name (gdb::string_view name, bool throw_on_error = false)
 	      warned = true;
 	      warning (_("could not convert '%s' from the host encoding (%s) to UTF-32.\n"
 			 "This normally should not happen, please file a bug report."),
-		       gdb::to_string (name).c_str (), host_charset ());
+		       std::string (name).c_str (), host_charset ());
 	    }
 
 	  /* We don't try to recover from errors; just return the
 	     original string.  */
-	  fold_storage = gdb::to_string (name);
+	  fold_storage = name;
 	  return fold_storage.c_str ();
 	}
 
@@ -1135,12 +1133,12 @@ ada_fold_name (gdb::string_view name, bool throw_on_error = false)
 	      warned = true;
 	      warning (_("could not convert the lower-cased variant of '%s'\n"
 			 "from UTF-32 to the host encoding (%s)."),
-		       gdb::to_string (name).c_str (), host_charset ());
+		       std::string (name).c_str (), host_charset ());
 	    }
 
 	  /* We don't try to recover from errors; just return the
 	     original string.  */
-	  fold_storage = gdb::to_string (name);
+	  fold_storage = name;
 	}
     }
 
@@ -1308,7 +1306,7 @@ convert_from_hex_encoded (std::string &out, const char *str, int n)
 /* See ada-lang.h.  */
 
 std::string
-ada_decode (const char *encoded, bool wrap, bool operators)
+ada_decode (const char *encoded, bool wrap, bool operators, bool wide)
 {
   int i;
   int len0;
@@ -1389,7 +1387,7 @@ ada_decode (const char *encoded, bool wrap, bool operators)
 	i -= 1;
       if (i > 1 && encoded[i] == '_' && encoded[i - 1] == '_')
 	len0 = i - 1;
-      else if (encoded[i] == '$')
+      else if (i >= 0 && encoded[i] == '$')
 	len0 = i;
     }
 
@@ -1490,7 +1488,7 @@ ada_decode (const char *encoded, bool wrap, bool operators)
       if (i < len0 + 3
 	  && encoded[i] == 'N' && encoded[i+1] == '_' && encoded[i+2] == '_')
 	{
-	  /* Backtrack a bit up until we reach either the begining of
+	  /* Backtrack a bit up until we reach either the beginning of
 	     the encoded name, or "__".  Make sure that we only find
 	     digits or lowercase characters.  */
 	  const char *ptr = encoded + i - 1;
@@ -1502,7 +1500,7 @@ ada_decode (const char *encoded, bool wrap, bool operators)
 	    i++;
 	}
 
-      if (i < len0 + 3 && encoded[i] == 'U' && isxdigit (encoded[i + 1]))
+      if (wide && i < len0 + 3 && encoded[i] == 'U' && isxdigit (encoded[i + 1]))
 	{
 	  if (convert_from_hex_encoded (decoded, &encoded[i + 1], 2))
 	    {
@@ -1510,7 +1508,7 @@ ada_decode (const char *encoded, bool wrap, bool operators)
 	      continue;
 	    }
 	}
-      else if (i < len0 + 5 && encoded[i] == 'W' && isxdigit (encoded[i + 1]))
+      else if (wide && i < len0 + 5 && encoded[i] == 'W' && isxdigit (encoded[i + 1]))
 	{
 	  if (convert_from_hex_encoded (decoded, &encoded[i + 1], 4))
 	    {
@@ -1518,7 +1516,7 @@ ada_decode (const char *encoded, bool wrap, bool operators)
 	      continue;
 	    }
 	}
-      else if (i < len0 + 10 && encoded[i] == 'W' && encoded[i + 1] == 'W'
+      else if (wide && i < len0 + 10 && encoded[i] == 'W' && encoded[i + 1] == 'W'
 	       && isxdigit (encoded[i + 2]))
 	{
 	  if (convert_from_hex_encoded (decoded, &encoded[i + 2], 8))
@@ -1585,6 +1583,18 @@ Suppress:
     decoded = '<' + std::string(encoded) + '>';
   return decoded;
 }
+
+#ifdef GDB_SELF_TEST
+
+static void
+ada_decode_tests ()
+{
+  /* This isn't valid, but used to cause a crash.  PR gdb/30639.  The
+     result does not really matter very much.  */
+  SELF_CHECK (ada_decode ("44") == "44");
+}
+
+#endif
 
 /* Table for keeping permanent unique copies of decoded names.  Once
    allocated, names in this table are never released.  While this is a
@@ -1809,7 +1819,8 @@ desc_bounds_type (struct type *type)
 }
 
 /* If ARR is an array descriptor (fat or thin pointer), or pointer to
-   one, a pointer to its bounds data.   Otherwise NULL.  */
+   one, a pointer to its bounds data.  Otherwise, throw an
+   exception.  */
 
 static struct value *
 desc_bounds (struct value *arr)
@@ -1860,7 +1871,7 @@ desc_bounds (struct value *arr)
       return p_bounds;
     }
   else
-    return NULL;
+    error (_("Not an array"));
 }
 
 /* If TYPE is the type of an array-descriptor (fat pointer),  the bit
@@ -1880,8 +1891,8 @@ fat_pntr_bounds_bitsize (struct type *type)
 {
   type = desc_base_type (type);
 
-  if (TYPE_FIELD_BITSIZE (type, 1) > 0)
-    return TYPE_FIELD_BITSIZE (type, 1);
+  if (type->field (1).bitsize () > 0)
+    return type->field (1).bitsize ();
   else
     return 8 * ada_check_typedef (type->field (1).type ())->length ();
 }
@@ -1946,8 +1957,8 @@ fat_pntr_data_bitsize (struct type *type)
 {
   type = desc_base_type (type);
 
-  if (TYPE_FIELD_BITSIZE (type, 0) > 0)
-    return TYPE_FIELD_BITSIZE (type, 0);
+  if (type->field (0).bitsize () > 0)
+    return type->field (0).bitsize ();
   else
     return TARGET_CHAR_BIT * type->field (0).type ()->length ();
 }
@@ -1985,8 +1996,8 @@ desc_bound_bitsize (struct type *type, int i, int which)
 {
   type = desc_base_type (type);
 
-  if (TYPE_FIELD_BITSIZE (type, 2 * i + which - 2) > 0)
-    return TYPE_FIELD_BITSIZE (type, 2 * i + which - 2);
+  if (type->field (2 * i + which - 2).bitsize () > 0)
+    return type->field (2 * i + which - 2).bitsize ();
   else
     return 8 * type->field (2 * i + which - 2).type ()->length ();
 }
@@ -2078,23 +2089,6 @@ ada_is_array_descriptor_type (struct type *type)
 	  && desc_arity (desc_bounds_type (type)) > 0);
 }
 
-/* Non-zero iff type is a partially mal-formed GNAT array
-   descriptor.  FIXME: This is to compensate for some problems with
-   debugging output from GNAT.  Re-examine periodically to see if it
-   is still needed.  */
-
-int
-ada_is_bogus_array_descriptor (struct type *type)
-{
-  return
-    type != NULL
-    && type->code () == TYPE_CODE_STRUCT
-    && (lookup_struct_elt_type (type, "P_BOUNDS", 1) != NULL
-	|| lookup_struct_elt_type (type, "P_ARRAY", 1) != NULL)
-    && !ada_is_array_descriptor_type (type);
-}
-
-
 /* If ARR has a record type in the form of a standard GNAT array descriptor,
    (fat pointer) returns the type of the array data described---specifically,
    a pointer-to-array type.  If BOUNDS is non-zero, the bounds data are filled
@@ -2118,9 +2112,9 @@ ada_type_of_array (struct value *arr, int bounds)
 	ada_check_typedef (desc_data_target_type (arr->type ()));
 
       if (ada_is_unconstrained_packed_array_type (arr->type ()))
-	TYPE_FIELD_BITSIZE (array_type, 0) =
-	  decode_packed_array_bitsize (arr->type ());
-      
+	array_type->field (0).set_bitsize
+	  (decode_packed_array_bitsize (arr->type ()));
+
       return array_type;
     }
   else
@@ -2150,6 +2144,7 @@ ada_type_of_array (struct value *arr, int bounds)
 					longest_to_int (value_as_long (low)),
 					longest_to_int (value_as_long (high)));
 	  elt_type = create_array_type (alloc, elt_type, range_type);
+	  INIT_GNAT_SPECIFIC (elt_type);
 
 	  if (ada_is_unconstrained_packed_array_type (arr->type ()))
 	    {
@@ -2159,14 +2154,15 @@ ada_type_of_array (struct value *arr, int bounds)
 	      LONGEST lo = value_as_long (low);
 	      LONGEST hi = value_as_long (high);
 
-	      TYPE_FIELD_BITSIZE (elt_type, 0) =
-		decode_packed_array_bitsize (arr->type ());
+	      elt_type->field (0).set_bitsize
+		(decode_packed_array_bitsize (arr->type ()));
+
 	      /* If the array has no element, then the size is already
 		 zero, and does not need to be recomputed.  */
 	      if (lo < hi)
 		{
 		  int array_bitsize =
-			(hi - lo + 1) * TYPE_FIELD_BITSIZE (elt_type, 0);
+			(hi - lo + 1) * elt_type->field (0).bitsize ();
 
 		  elt_type->set_length ((array_bitsize + 7) / 8);
 		}
@@ -2284,7 +2280,7 @@ ada_is_unconstrained_packed_array_type (struct type *type)
       if (type->code () == TYPE_CODE_TYPEDEF)
 	type = ada_typedef_target_type (type);
       /* Now we can see if the array elements are packed.  */
-      return TYPE_FIELD_BITSIZE (type, 0) > 0;
+      return type->field (0).bitsize () > 0;
     }
 
   return 0;
@@ -2298,7 +2294,7 @@ ada_is_any_packed_array_type (struct type *type)
 {
   return (ada_is_constrained_packed_array_type (type)
 	  || (type->code () == TYPE_CODE_ARRAY
-	      && TYPE_FIELD_BITSIZE (type, 0) % 8 != 0));
+	      && type->field (0).bitsize () % 8 != 0));
 }
 
 /* Given that TYPE encodes a packed array type (constrained or unconstrained),
@@ -2332,7 +2328,7 @@ decode_packed_array_bitsize (struct type *type)
 	 fetches the array type.  */
       type = type->field (0).type ()->target_type ();
       /* Now we can see if the array elements are packed.  */
-      return TYPE_FIELD_BITSIZE (type, 0);
+      return type->field (0).bitsize ();
     }
 
   if (sscanf (tail + sizeof ("___XP") - 1, "%ld", &bits) != 1)
@@ -2387,7 +2383,7 @@ constrained_packed_array_type (struct type *type, long *elt_bits)
     constrained_packed_array_type (ada_check_typedef (type->target_type ()),
 				   elt_bits);
   new_type = create_array_type (alloc, new_elt_type, index_type);
-  TYPE_FIELD_BITSIZE (new_type, 0) = *elt_bits;
+  new_type->field (0).set_bitsize (*elt_bits);
   new_type->set_name (ada_type_name (type));
 
   if ((check_typedef (index_type)->code () == TYPE_CODE_RANGE
@@ -2473,8 +2469,8 @@ recursively_update_array_bitsize (struct type *type)
   if (elt_type->code () == TYPE_CODE_ARRAY)
     {
       LONGEST elt_len = recursively_update_array_bitsize (elt_type);
-      LONGEST elt_bitsize = elt_len * TYPE_FIELD_BITSIZE (elt_type, 0);
-      TYPE_FIELD_BITSIZE (type, 0) = elt_bitsize;
+      LONGEST elt_bitsize = elt_len * elt_type->field (0).bitsize ();
+      type->field (0).set_bitsize (elt_bitsize);
 
       type->set_length (((our_len * elt_bitsize + HOST_CHAR_BIT - 1)
 			 / HOST_CHAR_BIT));
@@ -2571,7 +2567,7 @@ value_subscript_packed (struct value *arr, int arity, struct value **ind)
   for (i = 0; i < arity; i += 1)
     {
       if (elt_type->code () != TYPE_CODE_ARRAY
-	  || TYPE_FIELD_BITSIZE (elt_type, 0) == 0)
+	  || elt_type->field (0).bitsize () == 0)
 	error
 	  (_("attempt to do packed indexing of "
 	     "something other than a packed array"));
@@ -2591,7 +2587,7 @@ value_subscript_packed (struct value *arr, int arity, struct value **ind)
 	  if (idx < lowerbound || idx > upperbound)
 	    lim_warning (_("packed array index %ld out of bounds"),
 			 (long) idx);
-	  bits = TYPE_FIELD_BITSIZE (elt_type, 0);
+	  bits = elt_type->field (0).bitsize ();
 	  elt_total_bit_offset += (idx - lowerbound) * bits;
 	  elt_type = ada_check_typedef (elt_type->target_type ());
 	}
@@ -3007,7 +3003,7 @@ ada_value_subscript (struct value *arr, int arity, struct value **ind)
 
   elt_type = ada_check_typedef (elt->type ());
   if (elt_type->code () == TYPE_CODE_ARRAY
-      && TYPE_FIELD_BITSIZE (elt_type, 0) > 0)
+      && elt_type->field (0).bitsize () > 0)
     return value_subscript_packed (elt, arity, ind);
 
   for (k = 0; k < arity; k += 1)
@@ -3064,7 +3060,7 @@ ada_value_ptr_subscript (struct value *arr, int arity, struct value **ind)
     = check_typedef (array_ind->enclosing_type ());
 
   if (type->code () == TYPE_CODE_ARRAY
-      && TYPE_FIELD_BITSIZE (type, 0) > 0)
+      && type->field (0).bitsize () > 0)
     return value_subscript_packed (array_ind, arity, ind);
 
   for (k = 0; k < arity; k += 1)
@@ -3099,9 +3095,9 @@ ada_value_slice_from_ptr (struct value *array_ptr, struct type *type,
   struct type *slice_type = create_array_type_with_stride
 			      (alloc, type0->target_type (), index_type,
 			       type0->dyn_prop (DYN_PROP_BYTE_STRIDE),
-			       TYPE_FIELD_BITSIZE (type0, 0));
+			       type0->field (0).bitsize ());
   int base_low =  ada_discrete_type_low_bound (type0->index_type ());
-  gdb::optional<LONGEST> base_low_pos, low_pos;
+  std::optional<LONGEST> base_low_pos, low_pos;
   CORE_ADDR base;
 
   low_pos = discrete_position (base_index_type, low);
@@ -3114,7 +3110,7 @@ ada_value_slice_from_ptr (struct value *array_ptr, struct type *type,
       base_low_pos = base_low;
     }
 
-  ULONGEST stride = TYPE_FIELD_BITSIZE (slice_type, 0) / 8;
+  ULONGEST stride = slice_type->field (0).bitsize () / 8;
   if (stride == 0)
     stride = type0->target_type ()->length ();
 
@@ -3134,8 +3130,8 @@ ada_value_slice (struct value *array, int low, int high)
   struct type *slice_type = create_array_type_with_stride
 			      (alloc, type->target_type (), index_type,
 			       type->dyn_prop (DYN_PROP_BYTE_STRIDE),
-			       TYPE_FIELD_BITSIZE (type, 0));
-  gdb::optional<LONGEST> low_pos, high_pos;
+			       type->field (0).bitsize ());
+  std::optional<LONGEST> low_pos, high_pos;
 
 
   low_pos = discrete_position (base_index_type, low);
@@ -3429,67 +3425,45 @@ ada_decoded_op_name (enum exp_opcode op)
   error (_("Could not find operator name for opcode"));
 }
 
-/* Returns true (non-zero) iff decoded name N0 should appear before N1
-   in a listing of choices during disambiguation (see sort_choices, below).
-   The idea is that overloadings of a subprogram name from the
-   same package should sort in their source order.  We settle for ordering
-   such symbols by their trailing number (__N  or $N).  */
-
-static int
-encoded_ordered_before (const char *N0, const char *N1)
-{
-  if (N1 == NULL)
-    return 0;
-  else if (N0 == NULL)
-    return 1;
-  else
-    {
-      int k0, k1;
-
-      for (k0 = strlen (N0) - 1; k0 > 0 && isdigit (N0[k0]); k0 -= 1)
-	;
-      for (k1 = strlen (N1) - 1; k1 > 0 && isdigit (N1[k1]); k1 -= 1)
-	;
-      if ((N0[k0] == '_' || N0[k0] == '$') && N0[k0 + 1] != '\000'
-	  && (N1[k1] == '_' || N1[k1] == '$') && N1[k1 + 1] != '\000')
-	{
-	  int n0, n1;
-
-	  n0 = k0;
-	  while (N0[n0] == '_' && n0 > 0 && N0[n0 - 1] == '_')
-	    n0 -= 1;
-	  n1 = k1;
-	  while (N1[n1] == '_' && n1 > 0 && N1[n1 - 1] == '_')
-	    n1 -= 1;
-	  if (n0 == n1 && strncmp (N0, N1, n0) == 0)
-	    return (atoi (N0 + k0 + 1) < atoi (N1 + k1 + 1));
-	}
-      return (strcmp (N0, N1) < 0);
-    }
-}
-
-/* Sort SYMS[0..NSYMS-1] to put the choices in a canonical order by the
-   encoded names.  */
+/* Sort SYMS to put the choices in a canonical order by the encoded
+   names.  */
 
 static void
-sort_choices (struct block_symbol syms[], int nsyms)
+sort_choices (std::vector<struct block_symbol> &syms)
 {
-  int i;
+  std::sort (syms.begin (), syms.end (),
+	     [] (const block_symbol &a, const block_symbol &b)
+	     {
+	       if (!a.symbol->is_objfile_owned ())
+		 return true;
+	       if (!b.symbol->is_objfile_owned ())
+		 return true;
 
-  for (i = 1; i < nsyms; i += 1)
-    {
-      struct block_symbol sym = syms[i];
-      int j;
+	       const char *fna = a.symbol->symtab ()->filename;
+	       const char *fnb = b.symbol->symtab ()->filename;
 
-      for (j = i - 1; j >= 0; j -= 1)
-	{
-	  if (encoded_ordered_before (syms[j].symbol->linkage_name (),
-				      sym.symbol->linkage_name ()))
-	    break;
-	  syms[j + 1] = syms[j];
-	}
-      syms[j + 1] = sym;
-    }
+	       /* First sort by basename.  This is done because,
+		  depending on how GNAT was invoked, different sources
+		  might have relative or absolute paths, but we'd like
+		  similar ones to appear together.  */
+	       int cmp = strcmp (lbasename (fna), lbasename (fnb));
+	       if (cmp != 0)
+		 return cmp < 0;
+
+	       /* The basenames are the same, so group identical paths
+		  together.  */
+	       cmp = strcmp (fna, fnb);
+	       if (cmp != 0)
+		 return cmp < 0;
+
+	       if (a.symbol->line () < b.symbol->line ())
+		 return true;
+	       if (a.symbol->line () > b.symbol->line ())
+		 return false;
+
+	       return strcmp (a.symbol->natural_name (),
+			      b.symbol->natural_name ()) < 0;
+	     });
 }
 
 /* Whether GDB should display formals and return types for functions in the
@@ -3624,7 +3598,7 @@ get_selections (int *choices, int n_choices, int max_results,
   return n_chosen;
 }
 
-/* Given a list of NSYMS symbols in SYMS, select up to MAX_RESULTS>0
+/* Given a list symbols in SYMS, select up to MAX_RESULTS>0
    by asking the user (if necessary), returning the number selected,
    and setting the first elements of SYMS items.  Error if no symbols
    selected.  */
@@ -3633,18 +3607,16 @@ get_selections (int *choices, int n_choices, int max_results,
    to be re-integrated one of these days.  */
 
 static int
-user_select_syms (struct block_symbol *syms, int nsyms, int max_results)
+user_select_syms (std::vector<struct block_symbol> &syms, int max_results)
 {
   int i;
-  int *chosen = XALLOCAVEC (int , nsyms);
-  int n_chosen;
   int first_choice = (max_results == 1) ? 1 : 2;
   const char *select_mode = multiple_symbols_select_mode ();
 
   if (max_results < 1)
     error (_("Request to select 0 symbols!"));
-  if (nsyms <= 1)
-    return nsyms;
+  if (syms.size () <= 1)
+    return syms.size ();
 
   if (select_mode == multiple_symbols_cancel)
     error (_("\
@@ -3655,15 +3627,15 @@ See set/show multiple-symbol."));
      Only do that if more than one symbol can be selected, of course.
      Otherwise, display the menu as usual.  */
   if (select_mode == multiple_symbols_all && max_results > 1)
-    return nsyms;
+    return syms.size ();
 
   gdb_printf (_("[0] cancel\n"));
   if (max_results > 1)
     gdb_printf (_("[1] all\n"));
 
-  sort_choices (syms, nsyms);
+  sort_choices (syms);
 
-  for (i = 0; i < nsyms; i += 1)
+  for (i = 0; i < syms.size (); i += 1)
     {
       if (syms[i].symbol == NULL)
 	continue;
@@ -3703,9 +3675,11 @@ See set/show multiple-symbol."));
 	      gdb_printf ("[%d] ", i + first_choice);
 	      ada_print_symbol_signature (gdb_stdout, syms[i].symbol,
 					  &type_print_raw_options);
-	      gdb_printf (_(" at %s:%d\n"),
-			  symtab_to_filename_for_display (symtab),
-			  syms[i].symbol->line ());
+	      gdb_printf (_(" at %ps:%ps\n"),
+			  styled_string (file_name_style.style (),
+					 symtab_to_filename_for_display (symtab)),
+			  styled_string (line_number_style.style (),
+					 pulongest (syms[i].symbol->line ())));
 	    }
 	  else if (is_enumeral
 		   && syms[i].symbol->type ()->name () != NULL)
@@ -3724,9 +3698,10 @@ See set/show multiple-symbol."));
 
 	      if (symtab != NULL)
 		gdb_printf (is_enumeral
-			    ? _(" in %s (enumeral)\n")
-			    : _(" at %s:?\n"),
-			    symtab_to_filename_for_display (symtab));
+			    ? _(" in %ps (enumeral)\n")
+			    : _(" at %ps:?\n"),
+			    styled_string (file_name_style.style (),
+					   symtab_to_filename_for_display (symtab)));
 	      else
 		gdb_printf (is_enumeral
 			    ? _(" (enumeral)\n")
@@ -3735,8 +3710,10 @@ See set/show multiple-symbol."));
 	}
     }
 
-  n_chosen = get_selections (chosen, nsyms, max_results, max_results > 1,
-			     "overload-choice");
+  int *chosen = XALLOCAVEC (int , syms.size ());
+  int n_chosen = get_selections (chosen, syms.size (),
+				 max_results, max_results > 1,
+				 "overload-choice");
 
   for (i = 0; i < n_chosen; i += 1)
     syms[i] = syms[chosen[i]];
@@ -3754,7 +3731,7 @@ ada_find_operator_symbol (enum exp_opcode op, bool parse_completion,
     {
       std::vector<struct block_symbol> candidates
 	= ada_lookup_symbol_list (ada_decoded_op_name (op),
-				  NULL, VAR_DOMAIN);
+				  NULL, SEARCH_VFT);
 
       int i = ada_resolve_function (candidates, argvec,
 				    nargs, ada_decoded_op_name (op), NULL,
@@ -3775,7 +3752,7 @@ ada_resolve_funcall (struct symbol *sym, const struct block *block,
 		     innermost_block_tracker *tracker)
 {
   std::vector<struct block_symbol> candidates
-    = ada_lookup_symbol_list (sym->linkage_name (), block, VAR_DOMAIN);
+    = ada_lookup_symbol_list (sym->linkage_name (), block, SEARCH_VFT);
 
   int i;
   if (candidates.size () == 1)
@@ -3806,11 +3783,22 @@ ada_resolve_enum (std::vector<struct block_symbol> &syms,
   gdb_assert (context_type->code () == TYPE_CODE_ENUM);
   context_type = ada_check_typedef (context_type);
 
+  /* We already know the name matches, so we're just looking for
+     an element of the correct enum type.  */
+  struct type *type1 = context_type;
   for (int i = 0; i < syms.size (); ++i)
     {
-      /* We already know the name matches, so we're just looking for
-	 an element of the correct enum type.  */
-      if (ada_check_typedef (syms[i].symbol->type ()) == context_type)
+      struct type *type2 = ada_check_typedef (syms[i].symbol->type ());
+      if (type1 == type2)
+	return i;
+    }
+
+  for (int i = 0; i < syms.size (); ++i)
+    {
+      struct type *type2 = ada_check_typedef (syms[i].symbol->type ());
+      if (strcmp (type1->name (), type2->name ()) != 0)
+	continue;
+      if (ada_identical_enum_types_p (type1, type2))
 	return i;
     }
 
@@ -3828,7 +3816,7 @@ ada_resolve_variable (struct symbol *sym, const struct block *block,
 		      innermost_block_tracker *tracker)
 {
   std::vector<struct block_symbol> candidates
-    = ada_lookup_symbol_list (sym->linkage_name (), block, VAR_DOMAIN);
+    = ada_lookup_symbol_list (sym->linkage_name (), block, SEARCH_VFT);
 
   if (std::any_of (candidates.begin (),
 		   candidates.end (),
@@ -3882,6 +3870,24 @@ ada_resolve_variable (struct symbol *sym, const struct block *block,
 	   && context_type->code () == TYPE_CODE_ENUM)
     i = ada_resolve_enum (candidates, sym->linkage_name (), context_type,
 			  parse_completion);
+  else if (context_type == nullptr
+	   && symbols_are_identical_enums (candidates))
+    {
+      /* If all the remaining symbols are identical enumerals, then
+	 just keep the first one and discard the rest.
+
+	 Unlike what we did previously, we do not discard any entry
+	 unless they are ALL identical.  This is because the symbol
+	 comparison is not a strict comparison, but rather a practical
+	 comparison.  If all symbols are considered identical, then
+	 we can just go ahead and use the first one and discard the rest.
+	 But if we cannot reduce the list to a single element, we have
+	 to ask the user to disambiguate anyways.  And if we have to
+	 present a multiple-choice menu, it's less confusing if the list
+	 isn't missing some choices that were identical and yet distinct.  */
+      candidates.resize (1);
+      i = 0;
+    }
   else if (deprocedure_p && !is_nonfunction (candidates))
     {
       i = ada_resolve_function
@@ -3894,7 +3900,7 @@ ada_resolve_variable (struct symbol *sym, const struct block *block,
   else
     {
       gdb_printf (_("Multiple matches for %s\n"), sym->print_name ());
-      user_select_syms (candidates.data (), candidates.size (), 1);
+      user_select_syms (candidates, 1);
       i = 0;
     }
 
@@ -3902,11 +3908,37 @@ ada_resolve_variable (struct symbol *sym, const struct block *block,
   return candidates[i];
 }
 
-/* Return non-zero if formal type FTYPE matches actual type ATYPE.  */
-/* The term "match" here is rather loose.  The match is heuristic and
-   liberal.  */
+static bool ada_type_match (struct type *ftype, struct type *atype);
 
-static int
+/* Helper for ada_type_match that checks that two array types are
+   compatible.  As with that function, FTYPE is the formal type and
+   ATYPE is the actual type.  */
+
+static bool
+ada_type_match_arrays (struct type *ftype, struct type *atype)
+{
+  if (ftype->code () != TYPE_CODE_ARRAY
+      && !ada_is_array_descriptor_type (ftype))
+    return false;
+  if (atype->code () != TYPE_CODE_ARRAY
+      && !ada_is_array_descriptor_type (atype))
+    return false;
+
+  if (ada_array_arity (ftype) != ada_array_arity (atype))
+    return false;
+
+  struct type *f_elt_type = ada_array_element_type (ftype, -1);
+  struct type *a_elt_type = ada_array_element_type (atype, -1);
+  return ada_type_match (f_elt_type, a_elt_type);
+}
+
+/* Return non-zero if formal type FTYPE matches actual type ATYPE.
+   The term "match" here is rather loose.  The match is heuristic and
+   liberal -- while it tries to reject matches that are obviously
+   incorrect, it may still let through some that do not strictly
+   correspond to Ada rules.  */
+
+static bool
 ada_type_match (struct type *ftype, struct type *atype)
 {
   ftype = ada_check_typedef (ftype);
@@ -3923,11 +3955,11 @@ ada_type_match (struct type *ftype, struct type *atype)
       return ftype->code () == atype->code ();
     case TYPE_CODE_PTR:
       if (atype->code () != TYPE_CODE_PTR)
-	return 0;
+	return false;
       atype = atype->target_type ();
       /* This can only happen if the actual argument is 'null'.  */
       if (atype->code () == TYPE_CODE_INT && atype->length () == 0)
-	return 1;
+	return true;
       return ada_type_match (ftype->target_type (), atype);
     case TYPE_CODE_INT:
     case TYPE_CODE_ENUM:
@@ -3937,22 +3969,19 @@ ada_type_match (struct type *ftype, struct type *atype)
 	case TYPE_CODE_INT:
 	case TYPE_CODE_ENUM:
 	case TYPE_CODE_RANGE:
-	  return 1;
+	  return true;
 	default:
-	  return 0;
+	  return false;
 	}
 
-    case TYPE_CODE_ARRAY:
-      return (atype->code () == TYPE_CODE_ARRAY
-	      || ada_is_array_descriptor_type (atype));
-
     case TYPE_CODE_STRUCT:
-      if (ada_is_array_descriptor_type (ftype))
-	return (atype->code () == TYPE_CODE_ARRAY
-		|| ada_is_array_descriptor_type (atype));
-      else
+      if (!ada_is_array_descriptor_type (ftype))
 	return (atype->code () == TYPE_CODE_STRUCT
 		&& !ada_is_array_descriptor_type (atype));
+
+      [[fallthrough]];
+    case TYPE_CODE_ARRAY:
+      return ada_type_match_arrays (ftype, atype);
 
     case TYPE_CODE_UNION:
     case TYPE_CODE_FLT:
@@ -4077,7 +4106,8 @@ ada_resolve_function (std::vector<struct block_symbol> &syms,
   else if (m > 1 && !parse_completion)
     {
       gdb_printf (_("Multiple matches for %s\n"), name);
-      user_select_syms (syms.data (), m, 1);
+      syms.resize (m);
+      user_select_syms (syms, 1);
       return 0;
     }
   return 0;
@@ -4642,12 +4672,12 @@ make_array_descriptor (struct type *type, struct value *arr)
    even in this case, some expensive name-based symbol searches are still
    sometimes necessary - to find an XVZ variable, mostly.  */
 
-/* Clear all entries from the symbol cache.  */
+/* See ada-lang.h.  */
 
-static void
-ada_clear_symbol_cache ()
+void
+ada_clear_symbol_cache (program_space *pspace)
 {
-  ada_pspace_data_handle.clear (current_program_space);
+  ada_pspace_data_handle.clear (pspace);
 }
 
 /* Search the symbol cache for an entry matching NAME and DOMAIN.
@@ -4657,7 +4687,7 @@ ada_clear_symbol_cache ()
    SYM.  Same principle for BLOCK if not NULL.  */
 
 static int
-lookup_cached_symbol (const char *name, domain_enum domain,
+lookup_cached_symbol (const char *name, domain_search_flags domain,
 		      struct symbol **sym, const struct block **block)
 {
   htab_t tab = get_ada_pspace_data (current_program_space);
@@ -4680,8 +4710,8 @@ lookup_cached_symbol (const char *name, domain_enum domain,
    in domain DOMAIN, save this result in our symbol cache.  */
 
 static void
-cache_symbol (const char *name, domain_enum domain, struct symbol *sym,
-	      const struct block *block)
+cache_symbol (const char *name, domain_search_flags domain,
+	      struct symbol *sym, const struct block *block)
 {
   /* Symbols for builtin types don't have a block.
      For now don't cache such symbols.  */
@@ -4738,14 +4768,14 @@ name_match_type_from_name (const char *lookup_name)
 
 static struct symbol *
 standard_lookup (const char *name, const struct block *block,
-		 domain_enum domain)
+		 domain_search_flags domain)
 {
   /* Initialize it just to avoid a GCC false warning.  */
   struct block_symbol sym = {};
 
   if (lookup_cached_symbol (name, domain, &sym.symbol, NULL))
     return sym.symbol;
-  ada_lookup_encoded_symbol (name, block, domain, &sym);
+  sym = ada_lookup_encoded_symbol (name, block, domain);
   cache_symbol (name, domain, sym.symbol, sym.block);
   return sym.symbol;
 }
@@ -4874,10 +4904,10 @@ add_defn_to_vec (std::vector<struct block_symbol> &result,
    specially: "standard__" is first stripped off, and only static and
    global symbols are searched.  */
 
-struct bound_minimal_symbol
+bound_minimal_symbol
 ada_lookup_simple_minsym (const char *name, struct objfile *objfile)
 {
-  struct bound_minimal_symbol result;
+  bound_minimal_symbol result;
 
   symbol_name_match_type match_type = name_match_type_from_name (name);
   lookup_name_info lookup_name (name, match_type);
@@ -4886,7 +4916,7 @@ ada_lookup_simple_minsym (const char *name, struct objfile *objfile)
     = ada_get_symbol_name_matcher (lookup_name);
 
   gdbarch_iterate_over_objfiles_in_search_order
-    (objfile != NULL ? objfile->arch () : target_gdbarch (),
+    (objfile != NULL ? objfile->arch () : current_inferior ()->arch (),
      [&result, lookup_name, match_name] (struct objfile *obj)
        {
 	 for (minimal_symbol *msymbol : obj->msymbols ())
@@ -4917,47 +4947,44 @@ is_nondebugging_type (struct type *type)
   return (name != NULL && strcmp (name, "<variable, no debug info>") == 0);
 }
 
-/* Return nonzero if TYPE1 and TYPE2 are two enumeration types
+/* Return true if TYPE1 and TYPE2 are two enumeration types
    that are deemed "identical" for practical purposes.
 
    This function assumes that TYPE1 and TYPE2 are both TYPE_CODE_ENUM
-   types and that their number of enumerals is identical (in other
-   words, type1->num_fields () == type2->num_fields ()).  */
+   types.  */
 
-static int
+static bool
 ada_identical_enum_types_p (struct type *type1, struct type *type2)
 {
-  int i;
-
   /* The heuristic we use here is fairly conservative.  We consider
      that 2 enumerate types are identical if they have the same
      number of enumerals and that all enumerals have the same
      underlying value and name.  */
 
+  if (type1->num_fields () != type2->num_fields ())
+    return false;
+
   /* All enums in the type should have an identical underlying value.  */
-  for (i = 0; i < type1->num_fields (); i++)
+  for (int i = 0; i < type1->num_fields (); i++)
     if (type1->field (i).loc_enumval () != type2->field (i).loc_enumval ())
-      return 0;
+      return false;
 
   /* All enumerals should also have the same name (modulo any numerical
      suffix).  */
-  for (i = 0; i < type1->num_fields (); i++)
+  for (int i = 0; i < type1->num_fields (); i++)
     {
       const char *name_1 = type1->field (i).name ();
       const char *name_2 = type2->field (i).name ();
       int len_1 = strlen (name_1);
       int len_2 = strlen (name_2);
 
-      ada_remove_trailing_digits (type1->field (i).name (), &len_1);
-      ada_remove_trailing_digits (type2->field (i).name (), &len_2);
-      if (len_1 != len_2
-	  || strncmp (type1->field (i).name (),
-		      type2->field (i).name (),
-		      len_1) != 0)
-	return 0;
+      ada_remove_trailing_digits (name_1, &len_1);
+      ada_remove_trailing_digits (name_2, &len_2);
+      if (len_1 != len_2 || strncmp (name_1, name_2, len_1) != 0)
+	return false;
     }
 
-  return 1;
+  return true;
 }
 
 /* Return nonzero if all the symbols in SYMS are all enumeral symbols
@@ -5002,12 +5029,6 @@ symbols_are_identical_enums (const std::vector<struct block_symbol> &syms)
     if (syms[i].symbol->value_longest () != syms[0].symbol->value_longest ())
       return 0;
 
-  /* Quick check: They should all have the same number of enumerals.  */
-  for (i = 1; i < syms.size (); i++)
-    if (syms[i].symbol->type ()->num_fields ()
-	!= syms[0].symbol->type ()->num_fields ())
-      return 0;
-
   /* All the sanity checks passed, so we might have a set of
      identical enumeration types.  Perform a more complete
      comparison of the type of each symbol.  */
@@ -5026,79 +5047,78 @@ symbols_are_identical_enums (const std::vector<struct block_symbol> &syms)
    debugging symbols)).  Modifies SYMS to squeeze out deleted entries.  */
 
 static void
-remove_extra_symbols (std::vector<struct block_symbol> *syms)
+remove_extra_symbols (std::vector<struct block_symbol> &syms)
 {
   int i, j;
 
   /* We should never be called with less than 2 symbols, as there
      cannot be any extra symbol in that case.  But it's easy to
      handle, since we have nothing to do in that case.  */
-  if (syms->size () < 2)
+  if (syms.size () < 2)
     return;
 
   i = 0;
-  while (i < syms->size ())
+  while (i < syms.size ())
     {
-      int remove_p = 0;
+      bool remove_p = false;
 
       /* If two symbols have the same name and one of them is a stub type,
 	 the get rid of the stub.  */
 
-      if ((*syms)[i].symbol->type ()->is_stub ()
-	  && (*syms)[i].symbol->linkage_name () != NULL)
+      if (syms[i].symbol->type ()->is_stub ()
+	  && syms[i].symbol->linkage_name () != NULL)
 	{
-	  for (j = 0; j < syms->size (); j++)
+	  for (j = 0; !remove_p && j < syms.size (); j++)
 	    {
 	      if (j != i
-		  && !(*syms)[j].symbol->type ()->is_stub ()
-		  && (*syms)[j].symbol->linkage_name () != NULL
-		  && strcmp ((*syms)[i].symbol->linkage_name (),
-			     (*syms)[j].symbol->linkage_name ()) == 0)
-		remove_p = 1;
+		  && !syms[j].symbol->type ()->is_stub ()
+		  && syms[j].symbol->linkage_name () != NULL
+		  && strcmp (syms[i].symbol->linkage_name (),
+			     syms[j].symbol->linkage_name ()) == 0)
+		remove_p = true;
 	    }
 	}
 
       /* Two symbols with the same name, same class and same address
 	 should be identical.  */
 
-      else if ((*syms)[i].symbol->linkage_name () != NULL
-	  && (*syms)[i].symbol->aclass () == LOC_STATIC
-	  && is_nondebugging_type ((*syms)[i].symbol->type ()))
+      else if (syms[i].symbol->linkage_name () != NULL
+	  && syms[i].symbol->aclass () == LOC_STATIC
+	  && is_nondebugging_type (syms[i].symbol->type ()))
 	{
-	  for (j = 0; j < syms->size (); j += 1)
+	  for (j = 0; !remove_p && j < syms.size (); j += 1)
 	    {
 	      if (i != j
-		  && (*syms)[j].symbol->linkage_name () != NULL
-		  && strcmp ((*syms)[i].symbol->linkage_name (),
-			     (*syms)[j].symbol->linkage_name ()) == 0
-		  && ((*syms)[i].symbol->aclass ()
-		      == (*syms)[j].symbol->aclass ())
-		  && (*syms)[i].symbol->value_address ()
-		  == (*syms)[j].symbol->value_address ())
-		remove_p = 1;
+		  && syms[j].symbol->linkage_name () != NULL
+		  && strcmp (syms[i].symbol->linkage_name (),
+			     syms[j].symbol->linkage_name ()) == 0
+		  && (syms[i].symbol->aclass ()
+		      == syms[j].symbol->aclass ())
+		  && syms[i].symbol->value_address ()
+		  == syms[j].symbol->value_address ())
+		remove_p = true;
 	    }
 	}
       
+      /* Two functions with the same block are identical.  */
+
+      else if (syms[i].symbol->aclass () == LOC_BLOCK)
+	{
+	  for (j = 0; !remove_p && j < syms.size (); j += 1)
+	    {
+	      if (i != j
+		  && syms[j].symbol->aclass () == LOC_BLOCK
+		  && (syms[i].symbol->value_block ()
+		      == syms[j].symbol->value_block ()))
+		remove_p = true;
+	    }
+	}
+
       if (remove_p)
-	syms->erase (syms->begin () + i);
+	syms.erase (syms.begin () + i);
       else
 	i += 1;
     }
-
-  /* If all the remaining symbols are identical enumerals, then
-     just keep the first one and discard the rest.
-
-     Unlike what we did previously, we do not discard any entry
-     unless they are ALL identical.  This is because the symbol
-     comparison is not a strict comparison, but rather a practical
-     comparison.  If all symbols are considered identical, then
-     we can just go ahead and use the first one and discard the rest.
-     But if we cannot reduce the list to a single element, we have
-     to ask the user to disambiguate anyways.  And if we have to
-     present a multiple-choice menu, it's less confusing if the list
-     isn't missing some choices that were identical and yet distinct.  */
-  if (symbols_are_identical_enums (*syms))
-    syms->resize (1);
 }
 
 /* Given a type that corresponds to a renaming entity, use the type name
@@ -5142,7 +5162,7 @@ is_package_name (const char *name)
 
   /* If it is a function that has not been defined at library level,
      then we should be able to look it up in the symbols.  */
-  if (standard_lookup (name, NULL, VAR_DOMAIN) != NULL)
+  if (standard_lookup (name, NULL, SEARCH_VFT) != NULL)
     return 0;
 
   /* Library-level function names start with "_ada_".  See if function
@@ -5155,7 +5175,7 @@ is_package_name (const char *name)
 
   std::string fun_name = string_printf ("_ada_%s", name);
 
-  return (standard_lookup (fun_name.c_str (), NULL, VAR_DOMAIN) == NULL);
+  return (standard_lookup (fun_name.c_str (), NULL, SEARCH_VFT) == NULL);
 }
 
 /* Return nonzero if SYM corresponds to a renaming entity that is
@@ -5315,7 +5335,7 @@ remove_irrelevant_renamings (std::vector<struct block_symbol> *syms,
 static void
 ada_add_local_symbols (std::vector<struct block_symbol> &result,
 		       const lookup_name_info &lookup_name,
-		       const struct block *block, domain_enum domain)
+		       const struct block *block, domain_search_flags domain)
 {
   while (block != NULL)
     {
@@ -5389,17 +5409,14 @@ static int
 ada_add_block_renamings (std::vector<struct block_symbol> &result,
 			 const struct block *block,
 			 const lookup_name_info &lookup_name,
-			 domain_enum domain)
+			 domain_search_flags domain)
 {
-  struct using_direct *renaming;
   int defns_mark = result.size ();
 
   symbol_name_matcher_ftype *name_match
     = ada_get_symbol_name_matcher (lookup_name);
 
-  for (renaming = block->get_using ();
-       renaming != NULL;
-       renaming = renaming->next)
+  for (using_direct *renaming : block->get_using ())
     {
       const char *r_name;
 
@@ -5438,91 +5455,6 @@ ada_add_block_renamings (std::vector<struct block_symbol> &result,
   return result.size () != defns_mark;
 }
 
-/* Implements compare_names, but only applying the comparision using
-   the given CASING.  */
-
-static int
-compare_names_with_case (const char *string1, const char *string2,
-			 enum case_sensitivity casing)
-{
-  while (*string1 != '\0' && *string2 != '\0')
-    {
-      char c1, c2;
-
-      if (isspace (*string1) || isspace (*string2))
-	return strcmp_iw_ordered (string1, string2);
-
-      if (casing == case_sensitive_off)
-	{
-	  c1 = tolower (*string1);
-	  c2 = tolower (*string2);
-	}
-      else
-	{
-	  c1 = *string1;
-	  c2 = *string2;
-	}
-      if (c1 != c2)
-	break;
-
-      string1 += 1;
-      string2 += 1;
-    }
-
-  switch (*string1)
-    {
-    case '(':
-      return strcmp_iw_ordered (string1, string2);
-    case '_':
-      if (*string2 == '\0')
-	{
-	  if (is_name_suffix (string1))
-	    return 0;
-	  else
-	    return 1;
-	}
-      /* FALLTHROUGH */
-    default:
-      if (*string2 == '(')
-	return strcmp_iw_ordered (string1, string2);
-      else
-	{
-	  if (casing == case_sensitive_off)
-	    return tolower (*string1) - tolower (*string2);
-	  else
-	    return *string1 - *string2;
-	}
-    }
-}
-
-/* Compare STRING1 to STRING2, with results as for strcmp.
-   Compatible with strcmp_iw_ordered in that...
-
-       strcmp_iw_ordered (STRING1, STRING2) <= 0
-
-   ... implies...
-
-       compare_names (STRING1, STRING2) <= 0
-
-   (they may differ as to what symbols compare equal).  */
-
-static int
-compare_names (const char *string1, const char *string2)
-{
-  int result;
-
-  /* Similar to what strcmp_iw_ordered does, we need to perform
-     a case-insensitive comparison first, and only resort to
-     a second, case-sensitive, comparison if the first one was
-     not sufficient to differentiate the two strings.  */
-
-  result = compare_names_with_case (string1, string2, case_sensitive_off);
-  if (result == 0)
-    result = compare_names_with_case (string1, string2, case_sensitive_on);
-
-  return result;
-}
-
 /* Convenience function to get at the Ada encoded lookup name for
    LOOKUP_NAME, as a C string.  */
 
@@ -5532,21 +5464,24 @@ ada_lookup_name (const lookup_name_info &lookup_name)
   return lookup_name.ada ().lookup_name ().c_str ();
 }
 
-/* A helper for add_nonlocal_symbols.  Call expand_matching_symbols
+/* A helper for add_nonlocal_symbols.  Expand all necessary symtabs
    for OBJFILE, then walk the objfile's symtabs and update the
    results.  */
 
 static void
 map_matching_symbols (struct objfile *objfile,
 		      const lookup_name_info &lookup_name,
-		      bool is_wild_match,
-		      domain_enum domain,
+		      domain_search_flags domain,
 		      int global,
 		      match_data &data)
 {
   data.objfile = objfile;
-  objfile->expand_matching_symbols (lookup_name, domain, global,
-				    is_wild_match ? nullptr : compare_names);
+  objfile->expand_symtabs_matching (nullptr, &lookup_name,
+				    nullptr, nullptr,
+				    global
+				    ? SEARCH_GLOBAL_BLOCK
+				    : SEARCH_STATIC_BLOCK,
+				    domain);
 
   const int block_kind = global ? GLOBAL_BLOCK : STATIC_BLOCK;
   for (compunit_symtab *symtab : objfile->compunits ())
@@ -5567,7 +5502,7 @@ map_matching_symbols (struct objfile *objfile,
 static void
 add_nonlocal_symbols (std::vector<struct block_symbol> &result,
 		      const lookup_name_info &lookup_name,
-		      domain_enum domain, int global)
+		      domain_search_flags domain, int global)
 {
   struct match_data data (&result);
 
@@ -5575,8 +5510,7 @@ add_nonlocal_symbols (std::vector<struct block_symbol> &result,
 
   for (objfile *objfile : current_program_space->objfiles ())
     {
-      map_matching_symbols (objfile, lookup_name, is_wild_match, domain,
-			    global, data);
+      map_matching_symbols (objfile, lookup_name, domain, global, data);
 
       for (compunit_symtab *cu : objfile->compunits ())
 	{
@@ -5596,7 +5530,7 @@ add_nonlocal_symbols (std::vector<struct block_symbol> &result,
       lookup_name_info name1 (bracket_name, symbol_name_match_type::FULL);
 
       for (objfile *objfile : current_program_space->objfiles ())
-	map_matching_symbols (objfile, name1, false, domain, global, data);
+	map_matching_symbols (objfile, name1, domain, global, data);
     }
 }
 
@@ -5621,7 +5555,7 @@ static void
 ada_add_all_symbols (std::vector<struct block_symbol> &result,
 		     const struct block *block,
 		     const lookup_name_info &lookup_name,
-		     domain_enum domain,
+		     domain_search_flags domain,
 		     int full_search,
 		     int *made_global_lookup_p)
 {
@@ -5701,7 +5635,7 @@ ada_add_all_symbols (std::vector<struct block_symbol> &result,
 static std::vector<struct block_symbol>
 ada_lookup_symbol_list_worker (const lookup_name_info &lookup_name,
 			       const struct block *block,
-			       domain_enum domain,
+			       domain_search_flags domain,
 			       int full_search)
 {
   int syms_from_global_search;
@@ -5710,7 +5644,7 @@ ada_lookup_symbol_list_worker (const lookup_name_info &lookup_name,
   ada_add_all_symbols (results, block, lookup_name,
 		       domain, full_search, &syms_from_global_search);
 
-  remove_extra_symbols (&results);
+  remove_extra_symbols (results);
 
   if (results.empty () && full_search && syms_from_global_search)
     cache_symbol (ada_lookup_name (lookup_name), domain, NULL, NULL);
@@ -5730,7 +5664,7 @@ ada_lookup_symbol_list_worker (const lookup_name_info &lookup_name,
 
 std::vector<struct block_symbol>
 ada_lookup_symbol_list (const char *name, const struct block *block,
-			domain_enum domain)
+			domain_search_flags domain)
 {
   symbol_name_match_type name_match_type = name_match_type_from_name (name);
   lookup_name_info lookup_name (name, name_match_type);
@@ -5740,15 +5674,11 @@ ada_lookup_symbol_list (const char *name, const struct block *block,
 
 /* The result is as for ada_lookup_symbol_list with FULL_SEARCH set
    to 1, but choosing the first symbol found if there are multiple
-   choices.
+   choices.  */
 
-   The result is stored in *INFO, which must be non-NULL.
-   If no match is found, INFO->SYM is set to NULL.  */
-
-void
+block_symbol
 ada_lookup_encoded_symbol (const char *name, const struct block *block,
-			   domain_enum domain,
-			   struct block_symbol *info)
+			   domain_search_flags domain)
 {
   /* Since we already have an encoded name, wrap it in '<>' to force a
      verbatim match.  Otherwise, if the name happens to not look like
@@ -5757,9 +5687,7 @@ ada_lookup_encoded_symbol (const char *name, const struct block *block,
      would e.g., incorrectly lowercase object renaming names like
      "R28b" -> "r28b".  */
   std::string verbatim = add_angle_brackets (name);
-
-  gdb_assert (info != NULL);
-  *info = ada_lookup_symbol (verbatim.c_str (), block, domain);
+  return ada_lookup_symbol (verbatim.c_str (), block, domain);
 }
 
 /* Return a symbol in DOMAIN matching NAME, in BLOCK0 and enclosing
@@ -5769,7 +5697,7 @@ ada_lookup_encoded_symbol (const char *name, const struct block *block,
 
 struct block_symbol
 ada_lookup_symbol (const char *name, const struct block *block0,
-		   domain_enum domain)
+		   domain_search_flags domain)
 {
   std::vector<struct block_symbol> candidates
     = ada_lookup_symbol_list (name, block0, domain);
@@ -5870,8 +5798,8 @@ is_name_suffix (const char *str)
   /* ??? We should not modify STR directly, as we are doing below.  This
      is fine in this case, but may become problematic later if we find
      that this alternative did not work, and want to try matching
-     another one from the begining of STR.  Since we modified it, we
-     won't be able to find the begining of the string anymore!  */
+     another one from the beginning of STR.  Since we modified it, we
+     won't be able to find the beginning of the string anymore!  */
   if (str[0] == 'X')
     {
       str += 1;
@@ -6041,7 +5969,7 @@ static void
 ada_add_block_symbols (std::vector<struct block_symbol> &result,
 		       const struct block *block,
 		       const lookup_name_info &lookup_name,
-		       domain_enum domain, struct objfile *objfile)
+		       domain_search_flags domain, struct objfile *objfile)
 {
   /* A matching argument symbol, if any.  */
   struct symbol *arg_sym;
@@ -6052,7 +5980,7 @@ ada_add_block_symbols (std::vector<struct block_symbol> &result,
   found_sym = false;
   for (struct symbol *sym : block_iterator_range (block, &lookup_name))
     {
-      if (symbol_matches_domain (sym->language (), sym->domain (), domain))
+      if (sym->matches (domain))
 	{
 	  if (sym->aclass () != LOC_UNRESOLVED)
 	    {
@@ -6087,8 +6015,7 @@ ada_add_block_symbols (std::vector<struct block_symbol> &result,
 
       for (struct symbol *sym : block_iterator_range (block))
       {
-	if (symbol_matches_domain (sym->language (),
-				   sym->domain (), domain))
+	if (sym->matches (domain))
 	  {
 	    int cmp;
 
@@ -6406,7 +6333,7 @@ ada_tag_value_at_base_address (struct value *obj)
 
   obj_type = obj->type ();
 
-  /* It is the responsability of the caller to deref pointers.  */
+  /* It is the responsibility of the caller to deref pointers.  */
 
   if (obj_type->code () == TYPE_CODE_PTR || obj_type->code () == TYPE_CODE_REF)
     return obj;
@@ -6422,7 +6349,8 @@ ada_tag_value_at_base_address (struct value *obj)
 
   struct type *offset_type
     = language_lookup_primitive_type (language_def (language_ada),
-				      target_gdbarch(), "storage_offset");
+				      current_inferior ()->arch (),
+				      "storage_offset");
   ptr_type = lookup_pointer_type (offset_type);
   val = value_cast (ptr_type, tag);
   if (!val)
@@ -6505,7 +6433,9 @@ ada_get_tsd_type (struct inferior *inf)
   struct ada_inferior_data *data = get_ada_inferior_data (inf);
 
   if (data->tsd_type == 0)
-    data->tsd_type = ada_find_any_type ("ada__tags__type_specific_data");
+    data->tsd_type
+      = lookup_transparent_type ("<ada__tags__type_specific_data>",
+				 SEARCH_TYPE_DOMAIN);
   return data->tsd_type;
 }
 
@@ -6887,10 +6817,10 @@ ada_value_primitive_field (struct value *arg1, int offset, int fieldno,
   /* Handle packed fields.  It might be that the field is not packed
      relative to its containing structure, but the structure itself is
      packed; in this case we must take the bit-field path.  */
-  if (TYPE_FIELD_BITSIZE (arg_type, fieldno) != 0 || arg1->bitpos () != 0)
+  if (arg_type->field (fieldno).bitsize () != 0 || arg1->bitpos () != 0)
     {
       int bit_pos = arg_type->field (fieldno).loc_bitpos ();
-      int bit_size = TYPE_FIELD_BITSIZE (arg_type, fieldno);
+      int bit_size = arg_type->field (fieldno).bitsize ();
 
       return ada_value_primitive_packed_val (arg1,
 					     arg1->contents ().data (),
@@ -7019,7 +6949,7 @@ find_struct_field (const char *name, struct type *type, int offset,
 
       else if (name != NULL && field_name_match (t_field_name, name))
 	{
-	  int bit_size = TYPE_FIELD_BITSIZE (type, i);
+	  int bit_size = type->field (i).bitsize ();
 
 	  if (field_type_p != NULL)
 	    *field_type_p = type->field (i).type ();
@@ -7253,9 +7183,6 @@ type_as_string (struct type *type)
 }
 
 /* Given a type TYPE, look up the type of the component of type named NAME.
-   If DISPP is non-null, add its byte displacement from the beginning of a
-   structure (pointed to by a value) of type TYPE to *DISPP (does not
-   work for packed fields).
 
    Matches any field whose name has NAME as a prefix, possibly
    followed by "___".
@@ -7276,9 +7203,6 @@ static struct type *
 ada_lookup_struct_elt_type (struct type *type, const char *name, int refok,
 			    int noerr)
 {
-  int i;
-  int parent_offset = -1;
-
   if (name == NULL)
     goto BadName;
 
@@ -7304,78 +7228,11 @@ ada_lookup_struct_elt_type (struct type *type, const char *name, int refok,
 
   type = to_static_fixed_type (type);
 
-  for (i = 0; i < type->num_fields (); i += 1)
-    {
-      const char *t_field_name = type->field (i).name ();
-      struct type *t;
-
-      if (t_field_name == NULL)
-	continue;
-
-      else if (ada_is_parent_field (type, i))
-	{
-	  /* This is a field pointing us to the parent type of a tagged
-	     type.  As hinted in this function's documentation, we give
-	     preference to fields in the current record first, so what
-	     we do here is just record the index of this field before
-	     we skip it.  If it turns out we couldn't find our field
-	     in the current record, then we'll get back to it and search
-	     inside it whether the field might exist in the parent.  */
-
-	  parent_offset = i;
-	  continue;
-	}
-
-      else if (field_name_match (t_field_name, name))
-	return type->field (i).type ();
-
-      else if (ada_is_wrapper_field (type, i))
-	{
-	  t = ada_lookup_struct_elt_type (type->field (i).type (), name,
-					  0, 1);
-	  if (t != NULL)
-	    return t;
-	}
-
-      else if (ada_is_variant_part (type, i))
-	{
-	  int j;
-	  struct type *field_type = ada_check_typedef (type->field (i).type ());
-
-	  for (j = field_type->num_fields () - 1; j >= 0; j -= 1)
-	    {
-	      /* FIXME pnh 2008/01/26: We check for a field that is
-		 NOT wrapped in a struct, since the compiler sometimes
-		 generates these for unchecked variant types.  Revisit
-		 if the compiler changes this practice.  */
-	      const char *v_field_name = field_type->field (j).name ();
-
-	      if (v_field_name != NULL 
-		  && field_name_match (v_field_name, name))
-		t = field_type->field (j).type ();
-	      else
-		t = ada_lookup_struct_elt_type (field_type->field (j).type (),
-						name, 0, 1);
-
-	      if (t != NULL)
-		return t;
-	    }
-	}
-
-    }
-
-    /* Field not found so far.  If this is a tagged type which
-       has a parent, try finding that field in the parent now.  */
-
-    if (parent_offset != -1)
-      {
-	struct type *t;
-
-	t = ada_lookup_struct_elt_type (type->field (parent_offset).type (),
-					name, 0, 1);
-	if (t != NULL)
-	  return t;
-      }
+  struct type *result;
+  find_struct_field (name, type, 0, &result, nullptr, nullptr, nullptr,
+		     nullptr);
+  if (result != nullptr)
+    return result;
 
 BadName:
   if (!noerr)
@@ -7545,14 +7402,8 @@ field_alignment (struct type *type, int f)
 static struct symbol *
 ada_find_any_type_symbol (const char *name)
 {
-  struct symbol *sym;
-
-  sym = standard_lookup (name, get_selected_block (NULL), VAR_DOMAIN);
-  if (sym != NULL && sym->aclass () == LOC_TYPEDEF)
-    return sym;
-
-  sym = standard_lookup (name, NULL, STRUCT_DOMAIN);
-  return sym;
+  return standard_lookup (name, get_selected_block (nullptr),
+			  SEARCH_TYPE_DOMAIN);
 }
 
 /* Find a type named NAME.  Ignores ambiguity.  This routine will look
@@ -7847,9 +7698,7 @@ ada_template_to_fixed_record_type_1 (struct type *type,
   rtype = type_allocator (type).new_type ();
   rtype->set_code (TYPE_CODE_STRUCT);
   INIT_NONE_SPECIFIC (rtype);
-  rtype->set_num_fields (nfields);
-  rtype->set_fields
-   ((struct field *) TYPE_ZALLOC (rtype, nfields * sizeof (struct field)));
+  rtype->alloc_fields (nfields);
   rtype->set_name (ada_type_name (type));
   rtype->set_is_fixed_instance (true);
 
@@ -7862,7 +7711,7 @@ ada_template_to_fixed_record_type_1 (struct type *type,
       off = align_up (off, field_alignment (type, f))
 	+ type->field (f).loc_bitpos ();
       rtype->field (f).set_loc_bitpos (off);
-      TYPE_FIELD_BITSIZE (rtype, f) = 0;
+      rtype->field (f).set_bitsize (0);
 
       if (ada_is_variant_part (type, f))
 	{
@@ -7942,9 +7791,11 @@ ada_template_to_fixed_record_type_1 (struct type *type,
 	     would prevent us from printing this field appropriately.  */
 	  rtype->field (f).set_type (type->field (f).type ());
 	  rtype->field (f).set_name (type->field (f).name ());
-	  if (TYPE_FIELD_BITSIZE (type, f) > 0)
-	    fld_bit_len =
-	      TYPE_FIELD_BITSIZE (rtype, f) = TYPE_FIELD_BITSIZE (type, f);
+	  if (type->field (f).bitsize () > 0)
+	    {
+	      fld_bit_len = type->field (f).bitsize ();
+	      rtype->field (f).set_bitsize (fld_bit_len);
+	    }
 	  else
 	    {
 	      struct type *field_type = type->field (f).type ();
@@ -8099,14 +7950,8 @@ template_to_static_fixed_type (struct type *type0)
 	      type0->set_target_type (type);
 	      type->set_code (type0->code ());
 	      INIT_NONE_SPECIFIC (type);
-	      type->set_num_fields (nfields);
 
-	      field *fields =
-		((struct field *)
-		 TYPE_ALLOC (type, nfields * sizeof (struct field)));
-	      memcpy (fields, type0->fields (),
-		      sizeof (struct field) * nfields);
-	      type->set_fields (fields);
+	      type->copy_fields (type0);
 
 	      type->set_name (ada_type_name (type0));
 	      type->set_is_fixed_instance (true);
@@ -8152,12 +7997,7 @@ to_record_with_fixed_variant_part (struct type *type, const gdb_byte *valaddr,
   rtype = type_allocator (type).new_type ();
   rtype->set_code (TYPE_CODE_STRUCT);
   INIT_NONE_SPECIFIC (rtype);
-  rtype->set_num_fields (nfields);
-
-  field *fields =
-    (struct field *) TYPE_ALLOC (rtype, nfields * sizeof (struct field));
-  memcpy (fields, type->fields (), sizeof (struct field) * nfields);
-  rtype->set_fields (fields);
+  rtype->copy_fields (type);
 
   rtype->set_name (ada_type_name (type));
   rtype->set_is_fixed_instance (true);
@@ -8183,7 +8023,7 @@ to_record_with_fixed_variant_part (struct type *type, const gdb_byte *valaddr,
     {
       rtype->field (variant_field).set_type (branch_type);
       rtype->field (variant_field).set_name ("S");
-      TYPE_FIELD_BITSIZE (rtype, variant_field) = 0;
+      rtype->field (variant_field).set_bitsize (0);
       rtype->set_length (rtype->length () + branch_type->length ());
     }
 
@@ -8494,9 +8334,9 @@ to_fixed_array_type (struct type *type0, struct value *dval,
 	 bitsize of the array elements needs to be set again, and the array
 	 length needs to be recomputed based on that bitsize.  */
       int len = result->length () / result->target_type ()->length ();
-      int elt_bitsize = TYPE_FIELD_BITSIZE (type0, 0);
+      int elt_bitsize = type0->field (0).bitsize ();
 
-      TYPE_FIELD_BITSIZE (result, 0) = TYPE_FIELD_BITSIZE (type0, 0);
+      result->field (0).set_bitsize (elt_bitsize);
       result->set_length (len * elt_bitsize / HOST_CHAR_BIT);
       if (result->length () * HOST_CHAR_BIT < len * elt_bitsize)
 	result->set_length (result->length () + 1);
@@ -8838,35 +8678,6 @@ ada_to_fixed_value (struct value *val)
 
 /* Attributes */
 
-/* Table mapping attribute numbers to names.
-   NOTE: Keep up to date with enum ada_attribute definition in ada-lang.h.  */
-
-static const char * const attribute_names[] = {
-  "<?>",
-
-  "first",
-  "last",
-  "length",
-  "image",
-  "max",
-  "min",
-  "modulus",
-  "pos",
-  "size",
-  "tag",
-  "val",
-  0
-};
-
-static const char *
-ada_attribute_name (enum exp_opcode n)
-{
-  if (n >= OP_ATR_FIRST && n <= (int) OP_ATR_VAL)
-    return attribute_names[n - OP_ATR_FIRST + 1];
-  else
-    return attribute_names[0];
-}
-
 /* Evaluate the 'POS attribute applied to ARG.  */
 
 static LONGEST
@@ -8878,7 +8689,7 @@ pos_atr (struct value *arg)
   if (!discrete_type_p (type))
     error (_("'POS only defined on discrete types"));
 
-  gdb::optional<LONGEST> result = discrete_position (type, value_as_long (val));
+  std::optional<LONGEST> result = discrete_position (type, value_as_long (val));
   if (!result.has_value ())
     error (_("enumeration value is invalid: can't find 'POS"));
 
@@ -8915,7 +8726,8 @@ val_atr (struct type *type, LONGEST val)
 }
 
 struct value *
-ada_val_atr (enum noside noside, struct type *type, struct value *arg)
+ada_val_atr (struct expression *exp, enum noside noside, struct type *type,
+	     struct value *arg)
 {
   if (noside == EVAL_AVOID_SIDE_EFFECTS)
     return value::zero (type, not_lval);
@@ -8927,6 +8739,52 @@ ada_val_atr (enum noside noside, struct type *type, struct value *arg)
 
   return val_atr (type, value_as_long (arg));
 }
+
+/* Implementation of the enum_rep attribute.  */
+struct value *
+ada_atr_enum_rep (struct expression *exp, enum noside noside, struct type *type,
+		  struct value *arg)
+{
+  struct type *inttype = builtin_type (exp->gdbarch)->builtin_int;
+  if (noside == EVAL_AVOID_SIDE_EFFECTS)
+    return value::zero (inttype, not_lval);
+
+  if (type->code () == TYPE_CODE_RANGE)
+    type = type->target_type ();
+  if (type->code () != TYPE_CODE_ENUM)
+    error (_("'Enum_Rep only defined on enum types"));
+  if (!types_equal (type, arg->type ()))
+    error (_("'Enum_Rep requires argument to have same type as enum"));
+
+  return value_cast (inttype, arg);
+}
+
+/* Implementation of the enum_val attribute.  */
+struct value *
+ada_atr_enum_val (struct expression *exp, enum noside noside, struct type *type,
+		  struct value *arg)
+{
+  struct type *original_type = type;
+  if (noside == EVAL_AVOID_SIDE_EFFECTS)
+    return value::zero (original_type, not_lval);
+
+  if (type->code () == TYPE_CODE_RANGE)
+    type = type->target_type ();
+  if (type->code () != TYPE_CODE_ENUM)
+    error (_("'Enum_Val only defined on enum types"));
+  if (!integer_type_p (arg->type ()))
+    error (_("'Enum_Val requires integral argument"));
+
+  LONGEST value = value_as_long (arg);
+  for (int i = 0; i < type->num_fields (); ++i)
+    {
+      if (type->field (i).loc_enumval () == value)
+	return value_from_longest (original_type, value);
+    }
+
+  error (_("value %s not found in enum"), plongest (value));
+}
+
 
 
 				/* Evaluation */
@@ -9429,14 +9287,10 @@ check_objfile (const std::unique_ptr<ada_component> &comp,
   return comp->uses_objfile (objfile);
 }
 
-/* Assign the result of evaluating ARG starting at *POS to the INDEXth
-   component of LHS (a simple array or a record).  Does not modify the
-   inferior's memory, nor does it modify LHS (unless LHS ==
-   CONTAINER).  */
+/* See ada-exp.h.  */
 
-static void
-assign_component (struct value *container, struct value *lhs, LONGEST index,
-		  struct expression *exp, operation_up &arg)
+void
+aggregate_assigner::assign (LONGEST index, operation_up &arg)
 {
   scoped_value_mark mark;
 
@@ -9456,6 +9310,8 @@ assign_component (struct value *container, struct value *lhs, LONGEST index,
       elt = ada_to_fixed_value (elt);
     }
 
+  scoped_restore save_index = make_scoped_restore (&m_current_index, index);
+
   ada_aggregate_operation *ag_op
     = dynamic_cast<ada_aggregate_operation *> (arg.get ());
   if (ag_op != nullptr)
@@ -9466,9 +9322,23 @@ assign_component (struct value *container, struct value *lhs, LONGEST index,
 					      EVAL_NORMAL));
 }
 
+/* See ada-exp.h.  */
+
+value *
+aggregate_assigner::current_value () const
+{
+  /* Note that using an integer type here is incorrect -- the type
+     should be the array's index type.  Unfortunately, though, this
+     isn't currently available during parsing and type resolution.  */
+  struct type *index_type = builtin_type (exp->gdbarch)->builtin_int;
+  return value_from_longest (index_type, m_current_index);
+}
+
 bool
 ada_aggregate_component::uses_objfile (struct objfile *objfile)
 {
+  if (m_base != nullptr && m_base->uses_objfile (objfile))
+    return true;
   for (const auto &item : m_components)
     if (item->uses_objfile (objfile))
       return true;
@@ -9479,18 +9349,49 @@ void
 ada_aggregate_component::dump (ui_file *stream, int depth)
 {
   gdb_printf (stream, _("%*sAggregate\n"), depth, "");
+  if (m_base != nullptr)
+    {
+      gdb_printf (stream, _("%*swith delta\n"), depth + 1, "");
+      m_base->dump (stream, depth + 2);
+    }
   for (const auto &item : m_components)
     item->dump (stream, depth + 1);
 }
 
 void
-ada_aggregate_component::assign (struct value *container,
-				 struct value *lhs, struct expression *exp,
-				 std::vector<LONGEST> &indices,
-				 LONGEST low, LONGEST high)
+ada_aggregate_component::assign (aggregate_assigner &assigner)
 {
+  if (m_base != nullptr)
+    {
+      value *base = m_base->evaluate (nullptr, assigner.exp, EVAL_NORMAL);
+      if (ada_is_direct_array_type (base->type ()))
+	base = ada_coerce_to_simple_array (base);
+      if (!types_deeply_equal (assigner.container->type (), base->type ()))
+	error (_("Type mismatch in delta aggregate"));
+      value_assign_to_component (assigner.container, assigner.container,
+				 base);
+    }
+
   for (auto &item : m_components)
-    item->assign (container, lhs, exp, indices, low, high);
+    item->assign (assigner);
+}
+
+/* See ada-exp.h.  */
+
+ada_aggregate_component::ada_aggregate_component
+     (operation_up &&base, std::vector<ada_component_up> &&components)
+       : m_base (std::move (base)),
+	 m_components (std::move (components))
+{
+  for (const auto &component : m_components)
+    if (dynamic_cast<const ada_others_component *> (component.get ())
+	!= nullptr)
+      {
+	/* It's invalid and nonsensical to have 'others => ...' with a
+	   delta aggregate.  It was simpler to enforce this
+	   restriction here as opposed to in the parser.  */
+	error (_("'others' invalid in delta aggregate"));
+      }
 }
 
 /* See ada-exp.h.  */
@@ -9501,7 +9402,7 @@ ada_aggregate_operation::assign_aggregate (struct value *container,
 					   struct expression *exp)
 {
   struct type *lhs_type;
-  LONGEST low_index, high_index;
+  aggregate_assigner assigner;
 
   container = ada_coerce_ref (container);
   if (ada_is_direct_array_type (container->type ()))
@@ -9515,23 +9416,27 @@ ada_aggregate_operation::assign_aggregate (struct value *container,
     {
       lhs = ada_coerce_to_simple_array (lhs);
       lhs_type = check_typedef (lhs->type ());
-      low_index = lhs_type->bounds ()->low.const_val ();
-      high_index = lhs_type->bounds ()->high.const_val ();
+      assigner.low = lhs_type->bounds ()->low.const_val ();
+      assigner.high = lhs_type->bounds ()->high.const_val ();
     }
   else if (lhs_type->code () == TYPE_CODE_STRUCT)
     {
-      low_index = 0;
-      high_index = num_visible_fields (lhs_type) - 1;
+      assigner.low = 0;
+      assigner.high = num_visible_fields (lhs_type) - 1;
     }
   else
     error (_("Left-hand side must be array or record."));
 
-  std::vector<LONGEST> indices (4);
-  indices[0] = indices[1] = low_index - 1;
-  indices[2] = indices[3] = high_index + 1;
+  assigner.indices.push_back (assigner.low - 1);
+  assigner.indices.push_back (assigner.low - 1);
+  assigner.indices.push_back (assigner.high + 1);
+  assigner.indices.push_back (assigner.high + 1);
 
-  std::get<0> (m_storage)->assign (container, lhs, exp, indices,
-				   low_index, high_index);
+  assigner.container = container;
+  assigner.lhs = lhs;
+  assigner.exp = exp;
+
+  std::get<0> (m_storage)->assign (assigner);
 
   return container;
 }
@@ -9555,19 +9460,16 @@ ada_positional_component::dump (ui_file *stream, int depth)
    LOW, where HIGH is the upper bound.  Record the position in
    INDICES.  CONTAINER is as for assign_aggregate.  */
 void
-ada_positional_component::assign (struct value *container,
-				  struct value *lhs, struct expression *exp,
-				  std::vector<LONGEST> &indices,
-				  LONGEST low, LONGEST high)
+ada_positional_component::assign (aggregate_assigner &assigner)
 {
-  LONGEST ind = m_index + low;
+  LONGEST ind = m_index + assigner.low;
 
-  if (ind - 1 == high)
+  if (ind - 1 == assigner.high)
     warning (_("Extra components in aggregate ignored."));
-  if (ind <= high)
+  if (ind <= assigner.high)
     {
-      add_component_interval (ind, ind, indices);
-      assign_component (container, lhs, ind, exp, m_op);
+      assigner.add_interval (ind, ind);
+      assigner.assign (ind, m_op);
     }
 }
 
@@ -9586,23 +9488,21 @@ ada_discrete_range_association::dump (ui_file *stream, int depth)
 }
 
 void
-ada_discrete_range_association::assign (struct value *container,
-					struct value *lhs,
-					struct expression *exp,
-					std::vector<LONGEST> &indices,
-					LONGEST low, LONGEST high,
+ada_discrete_range_association::assign (aggregate_assigner &assigner,
 					operation_up &op)
 {
-  LONGEST lower = value_as_long (m_low->evaluate (nullptr, exp, EVAL_NORMAL));
-  LONGEST upper = value_as_long (m_high->evaluate (nullptr, exp, EVAL_NORMAL));
+  LONGEST lower = value_as_long (m_low->evaluate (nullptr, assigner.exp,
+						  EVAL_NORMAL));
+  LONGEST upper = value_as_long (m_high->evaluate (nullptr, assigner.exp,
+						   EVAL_NORMAL));
 
-  if (lower <= upper && (lower < low || upper > high))
+  if (lower <= upper && (lower < assigner.low || upper > assigner.high))
     error (_("Index in component association out of bounds."));
 
-  add_component_interval (lower, upper, indices);
+  assigner.add_interval (lower, upper);
   while (lower <= upper)
     {
-      assign_component (container, lhs, lower, exp, op);
+      assigner.assign (lower, op);
       lower += 1;
     }
 }
@@ -9621,18 +9521,16 @@ ada_name_association::dump (ui_file *stream, int depth)
 }
 
 void
-ada_name_association::assign (struct value *container,
-			      struct value *lhs,
-			      struct expression *exp,
-			      std::vector<LONGEST> &indices,
-			      LONGEST low, LONGEST high,
+ada_name_association::assign (aggregate_assigner &assigner,
 			      operation_up &op)
 {
   int index;
 
-  if (ada_is_direct_array_type (lhs->type ()))
-    index = longest_to_int (value_as_long (m_val->evaluate (nullptr, exp,
-							    EVAL_NORMAL)));
+  if (ada_is_direct_array_type (assigner.lhs->type ()))
+    {
+      value *tem = m_val->evaluate (nullptr, assigner.exp, EVAL_NORMAL);
+      index = longest_to_int (value_as_long (tem));
+    }
   else
     {
       ada_string_operation *strop
@@ -9645,19 +9543,26 @@ ada_name_association::assign (struct value *container,
 	{
 	  ada_var_value_operation *vvo
 	    = dynamic_cast<ada_var_value_operation *> (m_val.get ());
-	  if (vvo != nullptr)
+	  if (vvo == nullptr)
 	    error (_("Invalid record component association."));
 	  name = vvo->get_symbol ()->natural_name ();
+	  /* In this scenario, the user wrote (name => expr), but
+	     write_name_assoc found some fully-qualified name and
+	     substituted it.  This happens because, at parse time, the
+	     meaning of the expression isn't known; but here we know
+	     that just the base name was supplied and it refers to the
+	     name of a field.  */
+	  name = ada_unqualified_name (name);
 	}
 
       index = 0;
-      if (! find_struct_field (name, lhs->type (), 0,
+      if (! find_struct_field (name, assigner.lhs->type (), 0,
 			       NULL, NULL, NULL, NULL, &index))
 	error (_("Unknown component name: %s."), name);
     }
 
-  add_component_interval (index, index, indices);
-  assign_component (container, lhs, index, exp, op);
+  assigner.add_interval (index, index);
+  assigner.assign (index, op);
 }
 
 bool
@@ -9674,8 +9579,15 @@ ada_choices_component::uses_objfile (struct objfile *objfile)
 void
 ada_choices_component::dump (ui_file *stream, int depth)
 {
-  gdb_printf (stream, _("%*sChoices:\n"), depth, "");
+  if (m_name.empty ())
+    gdb_printf (stream, _("%*sChoices:\n"), depth, "");
+  else
+    {
+      gdb_printf (stream, _("%*sIterated choices:\n"), depth, "");
+      gdb_printf (stream, _("%*sName: %s\n"), depth + 1, "", m_name.c_str ());
+    }
   m_op->dump (stream, depth + 1);
+
   for (const auto &item : m_assocs)
     item->dump (stream, depth + 1);
 }
@@ -9685,13 +9597,36 @@ ada_choices_component::dump (ui_file *stream, int depth)
    the allowable indices are LOW..HIGH.  Record the indices assigned
    to in INDICES.  CONTAINER is as for assign_aggregate.  */
 void
-ada_choices_component::assign (struct value *container,
-			       struct value *lhs, struct expression *exp,
-			       std::vector<LONGEST> &indices,
-			       LONGEST low, LONGEST high)
+ada_choices_component::assign (aggregate_assigner &assigner)
 {
+  scoped_restore save_index = make_scoped_restore (&m_assigner, &assigner);
   for (auto &item : m_assocs)
-    item->assign (container, lhs, exp, indices, low, high, m_op);
+    item->assign (assigner, m_op);
+}
+
+void
+ada_index_var_operation::dump (struct ui_file *stream, int depth) const
+{
+  gdb_printf (stream, _("%*sIndex variable: %s\n"), depth, "",
+	      m_var->name ().c_str ());
+}
+
+value *
+ada_index_var_operation::evaluate (struct type *expect_type,
+				   struct expression *exp,
+				   enum noside noside)
+{
+  if (noside == EVAL_AVOID_SIDE_EFFECTS)
+    {
+      /* Note that using an integer type here is incorrect -- the type
+	 should be the array's index type.  Unfortunately, though,
+	 this isn't currently available during parsing and type
+	 resolution.  */
+      struct type *index_type = builtin_type (exp->gdbarch)->builtin_int;
+      return value::zero (index_type, not_lval);
+    }
+
+  return m_var->current_value ();
 }
 
 bool
@@ -9712,16 +9647,15 @@ ada_others_component::dump (ui_file *stream, int depth)
    have not been previously assigned.  The index intervals already assigned
    are in INDICES.  CONTAINER is as for assign_aggregate.  */
 void
-ada_others_component::assign (struct value *container,
-			      struct value *lhs, struct expression *exp,
-			      std::vector<LONGEST> &indices,
-			      LONGEST low, LONGEST high)
+ada_others_component::assign (aggregate_assigner &assigner)
 {
-  int num_indices = indices.size ();
+  int num_indices = assigner.indices.size ();
   for (int i = 0; i < num_indices - 2; i += 2)
     {
-      for (LONGEST ind = indices[i + 1] + 1; ind < indices[i + 2]; ind += 1)
-	assign_component (container, lhs, ind, exp, m_op);
+      for (LONGEST ind = assigner.indices[i + 1] + 1;
+	   ind < assigner.indices[i + 2];
+	   ind += 1)
+	assigner.assign (ind, m_op);
     }
 }
 
@@ -9731,6 +9665,7 @@ ada_assign_operation::evaluate (struct type *expect_type,
 				enum noside noside)
 {
   value *arg1 = std::get<0> (m_storage)->evaluate (nullptr, exp, noside);
+  scoped_restore save_lhs = make_scoped_restore (&m_current, arg1);
 
   ada_aggregate_operation *ag_op
     = dynamic_cast<ada_aggregate_operation *> (std::get<1> (m_storage).get ());
@@ -9761,45 +9696,43 @@ ada_assign_operation::evaluate (struct type *expect_type,
   return ada_value_assign (arg1, arg2);
 }
 
-} /* namespace expr */
+/* See ada-exp.h.  */
 
-/* Add the interval [LOW .. HIGH] to the sorted set of intervals
-   [ INDICES[0] .. INDICES[1] ],...  The resulting intervals do not
-   overlap.  */
-static void
-add_component_interval (LONGEST low, LONGEST high, 
-			std::vector<LONGEST> &indices)
+void
+aggregate_assigner::add_interval (LONGEST from, LONGEST to)
 {
   int i, j;
 
   int size = indices.size ();
   for (i = 0; i < size; i += 2) {
-    if (high >= indices[i] && low <= indices[i + 1])
+    if (to >= indices[i] && from <= indices[i + 1])
       {
 	int kh;
 
 	for (kh = i + 2; kh < size; kh += 2)
-	  if (high < indices[kh])
+	  if (to < indices[kh])
 	    break;
-	if (low < indices[i])
-	  indices[i] = low;
+	if (from < indices[i])
+	  indices[i] = from;
 	indices[i + 1] = indices[kh - 1];
-	if (high > indices[i + 1])
-	  indices[i + 1] = high;
+	if (to > indices[i + 1])
+	  indices[i + 1] = to;
 	memcpy (indices.data () + i + 2, indices.data () + kh, size - kh);
 	indices.resize (kh - i - 2);
 	return;
       }
-    else if (high < indices[i])
+    else if (to < indices[i])
       break;
   }
 	
   indices.resize (indices.size () + 2);
   for (j = indices.size () - 1; j >= i + 2; j -= 1)
     indices[j] = indices[j - 2];
-  indices[i] = low;
-  indices[i + 1] = high;
+  indices[i] = from;
+  indices[i + 1] = to;
 }
+
+} /* namespace expr */
 
 /* Perform and Ada cast of ARG2 to type TYPE if the type of ARG2
    is different.  */
@@ -9864,7 +9797,7 @@ ada_value_cast (struct type *type, struct value *arg2)
        No  : Rec := (empty => True);
 
     The size and contents of that record depends on the value of the
-    descriminant (Rec.Empty).  At this point, neither the debugging
+    discriminant (Rec.Empty).  At this point, neither the debugging
     information nor the associated type structure in GDB are able to
     express such dynamic types.  So what the debugger does is to create
     "fixed" versions of the type that applies to the specific object.
@@ -10145,15 +10078,28 @@ ada_atr_tag (struct type *expect_type,
   return ada_value_tag (arg1);
 }
 
-/* A helper function for OP_ATR_SIZE.  */
+namespace expr
+{
 
 value *
-ada_atr_size (struct type *expect_type,
-	      struct expression *exp,
-	      enum noside noside, enum exp_opcode op,
-	      struct value *arg1)
+ada_atr_size_operation::evaluate (struct type *expect_type,
+				  struct expression *exp,
+				  enum noside noside)
 {
-  struct type *type = arg1->type ();
+  bool is_type = std::get<0> (m_storage)->opcode () == OP_TYPE;
+  bool is_size = std::get<1> (m_storage);
+
+  enum noside sub_noside = is_type ? EVAL_AVOID_SIDE_EFFECTS : noside;
+  value *val = std::get<0> (m_storage)->evaluate (nullptr, exp, sub_noside);
+  struct type *type = ada_check_typedef (val->type ());
+
+  if (is_type)
+    {
+      if (is_size)
+	error (_("gdb cannot apply 'Size to a type"));
+      if (is_dynamic_type (type) || find_base_type (type) != nullptr)
+	error (_("cannot apply 'Object_Size to dynamic type"));
+    }
 
   /* If the argument is a reference, then dereference its type, since
      the user is really asking for the size of the actual object,
@@ -10167,6 +10113,8 @@ ada_atr_size (struct type *expect_type,
     return value_from_longest (builtin_type (exp->gdbarch)->builtin_int,
 			       TARGET_CHAR_BIT * type->length ());
 }
+
+} /* namespace expr */
 
 /* A helper function for UNOP_ABS.  */
 
@@ -10342,6 +10290,12 @@ static value *
 ada_unop_atr (struct expression *exp, enum noside noside, enum exp_opcode op,
 	      struct value *arg1, struct type *type_arg, int tem)
 {
+  const char *attr_name = nullptr;
+  if (op == OP_ATR_FIRST)
+    attr_name = "first";
+  else if (op == OP_ATR_LAST)
+    attr_name = "last";
+
   if (noside == EVAL_AVOID_SIDE_EFFECTS)
     {
       if (type_arg == NULL)
@@ -10359,7 +10313,7 @@ ada_unop_atr (struct expression *exp, enum noside noside, enum exp_opcode op,
 	    case OP_ATR_FIRST:
 	    case OP_ATR_LAST:
 	      type_arg = ada_index_type (type_arg, tem,
-					 ada_attribute_name (op));
+					 attr_name);
 	      break;
 	    case OP_ATR_LENGTH:
 	      type_arg = builtin_type (exp->gdbarch)->builtin_int;
@@ -10382,7 +10336,7 @@ ada_unop_atr (struct expression *exp, enum noside noside, enum exp_opcode op,
       else
 	{
 	  type = ada_index_type (arg1->type (), tem,
-				 ada_attribute_name (op));
+				 attr_name);
 	  if (type == NULL)
 	    type = builtin_type (exp->gdbarch)->builtin_int;
 	}
@@ -10440,7 +10394,7 @@ ada_unop_atr (struct expression *exp, enum noside noside, enum exp_opcode op,
 	type = builtin_type (exp->gdbarch)->builtin_int;
       else
 	{
-	  type = ada_index_type (type_arg, tem, ada_attribute_name (op));
+	  type = ada_index_type (type_arg, tem, attr_name);
 	  if (type == NULL)
 	    type = builtin_type (exp->gdbarch)->builtin_int;
 	}
@@ -10773,7 +10727,7 @@ ada_binop_addsub_operation::evaluate (struct type *expect_type,
   value *arg1 = std::get<1> (m_storage)->evaluate_with_coercion (exp, noside);
   value *arg2 = std::get<2> (m_storage)->evaluate_with_coercion (exp, noside);
 
-  auto do_op = [=] (LONGEST x, LONGEST y)
+  auto do_op = [this] (LONGEST x, LONGEST y)
     {
       if (std::get<0> (m_storage) == BINOP_ADD)
 	return x + y;
@@ -10813,7 +10767,7 @@ ada_unop_atr_operation::evaluate (struct type *expect_type,
   struct type *type_arg = nullptr;
   value *val = nullptr;
 
-  if (std::get<0> (m_storage)->opcode () == OP_TYPE)
+  if (std::get<0> (m_storage)->type_p ())
     {
       value *tem = std::get<0> (m_storage)->evaluate (nullptr, exp,
 						      EVAL_AVOID_SIDE_EFFECTS);
@@ -11014,15 +10968,6 @@ ada_var_value_operation::do_generate_ax (struct expression *exp,
 }
 
 value *
-ada_atr_val_operation::evaluate (struct type *expect_type,
-				 struct expression *exp,
-				 enum noside noside)
-{
-  value *arg = std::get<1> (m_storage)->evaluate (nullptr, exp, noside);
-  return ada_val_atr (noside, std::get<0> (m_storage), arg);
-}
-
-value *
 ada_unop_ind_operation::evaluate (struct type *expect_type,
 				  struct expression *exp,
 				  enum noside noside)
@@ -11033,12 +10978,18 @@ ada_unop_ind_operation::evaluate (struct type *expect_type,
   if (noside == EVAL_AVOID_SIDE_EFFECTS)
     {
       if (ada_is_array_descriptor_type (type))
-	/* GDB allows dereferencing GNAT array descriptors.  */
 	{
+	  /* GDB allows dereferencing GNAT array descriptors.
+	     However, for 'ptype' we don't want to try to
+	     "dereference" a thick pointer here -- that will end up
+	     giving us an array with (1 .. 0) for bounds, which is
+	     less clear than (<>).  */
 	  struct type *arrType = ada_type_of_array (arg1, 0);
 
 	  if (arrType == NULL)
 	    error (_("Attempt to dereference null array pointer."));
+	  if (is_thick_pntr (type))
+	    return arg1;
 	  return value_at_lazy (arrType, 0);
 	}
       else if (type->code () == TYPE_CODE_PTR
@@ -11096,7 +11047,7 @@ ada_unop_ind_operation::evaluate (struct type *expect_type,
 					  arg1));
       else
 	return value_at_lazy (builtin_type (exp->gdbarch)->builtin_int,
-			      (CORE_ADDR) value_as_address (arg1));
+			      value_as_address (arg1));
     }
 
   if (ada_is_array_descriptor_type (type))
@@ -11173,7 +11124,7 @@ ada_funcall_operation::evaluate (struct type *expect_type,
       (desc_base_type (callee->type ())))
     callee = ada_coerce_to_simple_array (callee);
   else if (callee->type ()->code () == TYPE_CODE_ARRAY
-	   && TYPE_FIELD_BITSIZE (callee->type (), 0) != 0)
+	   && callee->type ()->field (0).bitsize () != 0)
     /* This is a packed array that has already been fixed, and
        therefore already coerced to a simple array.  Nothing further
        to do.  */
@@ -11228,18 +11179,11 @@ ada_funcall_operation::evaluate (struct type *expect_type,
 	    error_call_unknown_return_type (NULL);
 	  return value::allocate (type->target_type ());
 	}
-      return call_function_by_hand (callee, NULL, argvec);
+      return call_function_by_hand (callee, expect_type, argvec);
     case TYPE_CODE_INTERNAL_FUNCTION:
-      if (noside == EVAL_AVOID_SIDE_EFFECTS)
-	/* We don't know anything about what the internal
-	   function might return, but we have to return
-	   something.  */
-	return value::zero (builtin_type (exp->gdbarch)->builtin_int,
-			   not_lval);
-      else
 	return call_internal_function (exp->gdbarch, exp->language_defn,
 				       callee, nargs,
-				       argvec.data ());
+				       argvec.data (), noside);
 
     case TYPE_CODE_STRUCT:
       {
@@ -11417,7 +11361,7 @@ get_var_value (const char *name, const char *err_msg)
   std::vector<struct block_symbol> syms
     = ada_lookup_symbol_list_worker (lookup_name,
 				     get_selected_block (0),
-				     VAR_DOMAIN, 1);
+				     SEARCH_VFT, 1);
 
   if (syms.size () != 1)
     {
@@ -11576,7 +11520,7 @@ ada_modulus (struct type *type)
 {
   const dynamic_prop &high = type->bounds ()->high;
 
-  if (high.kind () == PROP_CONST)
+  if (high.is_constant ())
     return (ULONGEST) high.const_val () + 1;
 
   /* If TYPE is unresolved, the high bound might be a location list.  Return
@@ -11720,7 +11664,8 @@ ada_has_this_exception_support (const struct exception_support_info *einfo)
      that should be compiled with debugging information.  As a result, we
      expect to find that symbol in the symtabs.  */
 
-  sym = standard_lookup (einfo->catch_exception_sym, NULL, VAR_DOMAIN);
+  sym = standard_lookup (einfo->catch_exception_sym, NULL,
+			 SEARCH_FUNCTION_DOMAIN);
   if (sym == NULL)
     {
       /* Perhaps we did not find our symbol because the Ada runtime was
@@ -11737,8 +11682,9 @@ ada_has_this_exception_support (const struct exception_support_info *einfo)
 	 the name of the exception being raised (this name is printed in
 	 the catchpoint message, and is also used when trying to catch
 	 a specific exception).  We do not handle this case for now.  */
-      struct bound_minimal_symbol msym
-	= lookup_minimal_symbol (einfo->catch_exception_sym, NULL, NULL);
+      bound_minimal_symbol msym
+	= lookup_minimal_symbol (current_program_space,
+				 einfo->catch_exception_sym);
 
       if (msym.minsym && msym.minsym->type () != mst_solib_trampoline)
 	error (_("Your Ada runtime appears to be missing some debugging "
@@ -11754,11 +11700,13 @@ ada_has_this_exception_support (const struct exception_support_info *einfo)
     error (_("Symbol \"%s\" is not a function (class = %d)"),
 	   sym->linkage_name (), sym->aclass ());
 
-  sym = standard_lookup (einfo->catch_handlers_sym, NULL, VAR_DOMAIN);
+  sym = standard_lookup (einfo->catch_handlers_sym, NULL,
+			 SEARCH_FUNCTION_DOMAIN);
   if (sym == NULL)
     {
-      struct bound_minimal_symbol msym
-	= lookup_minimal_symbol (einfo->catch_handlers_sym, NULL, NULL);
+      bound_minimal_symbol msym
+	= lookup_minimal_symbol (current_program_space,
+				 einfo->catch_handlers_sym);
 
       if (msym.minsym && msym.minsym->type () != mst_solib_trampoline)
 	error (_("Your Ada runtime appears to be missing some debugging "
@@ -11813,31 +11761,8 @@ ada_exception_support_info_sniffer (void)
       return;
     }
 
-  /* Sometimes, it is normal for us to not be able to find the routine
-     we are looking for.  This happens when the program is linked with
-     the shared version of the GNAT runtime, and the program has not been
-     started yet.  Inform the user of these two possible causes if
-     applicable.  */
-
-  if (ada_update_initial_language (language_unknown) != language_ada)
-    error (_("Unable to insert catchpoint.  Is this an Ada main program?"));
-
-  /* If the symbol does not exist, then check that the program is
-     already started, to make sure that shared libraries have been
-     loaded.  If it is not started, this may mean that the symbol is
-     in a shared library.  */
-
-  if (inferior_ptid.pid () == 0)
-    error (_("Unable to insert catchpoint. Try to start the program first."));
-
-  /* At this point, we know that we are debugging an Ada program and
-     that the inferior has been started, but we still are not able to
-     find the run-time symbols.  That can mean that we are in
-     configurable run time mode, or that a-except as been optimized
-     out by the linker...  In any case, at this point it is not worth
-     supporting this feature.  */
-
-  error (_("Cannot insert Ada exception catchpoints in this configuration."));
+  throw_error (NOT_FOUND_ERROR,
+	       _("Could not find Ada runtime exception support"));
 }
 
 /* True iff FRAME is very likely to be that of a function that is
@@ -11846,7 +11771,7 @@ ada_exception_support_info_sniffer (void)
    to most users.  */
 
 static int
-is_known_support_routine (frame_info_ptr frame)
+is_known_support_routine (const frame_info_ptr &frame)
 {
   enum language func_lang;
   int i;
@@ -11905,9 +11830,9 @@ is_known_support_routine (frame_info_ptr frame)
    part of the Ada run-time, starting from FI and moving upward.  */
 
 void
-ada_find_printable_frame (frame_info_ptr fi)
+ada_find_printable_frame (const frame_info_ptr &initial_fi)
 {
-  for (; fi != NULL; fi = get_prev_frame (fi))
+  for (frame_info_ptr fi = initial_fi; fi != nullptr; fi = get_prev_frame (fi))
     {
       if (!is_known_support_routine (fi))
 	{
@@ -12121,56 +12046,42 @@ struct ada_catchpoint : public code_breakpoint
 {
   ada_catchpoint (struct gdbarch *gdbarch_,
 		  enum ada_exception_catchpoint_kind kind,
-		  struct symtab_and_line sal,
-		  const char *addr_string_,
+		  const char *cond_string,
 		  bool tempflag,
 		  bool enabled,
-		  bool from_tty)
-    : code_breakpoint (gdbarch_, bp_catchpoint),
+		  bool from_tty,
+		  std::string &&excep_string_)
+    : code_breakpoint (gdbarch_, bp_catchpoint, tempflag, cond_string),
+      m_excep_string (std::move (excep_string_)),
       m_kind (kind)
   {
-    add_location (sal);
-
     /* Unlike most code_breakpoint types, Ada catchpoints are
        pspace-specific.  */
-    gdb_assert (sal.pspace != nullptr);
-    this->pspace = sal.pspace;
-
-    if (from_tty)
-      {
-	struct gdbarch *loc_gdbarch = get_sal_arch (sal);
-	if (!loc_gdbarch)
-	  loc_gdbarch = gdbarch;
-
-	describe_other_breakpoints (loc_gdbarch,
-				    sal.pspace, sal.pc, sal.section, -1);
-	/* FIXME: brobecker/2006-12-28: Actually, re-implement a special
-	   version for exception catchpoints, because two catchpoints
-	   used for different exception names will use the same address.
-	   In this case, a "breakpoint ... also set at..." warning is
-	   unproductive.  Besides, the warning phrasing is also a bit
-	   inappropriate, we should use the word catchpoint, and tell
-	   the user what type of catchpoint it is.  The above is good
-	   enough for now, though.  */
-      }
-
+    pspace = current_program_space;
     enable_state = enabled ? bp_enabled : bp_disabled;
-    disposition = tempflag ? disp_del : disp_donttouch;
-    locspec = string_to_location_spec (&addr_string_,
-				       language_def (language_ada));
     language = language_ada;
+
+    re_set (pspace);
   }
 
   struct bp_location *allocate_location () override;
-  void re_set () override;
+  void re_set (program_space *pspace) override;
   void check_status (struct bpstat *bs) override;
   enum print_stop_action print_it (const bpstat *bs) const override;
-  bool print_one (bp_location **) const override;
+  bool print_one (const bp_location **) const override;
   void print_mention () const override;
   void print_recreate (struct ui_file *fp) const override;
 
+private:
+
+  /* A helper function for check_status.  Returns true if we should
+     stop for this breakpoint hit.  If the user specified a specific
+     exception, we only want to cause a stop if the program thrown
+     that exception.  */
+  bool should_stop_exception (const struct bp_location *bl) const;
+
   /* The name of the specific exception the user specified.  */
-  std::string excep_string;
+  std::string m_excep_string;
 
   /* What kind of catchpoint this is.  */
   enum ada_exception_catchpoint_kind m_kind;
@@ -12192,54 +12103,72 @@ public:
   expression_up excep_cond_expr;
 };
 
-/* Parse the exception condition string in the context of each of the
-   catchpoint's locations, and store them for later evaluation.  */
+static struct symtab_and_line ada_exception_sal
+     (enum ada_exception_catchpoint_kind ex);
 
-static void
-create_excep_cond_exprs (struct ada_catchpoint *c,
-			 enum ada_exception_catchpoint_kind ex)
+/* Implement the RE_SET method in the structure for all exception
+   catchpoint kinds.  */
+
+void
+ada_catchpoint::re_set (program_space *pspace)
 {
+  std::vector<symtab_and_line> sals;
+  try
+    {
+      struct symtab_and_line sal = ada_exception_sal (m_kind);
+      sals.push_back (sal);
+    }
+  catch (const gdb_exception_error &ex)
+    {
+      /* For NOT_FOUND_ERROR, the breakpoint will be pending.  */
+      if (ex.error != NOT_FOUND_ERROR)
+	throw;
+    }
+
+  update_breakpoint_locations (this, pspace, sals, {});
+
+  /* Reparse the exception conditional expressions.  One for each
+     location.  */
+
   /* Nothing to do if there's no specific exception to catch.  */
-  if (c->excep_string.empty ())
+  if (m_excep_string.empty ())
     return;
 
   /* Same if there are no locations... */
-  if (c->loc == NULL)
+  if (!has_locations ())
     return;
 
   /* Compute the condition expression in text form, from the specific
-     expection we want to catch.  */
+     exception we want to catch.  */
   std::string cond_string
-    = ada_exception_catchpoint_cond_string (c->excep_string.c_str (), ex);
+    = ada_exception_catchpoint_cond_string (m_excep_string.c_str (), m_kind);
 
   /* Iterate over all the catchpoint's locations, and parse an
      expression for each.  */
-  for (bp_location *bl : c->locations ())
+  for (bp_location &bl : locations ())
     {
-      struct ada_catchpoint_location *ada_loc
-	= (struct ada_catchpoint_location *) bl;
+      ada_catchpoint_location &ada_loc
+	= static_cast<ada_catchpoint_location &> (bl);
       expression_up exp;
 
-      if (!bl->shlib_disabled)
+      if (!bl.shlib_disabled)
 	{
 	  const char *s;
 
 	  s = cond_string.c_str ();
 	  try
 	    {
-	      exp = parse_exp_1 (&s, bl->address,
-				 block_for_pc (bl->address),
-				 0);
+	      exp = parse_exp_1 (&s, bl.address, block_for_pc (bl.address), 0);
 	    }
 	  catch (const gdb_exception_error &e)
 	    {
 	      warning (_("failed to reevaluate internal exception condition "
 			 "for catchpoint %d: %s"),
-		       c->number, e.what ());
+		       number, e.what ());
 	    }
 	}
 
-      ada_loc->excep_cond_expr = std::move (exp);
+      ada_loc.excep_cond_expr = std::move (exp);
     }
 }
 
@@ -12252,29 +12181,12 @@ ada_catchpoint::allocate_location ()
   return new ada_catchpoint_location (this);
 }
 
-/* Implement the RE_SET method in the structure for all exception
-   catchpoint kinds.  */
+/* See declaration.  */
 
-void
-ada_catchpoint::re_set ()
+bool
+ada_catchpoint::should_stop_exception (const struct bp_location *bl) const
 {
-  /* Call the base class's method.  This updates the catchpoint's
-     locations.  */
-  this->code_breakpoint::re_set ();
-
-  /* Reparse the exception conditional expressions.  One for each
-     location.  */
-  create_excep_cond_exprs (this, m_kind);
-}
-
-/* Returns true if we should stop for this breakpoint hit.  If the
-   user specified a specific exception, we only want to cause a stop
-   if the program thrown that exception.  */
-
-static bool
-should_stop_exception (const struct bp_location *bl)
-{
-  struct ada_catchpoint *c = (struct ada_catchpoint *) bl->owner;
+  ada_catchpoint *c = gdb::checked_static_cast<ada_catchpoint *> (bl->owner);
   const struct ada_catchpoint_location *ada_loc
     = (const struct ada_catchpoint_location *) bl;
   bool stop;
@@ -12304,7 +12216,7 @@ should_stop_exception (const struct bp_location *bl)
     }
 
   /* With no specific exception, should always stop.  */
-  if (c->excep_string.empty ())
+  if (c->m_excep_string.empty ())
     return true;
 
   if (ada_loc->excep_cond_expr == NULL)
@@ -12430,7 +12342,7 @@ ada_catchpoint::print_it (const bpstat *bs) const
    catchpoint kinds.  */
 
 bool
-ada_catchpoint::print_one (bp_location **last_loc) const
+ada_catchpoint::print_one (const bp_location **last_loc) const
 { 
   struct ui_out *uiout = current_uiout;
   struct value_print_options opts;
@@ -12444,10 +12356,10 @@ ada_catchpoint::print_one (bp_location **last_loc) const
   switch (m_kind)
     {
       case ada_catch_exception:
-	if (!excep_string.empty ())
+	if (!m_excep_string.empty ())
 	  {
 	    std::string msg = string_printf (_("`%s' Ada exception"),
-					     excep_string.c_str ());
+					     m_excep_string.c_str ());
 
 	    uiout->field_string ("what", msg);
 	  }
@@ -12461,11 +12373,11 @@ ada_catchpoint::print_one (bp_location **last_loc) const
 	break;
       
       case ada_catch_handlers:
-	if (!excep_string.empty ())
+	if (!m_excep_string.empty ())
 	  {
 	    uiout->field_fmt ("what",
 			      _("`%s' Ada exception handlers"),
-			      excep_string.c_str ());
+			      m_excep_string.c_str ());
 	  }
 	else
 	  uiout->field_string ("what", "all Ada exceptions handlers");
@@ -12499,10 +12411,10 @@ ada_catchpoint::print_mention () const
   switch (m_kind)
     {
       case ada_catch_exception:
-	if (!excep_string.empty ())
+	if (!m_excep_string.empty ())
 	  {
 	    std::string info = string_printf (_("`%s' Ada exception"),
-					      excep_string.c_str ());
+					      m_excep_string.c_str ());
 	    uiout->text (info);
 	  }
 	else
@@ -12514,11 +12426,11 @@ ada_catchpoint::print_mention () const
 	break;
 
       case ada_catch_handlers:
-	if (!excep_string.empty ())
+	if (!m_excep_string.empty ())
 	  {
 	    std::string info
 	      = string_printf (_("`%s' Ada exception handlers"),
-			       excep_string.c_str ());
+			       m_excep_string.c_str ());
 	    uiout->text (info);
 	  }
 	else
@@ -12545,8 +12457,8 @@ ada_catchpoint::print_recreate (struct ui_file *fp) const
     {
       case ada_catch_exception:
 	gdb_printf (fp, "catch exception");
-	if (!excep_string.empty ())
-	  gdb_printf (fp, " %s", excep_string.c_str ());
+	if (!m_excep_string.empty ())
+	  gdb_printf (fp, " %s", m_excep_string.c_str ());
 	break;
 
       case ada_catch_exception_unhandled:
@@ -12713,7 +12625,7 @@ ada_exception_catchpoint_cond_string (const char *excep_string,
      may then be set only on user-defined exceptions which have the
      same not-fully-qualified name (e.g. my_package.constraint_error).
 
-     To avoid this unexcepted behavior, these standard exceptions are
+     To avoid this unexpected behavior, these standard exceptions are
      systematically prefixed by "standard".  This means that "catch
      exception constraint_error" is rewritten into "catch exception
      standard.constraint_error".
@@ -12742,16 +12654,11 @@ ada_exception_catchpoint_cond_string (const char *excep_string,
   return result;
 }
 
-/* Return the symtab_and_line that should be used to insert an exception
-   catchpoint of the TYPE kind.
-
-   ADDR_STRING returns the name of the function where the real
-   breakpoint that implements the catchpoints is set, depending on the
-   type of catchpoint we need to create.  */
+/* Return the symtab_and_line that should be used to insert an
+   exception catchpoint of the TYPE kind.  */
 
 static struct symtab_and_line
-ada_exception_sal (enum ada_exception_catchpoint_kind ex,
-		   std::string *addr_string)
+ada_exception_sal (enum ada_exception_catchpoint_kind ex)
 {
   const char *sym_name;
   struct symbol *sym;
@@ -12762,16 +12669,14 @@ ada_exception_sal (enum ada_exception_catchpoint_kind ex,
   /* Then lookup the function on which we will break in order to catch
      the Ada exceptions requested by the user.  */
   sym_name = ada_exception_sym_name (ex);
-  sym = standard_lookup (sym_name, NULL, VAR_DOMAIN);
+  sym = standard_lookup (sym_name, NULL, SEARCH_VFT);
 
   if (sym == NULL)
-    error (_("Catchpoint symbol not found: %s"), sym_name);
+    throw_error (NOT_FOUND_ERROR, _("Catchpoint symbol not found: %s"),
+		 sym_name);
 
   if (sym->aclass () != LOC_BLOCK)
     error (_("Unable to insert catchpoint. %s is not a function."), sym_name);
-
-  /* Set ADDR_STRING.  */
-  *addr_string = sym_name;
 
   return find_function_start_sal (sym, 1);
 }
@@ -12794,22 +12699,21 @@ ada_exception_sal (enum ada_exception_catchpoint_kind ex,
 void
 create_ada_exception_catchpoint (struct gdbarch *gdbarch,
 				 enum ada_exception_catchpoint_kind ex_kind,
-				 const std::string &excep_string,
+				 std::string &&excep_string,
 				 const std::string &cond_string,
 				 int tempflag,
 				 int enabled,
 				 int from_tty)
 {
-  std::string addr_string;
-  struct symtab_and_line sal = ada_exception_sal (ex_kind, &addr_string);
+  /* This works around an obscure issue when an Ada program is
+     compiled with LTO.  */
+  scoped_restore_current_language save_language (language_ada);
 
   std::unique_ptr<ada_catchpoint> c
-    (new ada_catchpoint (gdbarch, ex_kind, sal, addr_string.c_str (),
-			 tempflag, enabled, from_tty));
-  c->excep_string = excep_string;
-  create_excep_cond_exprs (c.get (), ex_kind);
-  if (!cond_string.empty ())
-    set_breakpoint_condition (c.get (), cond_string.c_str (), from_tty, false);
+    (new ada_catchpoint (gdbarch, ex_kind,
+			 cond_string.empty () ? nullptr : cond_string.c_str (),
+			 tempflag, enabled, from_tty,
+			 std::move (excep_string)));
   install_breakpoint (0, std::move (c), 1);
 }
 
@@ -12833,7 +12737,7 @@ catch_ada_exception_command (const char *arg_entry, int from_tty,
   catch_ada_exception_command_split (arg, false, &ex_kind, &excep_string,
 				     &cond_string);
   create_ada_exception_catchpoint (gdbarch, ex_kind,
-				   excep_string, cond_string,
+				   std::move (excep_string), cond_string,
 				   tempflag, 1 /* enabled */,
 				   from_tty);
 }
@@ -12858,7 +12762,7 @@ catch_ada_handlers_command (const char *arg_entry, int from_tty,
   catch_ada_exception_command_split (arg, true, &ex_kind, &excep_string,
 				     &cond_string);
   create_ada_exception_catchpoint (gdbarch, ex_kind,
-				   excep_string, cond_string,
+				   std::move (excep_string), cond_string,
 				   tempflag, 1 /* enabled */,
 				   from_tty);
 }
@@ -12925,7 +12829,7 @@ catch_assert_command (const char *arg_entry, int from_tty,
     arg = "";
   catch_ada_assert_command_split (arg, cond_string);
   create_ada_exception_catchpoint (gdbarch, ada_catch_assert,
-				   "", cond_string,
+				   {}, cond_string,
 				   tempflag, 1 /* enabled */,
 				   from_tty);
 }
@@ -13064,7 +12968,7 @@ ada_add_standard_exceptions (compiled_regex *preg,
 
 static void
 ada_add_exceptions_from_frame (compiled_regex *preg,
-			       frame_info_ptr frame,
+			       const frame_info_ptr &frame,
 			       std::vector<ada_exc_info> *exceptions)
 {
   const struct block *block = get_frame_block (frame, 0);
@@ -13139,7 +13043,12 @@ ada_add_global_exceptions (compiled_regex *preg,
 			   },
 			   NULL,
 			   SEARCH_GLOBAL_BLOCK | SEARCH_STATIC_BLOCK,
-			   VARIABLES_DOMAIN);
+			   SEARCH_VAR_DOMAIN,
+			   [&] (enum language lang)
+			     {
+			       /* Try to skip non-Ada CUs.  */
+			       return lang == language_ada;
+			     });
 
   /* Iterate over all objfiles irrespective of scope or linker namespaces
      so we get all exceptions anywhere in the progspace.  */
@@ -13332,16 +13241,14 @@ do_exact_match (const char *symbol_search_name,
 
 ada_lookup_name_info::ada_lookup_name_info (const lookup_name_info &lookup_name)
 {
-  gdb::string_view user_name = lookup_name.name ();
+  std::string_view user_name = lookup_name.name ();
 
   if (!user_name.empty () && user_name[0] == '<')
     {
       if (user_name.back () == '>')
-	m_encoded_name
-	  = gdb::to_string (user_name.substr (1, user_name.size () - 2));
+	m_encoded_name = user_name.substr (1, user_name.size () - 2);
       else
-	m_encoded_name
-	  = gdb::to_string (user_name.substr (1, user_name.size () - 1));
+	m_encoded_name = user_name.substr (1, user_name.size () - 1);
       m_encoded_p = true;
       m_verbatim_p = true;
       m_wild_match_p = false;
@@ -13351,17 +13258,17 @@ ada_lookup_name_info::ada_lookup_name_info (const lookup_name_info &lookup_name)
     {
       m_verbatim_p = false;
 
-      m_encoded_p = user_name.find ("__") != gdb::string_view::npos;
+      m_encoded_p = user_name.find ("__") != std::string_view::npos;
 
       if (!m_encoded_p)
 	{
 	  const char *folded = ada_fold_name (user_name);
 	  m_encoded_name = ada_encode_1 (folded, false);
 	  if (m_encoded_name.empty ())
-	    m_encoded_name = gdb::to_string (user_name);
+	    m_encoded_name = user_name;
 	}
       else
-	m_encoded_name = gdb::to_string (user_name);
+	m_encoded_name = user_name;
 
       /* Handle the 'package Standard' special case.  See description
 	 of m_standard_p.  */
@@ -13372,6 +13279,8 @@ ada_lookup_name_info::ada_lookup_name_info (const lookup_name_info &lookup_name)
 	}
       else
 	m_standard_p = false;
+
+      m_decoded_name = ada_decode (m_encoded_name.c_str (), true, false, false);
 
       /* If the name contains a ".", then the user is entering a fully
 	 qualified entity name, and the match must not be done in wild
@@ -13408,7 +13317,7 @@ literal_symbol_name_matcher (const char *symbol_search_name,
 			     const lookup_name_info &lookup_name,
 			     completion_match_result *comp_match_res)
 {
-  gdb::string_view name_view = lookup_name.name ();
+  std::string_view name_view = lookup_name.name ();
 
   if (lookup_name.completion_mode ()
       ? (strncmp (symbol_search_name, name_view.data (),
@@ -13490,7 +13399,7 @@ public:
 
   struct value *read_var_value (struct symbol *var,
 				const struct block *var_block,
-				frame_info_ptr frame) const override
+				const frame_info_ptr &frame) const override
   {
     /* The only case where default_read_var_value is not sufficient
        is when VAR is a renaming...  */
@@ -13510,6 +13419,19 @@ public:
   bool symbol_printing_suppressed (struct symbol *symbol) const override
   {
     return symbol->is_artificial ();
+  }
+
+  /* See language.h.  */
+  struct value *value_string (struct gdbarch *gdbarch,
+			      const char *ptr, ssize_t len) const override
+  {
+    struct type *type = language_string_char_type (this, gdbarch);
+    value *val = ::value_string (ptr, len, type);
+    /* VAL will be a TYPE_CODE_STRING, but Ada only knows how to print
+       strings that are arrays of characters, so fix the type now.  */
+    gdb_assert (val->type ()->code () == TYPE_CODE_STRING);
+    val->type ()->set_code (TYPE_CODE_ARRAY);
+    return val;
   }
 
   /* See language.h.  */
@@ -13574,7 +13496,7 @@ public:
 
   bool iterate_over_symbols
 	(const struct block *block, const lookup_name_info &name,
-	 domain_enum domain,
+	 domain_search_flags domain,
 	 gdb::function_view<symbol_found_callback_ftype> callback) const override
   {
     std::vector<struct block_symbol> results
@@ -13671,7 +13593,7 @@ public:
 			     NULL,
 			     NULL,
 			     SEARCH_GLOBAL_BLOCK | SEARCH_STATIC_BLOCK,
-			     ALL_DOMAIN);
+			     SEARCH_ALL_DOMAINS);
 
     /* At this point scan through the misc symbol vectors and add each
        symbol you find to the list.  Eventually we want to ignore
@@ -13716,7 +13638,7 @@ public:
 
     for (b = get_selected_block (0); b != NULL; b = b->superblock ())
       {
-	if (!b->superblock ())
+	if (b->is_static_block ())
 	  surrounding_static_block = b;   /* For elmin of dups */
 
 	for (struct symbol *sym : block_iterator_range (b))
@@ -13807,7 +13729,7 @@ public:
 
   struct block_symbol lookup_symbol_nonlocal
 	(const char *name, const struct block *block,
-	 const domain_enum domain) const override
+	 const domain_search_flags domain) const override
   {
     struct block_symbol sym;
 
@@ -13831,12 +13753,12 @@ public:
        languages, we search the primitive types this late and only after
        having searched the global symbols without success.  */
 
-    if (domain == VAR_DOMAIN)
+    if ((domain & SEARCH_TYPE_DOMAIN) != 0)
       {
 	struct gdbarch *gdbarch;
 
 	if (block == NULL)
-	  gdbarch = target_gdbarch ();
+	  gdbarch = current_inferior ()->arch ();
 	else
 	  gdbarch = block->gdbarch ();
 	sym.symbol
@@ -13879,8 +13801,15 @@ public:
 		 const char *encoding, int force_ellipses,
 		 const struct value_print_options *options) const override
   {
-    ada_printstr (stream, elttype, string, length, encoding,
-		  force_ellipses, options);
+    /* ada_printstr doesn't handle UTF-8 too well, but we want this
+       for lazy-string printing.  Defer this case to the generic
+       code.  */
+    if (encoding != nullptr && strcasecmp (encoding, "UTF-8") == 0)
+      generic_printstr (stream, elttype, string, length, encoding,
+			force_ellipses, '"', 0, options);
+    else
+      ada_printstr (stream, elttype, string, length, encoding,
+		    force_ellipses, options);
   }
 
   /* See language.h.  */
@@ -13897,6 +13826,19 @@ public:
   {
     return ada_is_string_type (type);
   }
+
+  /* See language.h.  */
+
+  bool is_array_like (struct type *type) const override
+  {
+    return (ada_is_constrained_packed_array_type (type)
+	    || ada_is_array_descriptor_type (type));
+  }
+
+  /* See language.h.  */
+
+  struct value *to_array (struct value *val) const override
+  { return ada_coerce_to_simple_array (val); }
 
   /* See language.h.  */
 
@@ -13941,7 +13883,7 @@ static struct cmd_list_element *show_ada_list;
 static void
 ada_new_objfile_observer (struct objfile *objfile)
 {
-  ada_clear_symbol_cache ();
+  ada_clear_symbol_cache (objfile->pspace ());
 }
 
 /* This module's 'free_objfile' observer.  */
@@ -13949,7 +13891,7 @@ ada_new_objfile_observer (struct objfile *objfile)
 static void
 ada_free_objfile_observer (struct objfile *objfile)
 {
-  ada_clear_symbol_cache ();
+  ada_clear_symbol_cache (objfile->pspace ());
 }
 
 /* Charsets known to GNAT.  */
@@ -13999,11 +13941,11 @@ this option to \"off\" unless necessary."),
 
   add_setshow_boolean_cmd ("print-signatures", class_vars,
 			   &print_signatures, _("\
-Enable or disable the output of formal and return types for functions in the \
-overloads selection menu."), _("\
-Show whether the output of formal and return types for functions in the \
-overloads selection menu is activated."),
-			   NULL, NULL, NULL, &set_ada_list, &show_ada_list);
+Control the display of functions in overloads selection menu."), _("\
+Show how functions in overloads selection menu will be displayed."),
+			   _("\
+When enabled, formal and return types are shown."),
+			   NULL, NULL, &set_ada_list, &show_ada_list);
 
   ada_source_charset = gnat_source_charsets[0];
   add_setshow_enum_cmd ("source-charset", class_files,
@@ -14082,6 +14024,12 @@ DWARF attribute."),
 
   /* The ada-lang observers.  */
   gdb::observers::new_objfile.attach (ada_new_objfile_observer, "ada-lang");
+  gdb::observers::all_objfiles_removed.attach (ada_clear_symbol_cache,
+					       "ada-lang");
   gdb::observers::free_objfile.attach (ada_free_objfile_observer, "ada-lang");
   gdb::observers::inferior_exit.attach (ada_inferior_exit, "ada-lang");
+
+#ifdef GDB_SELF_TEST
+  selftests::register_test ("ada-decode", ada_decode_tests);
+#endif
 }

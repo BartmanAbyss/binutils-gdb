@@ -1,5 +1,5 @@
 /* tc-hppa.c -- Assemble for the PA
-   Copyright (C) 1989-2023 Free Software Foundation, Inc.
+   Copyright (C) 1989-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -1348,17 +1348,12 @@ tc_gen_reloc (asection *section, fixS *fixp)
   int n_relocs;
   int i;
 
-  hppa_fixp = (struct hppa_fix_struct *) fixp->tc_fix_data;
   if (fixp->fx_addsy == 0)
     return &no_relocs;
 
+  hppa_fixp = (struct hppa_fix_struct *) fixp->tc_fix_data;
   gas_assert (hppa_fixp != 0);
   gas_assert (section != 0);
-
-  reloc = XNEW (arelent);
-
-  reloc->sym_ptr_ptr = XNEW (asymbol *);
-  *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
 
   /* Allow fixup_segment to recognize hand-written pc-relative relocations.
      When we went through cons_fix_new_hppa, we classified them as complex.  */
@@ -1388,11 +1383,10 @@ tc_gen_reloc (asection *section, fixS *fixp)
   for (n_relocs = 0; codes[n_relocs]; n_relocs++)
     ;
 
-  relocs = XNEWVEC (arelent *, n_relocs + 1);
-  reloc = XNEWVEC (arelent, n_relocs);
+  relocs = notes_alloc (sizeof (*relocs) * (n_relocs + 1));
+  reloc = notes_alloc (sizeof (*reloc) * n_relocs);
   for (i = 0; i < n_relocs; i++)
     relocs[i] = &reloc[i];
-
   relocs[n_relocs] = NULL;
 
 #ifdef OBJ_ELF
@@ -1447,7 +1441,7 @@ tc_gen_reloc (asection *section, fixS *fixp)
 	  break;
 	}
 
-      reloc->sym_ptr_ptr = XNEW (asymbol *);
+      reloc->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
       *reloc->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
       reloc->howto = bfd_reloc_type_lookup (stdoutput,
 					    (bfd_reloc_code_real_type) code);
@@ -1463,7 +1457,7 @@ tc_gen_reloc (asection *section, fixS *fixp)
     {
       code = *codes[i];
 
-      relocs[i]->sym_ptr_ptr = XNEW (asymbol *);
+      relocs[i]->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
       *relocs[i]->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
       relocs[i]->howto =
 	bfd_reloc_type_lookup (stdoutput,
@@ -1477,36 +1471,25 @@ tc_gen_reloc (asection *section, fixS *fixp)
 	     of two symbols.  With that in mind we fill in all four
 	     relocs now and break out of the loop.  */
 	  gas_assert (i == 1);
-	  relocs[0]->sym_ptr_ptr
-	    = (asymbol **) bfd_abs_section_ptr->symbol_ptr_ptr;
-	  relocs[0]->howto
-	    = bfd_reloc_type_lookup (stdoutput,
-				     (bfd_reloc_code_real_type) *codes[0]);
-	  relocs[0]->address = fixp->fx_frag->fr_address + fixp->fx_where;
+	  /* relocs[0] and relocs[1] have been initialised above.  We can
+	     use relocs[0]->sym_ptr_ptr allocation for relocs[2].  */
+	  relocs[2]->sym_ptr_ptr = relocs[0]->sym_ptr_ptr;
+	  relocs[0]->sym_ptr_ptr = &bfd_abs_section_ptr->symbol;
 	  relocs[0]->addend = 0;
-	  relocs[1]->sym_ptr_ptr = XNEW (asymbol *);
-	  *relocs[1]->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
-	  relocs[1]->howto
-	    = bfd_reloc_type_lookup (stdoutput,
-				     (bfd_reloc_code_real_type) *codes[1]);
-	  relocs[1]->address = fixp->fx_frag->fr_address + fixp->fx_where;
 	  relocs[1]->addend = 0;
-	  relocs[2]->sym_ptr_ptr = XNEW (asymbol *);
 	  *relocs[2]->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_subsy);
 	  relocs[2]->howto
 	    = bfd_reloc_type_lookup (stdoutput,
 				     (bfd_reloc_code_real_type) *codes[2]);
 	  relocs[2]->address = fixp->fx_frag->fr_address + fixp->fx_where;
 	  relocs[2]->addend = 0;
-	  relocs[3]->sym_ptr_ptr
-	    = (asymbol **) bfd_abs_section_ptr->symbol_ptr_ptr;
+	  relocs[3]->sym_ptr_ptr = &bfd_abs_section_ptr->symbol;
 	  relocs[3]->howto
 	    = bfd_reloc_type_lookup (stdoutput,
 				     (bfd_reloc_code_real_type) *codes[3]);
 	  relocs[3]->address = fixp->fx_frag->fr_address + fixp->fx_where;
 	  relocs[3]->addend = 0;
-	  relocs[4]->sym_ptr_ptr
-	    = (asymbol **) bfd_abs_section_ptr->symbol_ptr_ptr;
+	  relocs[4]->sym_ptr_ptr = &bfd_abs_section_ptr->symbol;
 	  relocs[4]->howto
 	    = bfd_reloc_type_lookup (stdoutput,
 				     (bfd_reloc_code_real_type) *codes[4]);
@@ -1546,7 +1529,6 @@ tc_gen_reloc (asection *section, fixS *fixp)
 	case R_N0SEL:
 	case R_N1SEL:
 	  /* There is no symbol or addend associated with these fixups.  */
-	  relocs[i]->sym_ptr_ptr = XNEW (asymbol *);
 	  *relocs[i]->sym_ptr_ptr = symbol_get_bfdsym (dummy_symbol);
 	  relocs[i]->addend = 0;
 	  break;
@@ -1555,7 +1537,6 @@ tc_gen_reloc (asection *section, fixS *fixp)
 	case R_ENTRY:
 	case R_EXIT:
 	  /* There is no symbol associated with these fixups.  */
-	  relocs[i]->sym_ptr_ptr = XNEW (asymbol *);
 	  *relocs[i]->sym_ptr_ptr = symbol_get_bfdsym (dummy_symbol);
 	  relocs[i]->addend = fixp->fx_offset;
 	  break;
@@ -1631,26 +1612,26 @@ md_estimate_size_before_relax (fragS *fragP, asection *segment ATTRIBUTE_UNUSED)
 
 #ifdef OBJ_ELF
 # ifdef WARN_COMMENTS
-const char *md_shortopts = "Vc";
+const char md_shortopts[] = "Vc";
 # else
-const char *md_shortopts = "V";
+const char md_shortopts[] = "V";
 # endif
 #else
 # ifdef WARN_COMMENTS
-const char *md_shortopts = "c";
+const char md_shortopts[] = "c";
 # else
-const char *md_shortopts = "";
+const char md_shortopts[] = "";
 # endif
 #endif
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #ifdef WARN_COMMENTS
   {"warn-comment", no_argument, NULL, 'c'},
 #endif
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c, const char *arg ATTRIBUTE_UNUSED)
@@ -6199,7 +6180,7 @@ pa_callinfo (int unused ATTRIBUTE_UNUSED)
    label when finished.  */
 
 static void
-pa_text (int unused ATTRIBUTE_UNUSED)
+pa_text (int arg)
 {
 #ifdef OBJ_SOM
   current_space = is_defined_space ("$TEXT$");
@@ -6207,21 +6188,32 @@ pa_text (int unused ATTRIBUTE_UNUSED)
     = pa_subsegment_to_subspace (current_space->sd_seg, 0);
 #endif
 
-  s_text (0);
+#ifdef OBJ_ELF
+  obj_elf_text (arg);
+#else
+  s_text (arg);
+#endif
+
   pa_undefine_label ();
 }
 
 /* Switch to the data space.  As usual delete our label.  */
 
 static void
-pa_data (int unused ATTRIBUTE_UNUSED)
+pa_data (int arg)
 {
 #ifdef OBJ_SOM
   current_space = is_defined_space ("$PRIVATE$");
   current_subspace
     = pa_subsegment_to_subspace (current_space->sd_seg, 0);
 #endif
-  s_data (0);
+
+#ifdef OBJ_ELF
+  obj_elf_data (arg);
+#else
+  s_data (arg);
+#endif
+
   pa_undefine_label ();
 }
 
@@ -6354,6 +6346,7 @@ hppa_force_reg_syms_absolute (expressionS *resultP,
 			      expressionS *rightP)
 {
   if (fudge_reg_expressions
+      && resultP
       && rightP->X_op == O_register
       && resultP->X_op == O_register)
     {

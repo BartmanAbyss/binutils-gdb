@@ -1,5 +1,5 @@
 /* ehopt.c--optimize gcc exception frame information.
-   Copyright (C) 1998-2023 Free Software Foundation, Inc.
+   Copyright (C) 1998-2025 Free Software Foundation, Inc.
    Written by Ian Lance Taylor <ian@cygnus.com>.
 
    This file is part of GAS, the GNU Assembler.
@@ -386,7 +386,7 @@ check_eh_frame (expressionS *exp, unsigned int *pnbytes)
 	{
 	  /* This might be a DW_CFA_advance_loc4.  Record the frag and the
 	     position within the frag, so that we can change it later.  */
-	  frag_grow (1);
+	  frag_grow (1 + 4);
 	  d->state = state_saw_loc4;
 	  d->loc4_frag = frag_now;
 	  d->loc4_fix = frag_now_fix ();

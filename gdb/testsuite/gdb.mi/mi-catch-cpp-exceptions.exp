@@ -1,4 +1,4 @@
-# Copyright 2019-2023 Free Software Foundation, Inc.
+# Copyright 2019-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -68,7 +68,7 @@ proc continue_to_next_exception { func line testname } {
     mi_expect_stop "exception-caught" ".*" ".*" ".*" ".*" \
 	{} "run until an exception is caught: $testname"
     mi_gdb_test "-stack-list-frames 1 1" \
-	"\\^done,stack=\\\[frame=\{level=\"1\",addr=\"$hex\",func=\"${func}\",.*,line=\"${line}\".*\}\\\]" \
+	"\\^done,stack=\\\[frame=\{level=\"1\",addr=\"$hex\",(addr_flags=\"PAC\",)?func=\"${func}\",.*,line=\"${line}\".*\}\\\]" \
 	"check previous frame: $testname"
 }
 

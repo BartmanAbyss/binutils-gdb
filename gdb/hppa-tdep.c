@@ -1,6 +1,6 @@
 /* Target-dependent code for the HP PA-RISC architecture.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    Contributed by the Center for Software Science at the
    University of Utah (pa-gdb-bugs@cs.utah.edu).
@@ -20,8 +20,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "bfd.h"
+#include "extract-store-integer.h"
 #include "inferior.h"
 #include "regcache.h"
 #include "completer.h"
@@ -35,7 +35,7 @@
 #include "frame-base.h"
 
 #include "gdbcore.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "gdbtypes.h"
 #include "objfiles.h"
 #include "hppa-tdep.h"
@@ -71,7 +71,7 @@ struct hppa_unwind_info
 struct hppa_objfile_private
   {
     struct hppa_unwind_info *unwind_info = nullptr;	/* a pointer */
-    struct so_list *so_info = nullptr;			/* a pointer  */
+    solib *so_info = nullptr;			/* a pointer  */
     CORE_ADDR dp = 0;
 
     int dummy_call_sequence_reg = 0;
@@ -194,9 +194,8 @@ hppa_extract_17 (unsigned word)
 CORE_ADDR 
 hppa_symbol_address(const char *sym)
 {
-  struct bound_minimal_symbol minsym;
-
-  minsym = lookup_minimal_symbol (sym, NULL, NULL);
+  bound_minimal_symbol minsym
+    = lookup_minimal_symbol (current_program_space, sym);
   if (minsym.minsym)
     return minsym.value_address ();
   else
@@ -632,7 +631,7 @@ hppa32_register_name (struct gdbarch *gdbarch, int i)
     "fr28",    "fr28R",  "fr29",   "fr29R",
     "fr30",   "fr30R",   "fr31",   "fr31R"
   };
-  gdb_static_assert (ARRAY_SIZE (names) == hppa32_num_regs);
+  static_assert (ARRAY_SIZE (names) == hppa32_num_regs);
   return names[i];
 }
 
@@ -665,7 +664,7 @@ hppa64_register_name (struct gdbarch *gdbarch, int i)
     "fr24",    "fr25",   "fr26",   "fr27",
     "fr28",  "fr29",    "fr30",   "fr31"
   };
-  gdb_static_assert (ARRAY_SIZE (names) == hppa64_num_regs);
+  static_assert (ARRAY_SIZE (names) == hppa64_num_regs);
   return names[i];
 }
 
@@ -1829,7 +1828,7 @@ hppa_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
 /* Return an unwind entry that falls within the frame's code block.  */
 
 static struct unwind_table_entry *
-hppa_find_unwind_entry_in_block (frame_info_ptr this_frame)
+hppa_find_unwind_entry_in_block (const frame_info_ptr &this_frame)
 {
   CORE_ADDR pc = get_frame_address_in_block (this_frame);
 
@@ -1850,7 +1849,7 @@ struct hppa_frame_cache
 };
 
 static struct hppa_frame_cache *
-hppa_frame_cache (frame_info_ptr this_frame, void **this_cache)
+hppa_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -2251,7 +2250,7 @@ hppa_frame_cache (frame_info_ptr this_frame, void **this_cache)
 }
 
 static void
-hppa_frame_this_id (frame_info_ptr this_frame, void **this_cache,
+hppa_frame_this_id (const frame_info_ptr &this_frame, void **this_cache,
 		    struct frame_id *this_id)
 {
   struct hppa_frame_cache *info;
@@ -2264,7 +2263,7 @@ hppa_frame_this_id (frame_info_ptr this_frame, void **this_cache,
 }
 
 static struct value *
-hppa_frame_prev_register (frame_info_ptr this_frame,
+hppa_frame_prev_register (const frame_info_ptr &this_frame,
 			  void **this_cache, int regnum)
 {
   struct hppa_frame_cache *info = hppa_frame_cache (this_frame, this_cache);
@@ -2275,7 +2274,7 @@ hppa_frame_prev_register (frame_info_ptr this_frame,
 
 static int
 hppa_frame_unwind_sniffer (const struct frame_unwind *self,
-			   frame_info_ptr this_frame, void **this_cache)
+			   const frame_info_ptr &this_frame, void **this_cache)
 {
   if (hppa_find_unwind_entry_in_block (this_frame))
     return 1;
@@ -2283,16 +2282,16 @@ hppa_frame_unwind_sniffer (const struct frame_unwind *self,
   return 0;
 }
 
-static const struct frame_unwind hppa_frame_unwind =
-{
+static const struct frame_unwind_legacy hppa_frame_unwind (
   "hppa unwind table",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   hppa_frame_this_id,
   hppa_frame_prev_register,
   NULL,
   hppa_frame_unwind_sniffer
-};
+);
 
 /* This is a generic fallback frame unwinder that kicks in if we fail all
    the other ones.  Normally we would expect the stub and regular unwinder
@@ -2303,7 +2302,7 @@ static const struct frame_unwind hppa_frame_unwind =
    identify the stack and pc for the frame.  */
 
 static struct hppa_frame_cache *
-hppa_fallback_frame_cache (frame_info_ptr this_frame, void **this_cache)
+hppa_fallback_frame_cache (const frame_info_ptr &this_frame, void **this_cache)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -2376,7 +2375,7 @@ hppa_fallback_frame_cache (frame_info_ptr this_frame, void **this_cache)
 }
 
 static void
-hppa_fallback_frame_this_id (frame_info_ptr this_frame, void **this_cache,
+hppa_fallback_frame_this_id (const frame_info_ptr &this_frame, void **this_cache,
 			     struct frame_id *this_id)
 {
   struct hppa_frame_cache *info = 
@@ -2386,7 +2385,7 @@ hppa_fallback_frame_this_id (frame_info_ptr this_frame, void **this_cache,
 }
 
 static struct value *
-hppa_fallback_frame_prev_register (frame_info_ptr this_frame,
+hppa_fallback_frame_prev_register (const frame_info_ptr &this_frame,
 				   void **this_cache, int regnum)
 {
   struct hppa_frame_cache *info
@@ -2396,16 +2395,16 @@ hppa_fallback_frame_prev_register (frame_info_ptr this_frame,
 					  info->saved_regs, regnum);
 }
 
-static const struct frame_unwind hppa_fallback_frame_unwind =
-{
+static const struct frame_unwind_legacy hppa_fallback_frame_unwind (
   "hppa prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   hppa_fallback_frame_this_id,
   hppa_fallback_frame_prev_register,
   NULL,
   default_frame_sniffer
-};
+);
 
 /* Stub frames, used for all kinds of call stubs.  */
 struct hppa_stub_unwind_cache
@@ -2415,7 +2414,7 @@ struct hppa_stub_unwind_cache
 };
 
 static struct hppa_stub_unwind_cache *
-hppa_stub_frame_unwind_cache (frame_info_ptr this_frame,
+hppa_stub_frame_unwind_cache (const frame_info_ptr &this_frame,
 			      void **this_cache)
 {
   struct hppa_stub_unwind_cache *info;
@@ -2436,7 +2435,7 @@ hppa_stub_frame_unwind_cache (frame_info_ptr this_frame,
 }
 
 static void
-hppa_stub_frame_this_id (frame_info_ptr this_frame,
+hppa_stub_frame_this_id (const frame_info_ptr &this_frame,
 			 void **this_prologue_cache,
 			 struct frame_id *this_id)
 {
@@ -2448,7 +2447,7 @@ hppa_stub_frame_this_id (frame_info_ptr this_frame,
 }
 
 static struct value *
-hppa_stub_frame_prev_register (frame_info_ptr this_frame,
+hppa_stub_frame_prev_register (const frame_info_ptr &this_frame,
 			       void **this_prologue_cache, int regnum)
 {
   struct hppa_stub_unwind_cache *info
@@ -2463,7 +2462,7 @@ hppa_stub_frame_prev_register (frame_info_ptr this_frame,
 
 static int
 hppa_stub_unwind_sniffer (const struct frame_unwind *self,
-			  frame_info_ptr this_frame,
+			  const frame_info_ptr &this_frame,
 			  void **this_cache)
 {
   CORE_ADDR pc = get_frame_address_in_block (this_frame);
@@ -2478,18 +2477,19 @@ hppa_stub_unwind_sniffer (const struct frame_unwind *self,
   return 0;
 }
 
-static const struct frame_unwind hppa_stub_frame_unwind = {
+static const struct frame_unwind_legacy hppa_stub_frame_unwind (
   "hppa stub",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   hppa_stub_frame_this_id,
   hppa_stub_frame_prev_register,
   NULL,
   hppa_stub_unwind_sniffer
-};
+);
 
 CORE_ADDR
-hppa_unwind_pc (struct gdbarch *gdbarch, frame_info_ptr next_frame)
+hppa_unwind_pc (struct gdbarch *gdbarch, const frame_info_ptr &next_frame)
 {
   ULONGEST ipsw;
   CORE_ADDR pc;
@@ -2675,7 +2675,7 @@ hppa_addr_bits_remove (struct gdbarch *gdbarch, CORE_ADDR addr)
 /* Get the ARGIth function argument for the current function.  */
 
 static CORE_ADDR
-hppa_fetch_pointer_argument (frame_info_ptr frame, int argi, 
+hppa_fetch_pointer_argument (const frame_info_ptr &frame, int argi,
 			     struct type *type)
 {
   return get_frame_register_unsigned (frame, HPPA_R0_REGNUM + 26 - argi);
@@ -2706,7 +2706,7 @@ hppa_find_global_pointer (struct gdbarch *gdbarch, struct value *function)
 }
 
 struct value *
-hppa_frame_prev_register_helper (frame_info_ptr this_frame,
+hppa_frame_prev_register_helper (const frame_info_ptr &this_frame,
 				 trad_frame_saved_reg saved_regs[],
 				 int regnum)
 {
@@ -2884,7 +2884,7 @@ hppa_in_solib_call_trampoline (struct gdbarch *gdbarch, CORE_ADDR pc)
    systems: $$dyncall, import stubs and PLT stubs.  */
 
 CORE_ADDR
-hppa_skip_trampoline_code (frame_info_ptr frame, CORE_ADDR pc)
+hppa_skip_trampoline_code (const frame_info_ptr &frame, CORE_ADDR pc)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
   struct type *func_ptr_type = builtin_type (gdbarch)->builtin_func_ptr;

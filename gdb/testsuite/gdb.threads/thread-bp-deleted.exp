@@ -1,4 +1,4 @@
-# Copyright (C) 2023 Free Software Foundation, Inc.
+# Copyright (C) 2023-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -124,7 +124,7 @@ if {$is_remote} {
     #
     # However, we might be too quick sending the 'info threads 99' command,
     # so, if we see the output of that command without any thread exited
-    # text, we wait for a short while and try again.  We wait for upto 5
+    # text, we wait for a short while and try again.  We wait for up to 5
     # seconds (5 tries).  However, this might mean on a _really_ slow
     # machine that the thread still hasn't exited.  I guess if we start
     # seeing that then we can just update ATTEMPT_COUNT below.
@@ -155,17 +155,7 @@ if {$is_remote} {
 		exp_continue
 	    }
 
-	    # When PR gdb/30129 is fixed then this can all be collapsed down
-	    # into a single gdb_assert call.  This is split out like this
-	    # because the SAW_BP_DELETED part is working, and we want to
-	    # spot if that stops working.
-	    if { $saw_thread_exited && $saw_bp_deleted } {
-		kpass "gdb/30129" $gdb_test_name
-	    } elseif {!$saw_thread_exited && $saw_bp_deleted} {
-		kfail "gdb/30129" $gdb_test_name
-	    } else {
-		fail $gdb_test_name
-	    }
+	    gdb_assert { $saw_thread_exited && $saw_bp_deleted } $gdb_test_name
 	}
     }
 } else {

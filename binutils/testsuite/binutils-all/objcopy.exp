@@ -1,4 +1,4 @@
-#   Copyright (C) 1994-2023 Free Software Foundation, Inc.
+#   Copyright (C) 1994-2025 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -693,6 +693,7 @@ proc copy_setup { } {
     }
 
     if { [istarget *-*-linux*]
+	 || [istarget kvx-*-*]
 	 || [istarget *-*-gnu*] } {
 	foreach i $gcc_gas_flag {
 	    set flags "additional_flags=$i $flags"
@@ -1028,7 +1029,11 @@ proc keep_debug_symbols_for_elf_relocatable { prog flags test } {
 	    {[^a-zA-Z]+([a-zA-Z0-9_\.]+)[ \t]+([A-Z]+)[ \t]+[0-9a-f]+ [0-9a-f]+ [0-9a-f]+ [0-9]+[ \t]+([A-Z]*)[ \t]+[0-9]+(.*)} \
 	    $got all name type flag rest] } {
 	if { $type != "NOTE" && [regexp {[AG]} $flag] } {
-	    lappend non_debug_sections $name
+	    # PR 30699: Some debug sections can be in a group, so
+	    # exclude sections whose name includes "debug_"
+	    if { ! [regexp {debug_} $name] } {
+		lappend non_debug_sections $name
+	    }
 	}
 	set got $rest
     }
@@ -1086,6 +1091,7 @@ switch [copy_setup] {
 	untested $test5
 	if [is_elf_format] {
 	    untested $test6
+	    untested $test7
 	}
     }
     "3" {
@@ -1267,9 +1273,15 @@ if [is_elf_format] {
     run_dump_test "strip-7"
     run_dump_test "strip-8"
     run_dump_test "strip-9"
+    # This requires STB_GNU_UNIQUE support with OSABI set to GNU.
+    if { [supports_gnu_unique] } {
+	run_dump_test "strip-10"
+    }
+    run_dump_test "strip-11"
     run_dump_test "strip-12"
 
-    if { [istarget "mips64*-*-openbsd*"] } {
+    if { [istarget "mips64*-*-openbsd*"] \
+	 || [istarget "mips64*-*-*-gnuabi64"] } {
 	set reloc_format mips64
     }
     # A relocation type not supported by any target
@@ -1301,12 +1313,7 @@ if [is_elf_format] {
     run_dump_test "strip-15" [list \
 				  [list source strip-15${reloc_format}.s] \
 				  [list as "${elf64} --defsym RELOC=${reloc}"]]
-
-    # This requires STB_GNU_UNIQUE support with OSABI set to GNU.
-    if { [supports_gnu_unique] } {
-	run_dump_test "strip-10"
-    }
-    run_dump_test "strip-11"
+    run_dump_test "strip-16"
 
     if { [istarget "i*86-*"] || [istarget "x86_64-*-*"] } {
 	# Check to make sure we don't strip a symbol named in relocations.
@@ -1357,6 +1364,11 @@ if [is_elf_format] {
         verbose [file rootname $t]
         run_dump_test [file rootname $t]
     }
+
+    # Test --strip-section-headers
+    run_dump_test "strip-section-headers-1" [list \
+			  [list source strip-15${reloc_format}.s] \
+			  [list as "${elf64} --defsym RELOC=${reloc}"]]
 }
 run_dump_test "localize-hidden-2"
 
@@ -1451,6 +1463,7 @@ if [is_elf_format] {
 run_dump_test "pr23633"
 
 run_dump_test "set-section-alignment"
+run_dump_test "section-alignment"
 
 setup_xfail "hppa*-*-*"
 setup_xfail "spu-*-*"

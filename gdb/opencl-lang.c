@@ -1,5 +1,5 @@
 /* OpenCL language support for GDB, the GNU debugger.
-   Copyright (C) 2010-2023 Free Software Foundation, Inc.
+   Copyright (C) 2010-2024 Free Software Foundation, Inc.
 
    Contributed by Ken Werner <ken.werner@de.ibm.com>.
 
@@ -18,7 +18,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "gdbtypes.h"
 #include "symtab.h"
 #include "expression.h"
@@ -582,7 +581,7 @@ vector_relop (struct expression *exp, struct value *val1, struct value *val2,
 
 /* Perform a cast of ARG into TYPE.  There's sadly a lot of duplication in
    here from valops.c:value_cast, opencl is different only in the
-   behaviour of scalar to vector casting.  As far as possibly we're going
+   behavior of scalar to vector casting.  As far as possibly we're going
    to try and delegate back to the standard value_cast function. */
 
 struct value *

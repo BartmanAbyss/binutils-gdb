@@ -1,6 +1,6 @@
 /* This testcase is part of GDB, the GNU debugger.
 
-   Copyright 2021-2023 Free Software Foundation, Inc.
+   Copyright 2021-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,17 @@
 
 #include <hip/hip_runtime.h>
 #include <unistd.h>
+
+#define CHECK(cmd)                                                           \
+  {                                                                          \
+    hipError_t error = cmd;                                                  \
+    if (error != hipSuccess)                                                 \
+      {                                                                      \
+	fprintf (stderr, "error: '%s'(%d) at %s:%d\n",                       \
+		 hipGetErrorString (error), error, __FILE__, __LINE__);      \
+	exit (EXIT_FAILURE);                                                 \
+      }                                                                      \
+  }
 
 __global__ static void
 kernel1 ()
@@ -50,6 +61,6 @@ main ()
 
   kernel2<<<1, 1>>> ();
 
-  hipDeviceSynchronize ();
+  CHECK (hipDeviceSynchronize ());
   return 0;
 }

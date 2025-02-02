@@ -1,6 +1,6 @@
 /* Skipping uninteresting files and functions while stepping.
 
-   Copyright (C) 2011-2023 Free Software Foundation, Inc.
+   Copyright (C) 2011-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,13 +15,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "skip.h"
+#include "event-top.h"
 #include "value.h"
 #include "valprint.h"
 #include "ui-out.h"
 #include "symtab.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "command.h"
 #include "completer.h"
 #include "stack.h"
@@ -29,12 +29,12 @@
 #include "arch-utils.h"
 #include "linespec.h"
 #include "objfiles.h"
-#include "breakpoint.h" /* for get_sal_arch () */
+#include "breakpoint.h"
 #include "source.h"
 #include "filenames.h"
 #include "fnmatch.h"
 #include "gdbsupport/gdb_regex.h"
-#include "gdbsupport/gdb_optional.h"
+#include <optional>
 #include <list>
 #include "cli/cli-style.h"
 #include "gdbsupport/buildargv.h"
@@ -113,7 +113,7 @@ private: /* data */
   std::string m_function;
 
   /* If this is a function regexp, the compiled form.  */
-  gdb::optional<compiled_regex> m_compiled_function_regexp;
+  std::optional<compiled_regex> m_compiled_function_regexp;
 
   /* Enabled/disabled state.  */
   bool m_enabled = true;
@@ -531,7 +531,7 @@ skiplist_entry::do_skip_gfile_p (const symtab_and_line &function_sal) const
   /* Check first sole SYMTAB->FILENAME.  It may not be a substring of
      symtab_to_fullname as it may contain "./" etc.  */
   if (gdb_filename_fnmatch (m_file.c_str (), function_sal.symtab->filename,
-			    FNM_FILE_NAME | FNM_NOESCAPE) == 0)
+			    FNM_NOESCAPE) == 0)
     result = true;
 
   /* Before we invoke symtab_to_fullname, which is expensive, do a quick
@@ -542,14 +542,14 @@ skiplist_entry::do_skip_gfile_p (const symtab_and_line &function_sal) const
   else if (!basenames_may_differ
       && gdb_filename_fnmatch (lbasename (m_file.c_str ()),
 			       lbasename (function_sal.symtab->filename),
-			       FNM_FILE_NAME | FNM_NOESCAPE) != 0)
+			       FNM_NOESCAPE) != 0)
     result = false;
   else
     {
       /* Note: symtab_to_fullname caches its result, thus we don't have to.  */
       const char *fullname = symtab_to_fullname (function_sal.symtab);
 
-      result = compare_glob_filenames_for_search (fullname, m_file.c_str ());
+      result = gdb_filename_fnmatch (m_file.c_str (), fullname, FNM_NOESCAPE);
     }
 
   if (debug_skip)
@@ -684,7 +684,7 @@ Ignore a file while stepping.\n\
 Usage: skip file [FILE-NAME]\n\
 If no filename is given, ignore the current file."),
 	       &skiplist);
-  set_cmd_completer (c, filename_completer);
+  set_cmd_completer (c, deprecated_filename_completer);
 
   c = add_cmd ("function", class_breakpoint, skip_function_command, _("\
 Ignore a function while stepping.\n\
@@ -723,7 +723,7 @@ If you don't specify any numbers or ranges, we'll delete all skip entries."),
   add_info ("skip", info_skip_command, _("\
 Display the status of skips.\n\
 Usage: info skip [NUMBER | RANGES]...\n\
-You can specify numbers (e.g. \"info skip 1 3\"), \n\
+You can specify numbers (e.g. \"info skip 1 3\"),\n\
 ranges (e.g. \"info skip 4-8\"), or both (e.g. \"info skip 1 3 4-8\").\n\n\
 If you don't specify any numbers or ranges, we'll show all skips."));
   set_cmd_completer (c, complete_skip_number);

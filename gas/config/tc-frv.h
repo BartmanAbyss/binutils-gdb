@@ -1,5 +1,5 @@
 /* tc-frv.h -- Header file for tc-frv.c.
-   Copyright (C) 2002-2023 Free Software Foundation, Inc.
+   Copyright (C) 2002-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -99,7 +99,7 @@ extern void frv_frob_file (void);
    for little gain.  This code is not meant to be run anyway, so just
    emit nops.  */
 #define MAX_MEM_FOR_RS_ALIGN_CODE (3 + 4)
-#define HANDLE_ALIGN(FRAGP) do						\
+#define HANDLE_ALIGN(SEC, FRAGP) do						\
   if ((FRAGP)->fr_type == rs_align_code) 				\
     {									\
       valueT count = ((FRAGP)->fr_next->fr_address			\

@@ -1,5 +1,5 @@
 /* tc-mt.c -- Assembler for the Morpho Technologies mt .
-   Copyright (C) 2005-2023 Free Software Foundation, Inc.
+   Copyright (C) 2005-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -68,7 +68,7 @@ const pseudo_typeS md_pseudo_table[] =
 
 static int no_scheduling_restrictions = 0;
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #define OPTION_NO_SCHED_REST	(OPTION_MD_BASE)
   { "nosched",	   no_argument, NULL, OPTION_NO_SCHED_REST },
@@ -76,9 +76,9 @@ struct option md_longopts[] =
   { "march", required_argument, NULL, OPTION_MARCH},
   { NULL,	   no_argument, NULL, 0 },
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
-const char * md_shortopts = "";
+const char md_shortopts[] = "";
 
 /* Mach selected from command line.  */
 static int mt_mach = bfd_mach_ms1;

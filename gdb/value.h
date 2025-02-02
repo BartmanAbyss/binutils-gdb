@@ -1,6 +1,6 @@
 /* Definitions for values of C expressions, for GDB.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,19 +17,19 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#if !defined (VALUE_H)
-#define VALUE_H 1
+#ifndef GDB_VALUE_H
+#define GDB_VALUE_H
 
-#include "frame.h"		/* For struct frame_id.  */
+#include "frame.h"
 #include "extension.h"
 #include "gdbsupport/gdb_ref_ptr.h"
 #include "gmp-utils.h"
+#include "gdbtypes.h"
 
 struct block;
 struct expression;
 struct regcache;
 struct symbol;
-struct type;
 struct ui_file;
 struct language_defn;
 struct value_print_options;
@@ -158,6 +158,19 @@ public:
 
   /* Allocate a value and its contents for type TYPE.  */
   static struct value *allocate (struct type *type);
+
+  /* Allocate a lazy value representing register REGNUM in the frame previous
+     to NEXT_FRAME.  If TYPE is non-nullptr, use it as the value type.
+     Otherwise, use `register_type` to obtain the type.  */
+  static struct value *allocate_register_lazy (const frame_info_ptr &next_frame,
+					       int regnum,
+					       type *type = nullptr);
+
+  /* Same as `allocate_register_lazy`, but make the value non-lazy.
+  
+     The caller is responsible for filling the value's contents.  */
+  static struct value *allocate_register (const frame_info_ptr &next_frame,
+					  int regnum, type *type = nullptr);
 
   /* Create a computed lvalue, with type TYPE, function pointers
      FUNCS, and closure CLOSURE.  */
@@ -361,9 +374,26 @@ public:
   struct internalvar **deprecated_internalvar_hack ()
   { return &m_location.internalvar; }
 
-  struct frame_id *deprecated_next_frame_id_hack ();
+  /* Return this value's next frame id.
 
-  int *deprecated_regnum_hack ();
+     The value must be of lval == lval_register.  */
+  frame_id next_frame_id ()
+  {
+    gdb_assert (m_lval == lval_register);
+
+    return m_location.reg.next_frame_id;
+  }
+
+  /* Return this value's register number.
+
+     The value must be of lval == lval_register.  */
+  int regnum ()
+  {
+    gdb_assert (m_lval == lval_register);
+
+    return m_location.reg.regnum;
+  }
+
 
   /* contents() and contents_raw() both return the address of the gdb
      buffer used to hold a copy of the contents of the lval.
@@ -563,7 +593,7 @@ public:
 
   /* Update this value before discarding OBJFILE.  COPIED_TYPES is
      used to prevent cycles / duplicates.  */
-  void preserve (struct objfile *objfile, htab_t copied_types);
+  void preserve (struct objfile *objfile, copied_types_hash_t &copied_types);
 
   /* Unpack a bitfield of BITSIZE bits found at BITPOS in the object
      at VALADDR + EMBEDDEDOFFSET that has the type of DEST_VAL and
@@ -662,10 +692,10 @@ private:
     {
       /* Register number.  */
       int regnum;
-      /* Frame ID of "next" frame to which a register value is relative.
-	 If the register value is found relative to frame F, then the
-	 frame id of F->next will be stored in next_frame_id.  */
-      struct frame_id next_frame_id;
+
+      /* Frame ID of the next physical (non-inline) frame to which a register
+	 value is relative.  */
+      frame_id next_frame_id;
     } reg;
 
     /* Pointer to internal variable.  */
@@ -952,15 +982,6 @@ extern void error_value_optimized_out (void);
 /* Pointer to internal variable.  */
 #define VALUE_INTERNALVAR(val) (*((val)->deprecated_internalvar_hack ()))
 
-/* Frame ID of "next" frame to which a register value is relative.  A
-   register value is indicated by VALUE_LVAL being set to lval_register.
-   So, if the register value is found relative to frame F, then the
-   frame id of F->next will be stored in VALUE_NEXT_FRAME_ID.  */
-#define VALUE_NEXT_FRAME_ID(val) (*((val)->deprecated_next_frame_id_hack ()))
-
-/* Register number if the value is from a register.  */
-#define VALUE_REGNUM(val) (*((val)->deprecated_regnum_hack ()))
-
 /* Return value after lval_funcs->coerce_ref (after check_typedef).  Return
    NULL if lval_funcs->coerce_ref is not applicable for whatever reason.  */
 
@@ -1090,7 +1111,7 @@ extern struct value *value_at (struct type *type, CORE_ADDR addr);
    properties.  */
 
 extern struct value *value_at_lazy (struct type *type, CORE_ADDR addr,
-				    frame_info_ptr frame = nullptr);
+				    const frame_info_ptr &frame = nullptr);
 
 /* Like value_at, but ensures that the result is marked not_lval.
    This can be important if the memory is "volatile".  */
@@ -1100,22 +1121,20 @@ extern struct value *value_from_contents_and_address_unresolved
      (struct type *, const gdb_byte *, CORE_ADDR);
 extern struct value *value_from_contents_and_address
      (struct type *, const gdb_byte *, CORE_ADDR,
-      frame_info_ptr frame = nullptr);
+      const frame_info_ptr &frame = nullptr);
 extern struct value *value_from_contents (struct type *, const gdb_byte *);
 
-extern struct value *default_value_from_register (struct gdbarch *gdbarch,
-						  struct type *type,
-						  int regnum,
-						  struct frame_id frame_id);
+extern value *default_value_from_register (gdbarch *gdbarch, type *type,
+					   int regnum,
+					   const frame_info_ptr &this_frame);
 
-extern void read_frame_register_value (struct value *value,
-				       frame_info_ptr frame);
+extern ULONGEST default_dwarf2_reg_piece_offset (gdbarch *gdbarch, int regnum, ULONGEST size);
 
 extern struct value *value_from_register (struct type *type, int regnum,
-					  frame_info_ptr frame);
+					  const frame_info_ptr &frame);
 
 extern CORE_ADDR address_from_register (int regnum,
-					frame_info_ptr frame);
+					const frame_info_ptr &frame);
 
 extern struct value *value_of_variable (struct symbol *var,
 					const struct block *b);
@@ -1123,9 +1142,14 @@ extern struct value *value_of_variable (struct symbol *var,
 extern struct value *address_of_variable (struct symbol *var,
 					  const struct block *b);
 
-extern struct value *value_of_register (int regnum, frame_info_ptr frame);
+/* Return a value with the contents of register REGNUM as found in the frame
+   previous to NEXT_FRAME.  */
 
-struct value *value_of_register_lazy (frame_info_ptr frame, int regnum);
+extern value *value_of_register (int regnum, const frame_info_ptr &next_frame);
+
+/* Same as the above, but the value is not fetched.  */
+
+extern value *value_of_register_lazy (const frame_info_ptr &next_frame, int regnum);
 
 /* Return the symbol's reading requirement.  */
 
@@ -1138,7 +1162,7 @@ extern int symbol_read_needs_frame (struct symbol *);
 
 extern struct value *read_var_value (struct symbol *var,
 				     const struct block *var_block,
-				     frame_info_ptr frame);
+				     const frame_info_ptr &frame);
 
 extern struct value *allocate_repeat_value (struct type *type, int count);
 
@@ -1170,25 +1194,63 @@ class scoped_value_mark
   /* Free the values currently on the value stack.  */
   void free_to_mark ()
   {
-    if (m_value != NULL)
+    if (!m_freed)
       {
 	value_free_to_mark (m_value);
-	m_value = NULL;
+	m_freed = true;
       }
   }
 
  private:
 
   const struct value *m_value;
+  bool m_freed = false;
 };
 
-extern struct value *value_cstring (const char *ptr, ssize_t len,
+/* Create not_lval value representing a NULL-terminated C string.  The
+   resulting value has type TYPE_CODE_ARRAY.  The string passed in should
+   not include embedded null characters.
+
+   PTR points to the string data; COUNT is number of characters (does
+   not include the NULL terminator) pointed to by PTR, each character is of
+   type (and size of) CHAR_TYPE.  */
+
+extern struct value *value_cstring (const gdb_byte *ptr, ssize_t count,
 				    struct type *char_type);
-extern struct value *value_string (const char *ptr, ssize_t len,
+
+/* Specialisation of value_cstring above.  In this case PTR points to
+   single byte characters.  CHAR_TYPE must have a length of 1.  */
+inline struct value *value_cstring (const char *ptr, ssize_t count,
+				    struct type *char_type)
+{
+  gdb_assert (char_type->length () == 1);
+  return value_cstring ((const gdb_byte *) ptr, count, char_type);
+}
+
+/* Create a not_lval value with type TYPE_CODE_STRING, the resulting value
+   has type TYPE_CODE_STRING.
+
+   PTR points to the string data; COUNT is number of characters pointed to
+   by PTR, each character has the type (and size of) CHAR_TYPE.
+
+   Note that string types are like array of char types with a lower bound
+   defined by the language (usually zero or one).  Also the string may
+   contain embedded null characters.  */
+
+extern struct value *value_string (const gdb_byte *ptr, ssize_t count,
 				   struct type *char_type);
 
-extern struct value *value_array (int lowbound, int highbound,
-				  struct value **elemvec);
+/* Specialisation of value_string above.  In this case PTR points to
+   single byte characters.  CHAR_TYPE must have a length of 1.  */
+inline struct value *value_string (const char *ptr, ssize_t count,
+				   struct type *char_type)
+{
+  gdb_assert (char_type->length () == 1);
+  return value_string ((const gdb_byte *) ptr, count, char_type);
+}
+
+extern struct value *value_array (int lowbound,
+				  gdb::array_view<struct value *> elemvec);
 
 extern struct value *value_concat (struct value *arg1, struct value *arg2);
 
@@ -1231,7 +1293,7 @@ extern struct value *value_neg (struct value *arg1);
 extern struct value *value_complement (struct value *arg1);
 
 extern struct value *value_struct_elt (struct value **argp,
-				       gdb::optional<gdb::array_view <value *>> args,
+				       std::optional<gdb::array_view <value *>> args,
 				       const char *name, int *static_memfuncp,
 				       const char *err);
 
@@ -1281,6 +1343,10 @@ extern struct value *value_repeat (struct value *arg1, int count);
 
 extern struct value *value_subscript (struct value *array, LONGEST index);
 
+/* Assuming VAL is array-like (see type::is_array_like), return an
+   array form of VAL.  */
+extern struct value *value_to_array (struct value *val);
+
 extern struct value *value_bitstring_subscript (struct type *type,
 						struct value *bitstring,
 						LONGEST index);
@@ -1313,7 +1379,7 @@ extern void fetch_subexp_value (struct expression *exp,
 				std::vector<value_ref_ptr> *val_chain,
 				bool preserve_errors);
 
-extern struct value *parse_and_eval (const char *exp);
+extern struct value *parse_and_eval (const char *exp, parser_flags flags = 0);
 
 extern struct value *parse_to_comma_and_eval (const char **expp);
 
@@ -1493,7 +1559,7 @@ extern int val_print_string (struct type *elttype, const char *encoding,
 
 extern void print_variable_and_value (const char *name,
 				      struct symbol *var,
-				      frame_info_ptr frame,
+				      const frame_info_ptr &frame,
 				      struct ui_file *stream,
 				      int indent);
 
@@ -1534,13 +1600,24 @@ extern struct value *find_function_in_inferior (const char *,
 
 extern struct value *value_allocate_space_in_inferior (int);
 
-/* User function handler.  */
+/* User function handler.  The internal_function_fn variant assumes return
+   type int.  The internal_function_fn_noside returns some value with the
+   return type when passed noside == EVAL_AVOID_SIDE_EFFECTS.  */
 
-typedef struct value *(*internal_function_fn) (struct gdbarch *gdbarch,
-					       const struct language_defn *language,
-					       void *cookie,
-					       int argc,
-					       struct value **argv);
+using internal_function_fn
+  = std::function<struct value *(struct gdbarch *gdbarch,
+				 const struct language_defn *language,
+				 void *cookie,
+				 int argc,
+				 struct value **argv)>;
+
+using internal_function_fn_noside
+  = std::function<struct value *(struct gdbarch *gdbarch,
+				 const struct language_defn *language,
+				 void *cookie,
+				 int argc,
+				 struct value **argv,
+				 enum noside noside)>;
 
 /* Add a new internal function.  NAME is the name of the function; DOC
    is a documentation string describing the function.  HANDLER is
@@ -1551,6 +1628,9 @@ typedef struct value *(*internal_function_fn) (struct gdbarch *gdbarch,
 extern void add_internal_function (const char *name, const char *doc,
 				   internal_function_fn handler,
 				   void *cookie);
+extern void add_internal_function (const char *name, const char *doc,
+				   internal_function_fn_noside handler,
+				   void *cookie);
 
 /* This overload takes an allocated documentation string.  */
 
@@ -1558,21 +1638,27 @@ extern void add_internal_function (gdb::unique_xmalloc_ptr<char> &&name,
 				   gdb::unique_xmalloc_ptr<char> &&doc,
 				   internal_function_fn handler,
 				   void *cookie);
+extern void add_internal_function (gdb::unique_xmalloc_ptr<char> &&name,
+				   gdb::unique_xmalloc_ptr<char> &&doc,
+				   internal_function_fn_noside handler,
+				   void *cookie);
 
 struct value *call_internal_function (struct gdbarch *gdbarch,
 				      const struct language_defn *language,
 				      struct value *function,
-				      int argc, struct value **argv);
+				      int argc, struct value **argv,
+				      enum noside noside);
 
 const char *value_internal_function_name (struct value *);
-
-/* Destroy the values currently allocated.  This is called when GDB is
-   exiting (e.g., on quit_force).  */
-extern void finalize_values ();
 
 /* Convert VALUE to a gdb_mpq.  The caller must ensure that VALUE is
    of floating-point, fixed-point, or integer type.  */
 extern gdb_mpq value_to_gdb_mpq (struct value *value);
+
+/* Return true if LEN (in bytes) exceeds the max-value-size setting,
+   otherwise, return false.  If the user has disabled (set to unlimited)
+   the max-value-size setting then this function will always return false.  */
+extern bool exceeds_max_value_size (ULONGEST length);
 
 /* While an instance of this class is live, and array values that are
    created, that are larger than max_value_size, will be restricted in size
@@ -1588,7 +1674,55 @@ struct scoped_array_length_limiting
 
 private:
   /* Used to hold the previous array value element limit.  */
-  gdb::optional<int> m_old_value;
+  std::optional<int> m_old_value;
 };
 
-#endif /* !defined (VALUE_H) */
+/* Helpers for building pseudo register values from raw registers.  */
+
+/* Create a value for pseudo register PSEUDO_REG_NUM by using bytes from
+   raw register RAW_REG_NUM starting at RAW_OFFSET.
+
+   The size of the pseudo register specifies how many bytes to use.  The
+   offset plus the size must not overflow the raw register's size.  */
+
+value *pseudo_from_raw_part (const frame_info_ptr &next_frame, int pseudo_reg_num,
+			     int raw_reg_num, int raw_offset);
+
+/* Write PSEUDO_BUF, the contents of a pseudo register, to part of raw register
+   RAW_REG_NUM starting at RAW_OFFSET.  */
+
+void pseudo_to_raw_part (const frame_info_ptr &next_frame,
+			 gdb::array_view<const gdb_byte> pseudo_buf,
+			 int raw_reg_num, int raw_offset);
+
+/* Create a value for pseudo register PSEUDO_REG_NUM by concatenating raw
+   registers RAW_REG_1_NUM and RAW_REG_2_NUM.
+
+   The sum of the sizes of raw registers must be equal to the size of the
+   pseudo register.  */
+
+value *pseudo_from_concat_raw (const frame_info_ptr &next_frame, int pseudo_reg_num,
+			       int raw_reg_1_num, int raw_reg_2_num);
+
+/* Write PSEUDO_BUF, the contents of a pseudo register, to the two raw registers
+   RAW_REG_1_NUM and RAW_REG_2_NUM.  */
+
+void pseudo_to_concat_raw (const frame_info_ptr &next_frame,
+			   gdb::array_view<const gdb_byte> pseudo_buf,
+			   int raw_reg_1_num, int raw_reg_2_num);
+
+/* Same as the above, but with three raw registers.  */
+
+value *pseudo_from_concat_raw (const frame_info_ptr &next_frame, int pseudo_reg_num,
+			       int raw_reg_1_num, int raw_reg_2_num,
+			       int raw_reg_3_num);
+
+/* Write PSEUDO_BUF, the contents of a pseudo register, to the three raw
+   registers RAW_REG_1_NUM, RAW_REG_2_NUM and RAW_REG_3_NUM.  */
+
+void pseudo_to_concat_raw (const frame_info_ptr &next_frame,
+			   gdb::array_view<const gdb_byte> pseudo_buf,
+			   int raw_reg_1_num, int raw_reg_2_num,
+			   int raw_reg_3_num);
+
+#endif /* GDB_VALUE_H */

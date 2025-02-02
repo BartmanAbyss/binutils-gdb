@@ -1,6 +1,6 @@
 /* CLI Definitions for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2023 Free Software Foundation, Inc.
+   Copyright (C) 2002-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,13 +17,13 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "cli-interp.h"
+#include "exceptions.h"
 #include "interps.h"
 #include "event-top.h"
 #include "ui-out.h"
 #include "cli-out.h"
-#include "top.h"		/* for "execute_command" */
+#include "top.h"
 #include "ui.h"
 #include "infrun.h"
 #include "observable.h"
@@ -67,15 +67,6 @@ cli_interp::cli_interp (const char *name)
 /* Suppress notification struct.  */
 struct cli_suppress_notification cli_suppress_notification;
 
-/* Returns the INTERP's data cast as cli_interp_base if INTERP is a
-   console-like interpreter, and returns NULL otherwise.  */
-
-static cli_interp_base *
-as_cli_interp_base (interp *interp)
-{
-  return dynamic_cast<cli_interp_base *> (interp);
-}
-
 /* See cli-interp.h.
 
    Breakpoint hits should always be mirrored to a console.  Deciding
@@ -112,10 +103,8 @@ should_print_stop_to_console (struct interp *console_interp,
    interpreter-exec), print nothing.  These are named "cli_base" as
    they print to both CLI interpreters and TUI interpreters.  */
 
-/* Observer for the normal_stop notification.  */
-
-static void
-cli_base_on_normal_stop (struct bpstat *bs, int print_frame)
+void
+cli_interp_base::on_normal_stop (struct bpstat *bs, int print_frame)
 {
   if (!print_frame)
     return;
@@ -124,107 +113,50 @@ cli_base_on_normal_stop (struct bpstat *bs, int print_frame)
   if (cli_suppress_notification.normal_stop)
     return;
 
-  SWITCH_THRU_ALL_UIS ()
-    {
-      struct interp *interp = top_level_interpreter ();
-      cli_interp_base *cli = as_cli_interp_base (interp);
-      if (cli == nullptr)
-	continue;
+  thread_info *thread = inferior_thread ();
+  if (should_print_stop_to_console (this, thread))
+    print_stop_event (this->interp_ui_out ());
 
-      thread_info *thread = inferior_thread ();
-      if (should_print_stop_to_console (interp, thread))
-	print_stop_event (cli->interp_ui_out ());
-    }
 }
 
-/* Observer for the signal_received notification.  */
-
-static void
-cli_base_on_signal_received (enum gdb_signal siggnal)
+void
+cli_interp_base::on_signal_received (enum gdb_signal siggnal)
 {
-  SWITCH_THRU_ALL_UIS ()
-    {
-      cli_interp_base *cli = as_cli_interp_base (top_level_interpreter ());
-      if (cli == nullptr)
-	continue;
-
-      print_signal_received_reason (cli->interp_ui_out (), siggnal);
-    }
+  print_signal_received_reason (this->interp_ui_out (), siggnal);
 }
 
-/* Observer for the signalled notification.  */
-
-static void
-cli_base_on_signal_exited (enum gdb_signal siggnal)
+void
+cli_interp_base::on_signal_exited (gdb_signal sig)
 {
-  SWITCH_THRU_ALL_UIS ()
-    {
-      cli_interp_base *cli = as_cli_interp_base (top_level_interpreter ());
-      if (cli == nullptr)
-	continue;
-
-      print_signal_exited_reason (cli->interp_ui_out (), siggnal);
-    }
+  print_signal_exited_reason (this->interp_ui_out (), sig);
 }
 
-/* Observer for the exited notification.  */
-
-static void
-cli_base_on_exited (int exitstatus)
+void
+cli_interp_base::on_exited (int status)
 {
-  SWITCH_THRU_ALL_UIS ()
-    {
-      cli_interp_base *cli = as_cli_interp_base (top_level_interpreter ());
-      if (cli == nullptr)
-	continue;
-
-      print_exited_reason (cli->interp_ui_out (), exitstatus);
-    }
+  print_exited_reason (this->interp_ui_out (), status);
 }
 
-/* Observer for the no_history notification.  */
-
-static void
-cli_base_on_no_history ()
+void
+cli_interp_base::on_no_history ()
 {
-  SWITCH_THRU_ALL_UIS ()
-    {
-      cli_interp_base *cli = as_cli_interp_base (top_level_interpreter ());
-      if (cli == nullptr)
-	continue;
-
-      print_no_history_reason (cli->interp_ui_out ());
-    }
+  print_no_history_reason (this->interp_ui_out ());
 }
 
-/* Observer for the sync_execution_done notification.  */
-
-static void
-cli_base_on_sync_execution_done ()
+void
+cli_interp_base::on_sync_execution_done ()
 {
-  cli_interp_base *cli = as_cli_interp_base (top_level_interpreter ());
-  if (cli == nullptr)
-    return;
-
   display_gdb_prompt (NULL);
 }
 
-/* Observer for the command_error notification.  */
-
-static void
-cli_base_on_command_error ()
+void
+cli_interp_base::on_command_error ()
 {
-  cli_interp_base *cli = as_cli_interp_base (top_level_interpreter ());
-  if (cli == nullptr)
-    return;
-
   display_gdb_prompt (NULL);
 }
 
-/* Observer for the user_selected_context_changed notification.  */
-
-static void
-cli_base_on_user_selected_context_changed (user_selected_what selection)
+void
+cli_interp_base::on_user_selected_context_changed (user_selected_what selection)
 {
   /* This event is suppressed.  */
   if (cli_suppress_notification.user_selected_context)
@@ -232,19 +164,12 @@ cli_base_on_user_selected_context_changed (user_selected_what selection)
 
   thread_info *tp = inferior_ptid != null_ptid ? inferior_thread () : nullptr;
 
-  SWITCH_THRU_ALL_UIS ()
-    {
-      cli_interp_base *cli = as_cli_interp_base (top_level_interpreter ());
-      if (cli == nullptr)
-	continue;
+  if (selection & USER_SELECTED_INFERIOR)
+    print_selected_inferior (this->interp_ui_out ());
 
-      if (selection & USER_SELECTED_INFERIOR)
-	print_selected_inferior (cli->interp_ui_out ());
-
-      if (tp != nullptr
-	  && ((selection & (USER_SELECTED_THREAD | USER_SELECTED_FRAME))))
-	print_selected_thread_frame (cli->interp_ui_out (), selection);
-    }
+  if (tp != nullptr
+      && ((selection & (USER_SELECTED_THREAD | USER_SELECTED_FRAME))))
+    print_selected_thread_frame (this->interp_ui_out (), selection);
 }
 
 /* pre_command_loop implementation.  */
@@ -303,7 +228,7 @@ cli_interp::exec (const char *command_str)
      interpreter which has a new ui_file for gdb_stdout, use that one
      instead of the default.
 
-     It is important that it gets reset everytime, since the user
+     It is important that it gets reset every time, since the user
      could set gdb to use a different interpreter.  */
   ui_file *old_stream = m_cli_uiout->set_stream (gdb_stdout);
   SCOPE_EXIT { m_cli_uiout->set_stream (old_stream); };
@@ -344,12 +269,11 @@ cli_interp_base::set_logging (ui_file_up logfile, bool logging_redirect,
   if (logfile != nullptr)
     {
       gdb_assert (m_saved_output == nullptr);
-      m_saved_output.reset (new saved_output_files);
+      m_saved_output = std::make_unique<saved_output_files> ();
       m_saved_output->out = gdb_stdout;
       m_saved_output->err = gdb_stderr;
       m_saved_output->log = gdb_stdlog;
       m_saved_output->targ = gdb_stdtarg;
-      m_saved_output->targerr = gdb_stdtargerr;
 
       ui_file *logfile_p = logfile.get ();
       m_saved_output->logfile_holder = std::move (logfile);
@@ -375,7 +299,6 @@ cli_interp_base::set_logging (ui_file_up logfile, bool logging_redirect,
       gdb_stdlog = m_saved_output->stdlog_holder.get ();
       gdb_stderr = new_stderr;
       gdb_stdtarg = new_stderr;
-      gdb_stdtargerr = new_stderr;
     }
   else
     {
@@ -383,7 +306,6 @@ cli_interp_base::set_logging (ui_file_up logfile, bool logging_redirect,
       gdb_stderr = m_saved_output->err;
       gdb_stdlog = m_saved_output->log;
       gdb_stdtarg = m_saved_output->targ;
-      gdb_stdtargerr = m_saved_output->targerr;
 
       m_saved_output.reset (nullptr);
     }
@@ -404,20 +326,4 @@ void
 _initialize_cli_interp ()
 {
   interp_factory_register (INTERP_CONSOLE, cli_interp_factory);
-
-  /* Note these all work for both the CLI and TUI interpreters.  */
-  gdb::observers::normal_stop.attach (cli_base_on_normal_stop,
-				      "cli-interp-base");
-  gdb::observers::signal_received.attach (cli_base_on_signal_received,
-					  "cli-interp-base");
-  gdb::observers::signal_exited.attach (cli_base_on_signal_exited,
-					"cli-interp-base");
-  gdb::observers::exited.attach (cli_base_on_exited, "cli-interp-base");
-  gdb::observers::no_history.attach (cli_base_on_no_history, "cli-interp-base");
-  gdb::observers::sync_execution_done.attach (cli_base_on_sync_execution_done,
-					      "cli-interp-base");
-  gdb::observers::command_error.attach (cli_base_on_command_error,
-					"cli-interp-base");
-  gdb::observers::user_selected_context_changed.attach
-    (cli_base_on_user_selected_context_changed, "cli-interp-base");
 }

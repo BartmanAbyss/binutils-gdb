@@ -1,5 +1,5 @@
 /* tc-pj.c -- Assemble code for Pico Java
-   Copyright (C) 1999-2023 Free Software Foundation, Inc.
+   Copyright (C) 1999-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -319,9 +319,9 @@ md_atof (int type, char *litP, int *sizeP)
   return ieee_md_atof (type, litP, sizeP, target_big_endian);
 }
 
-const char *md_shortopts = "";
+const char md_shortopts[] = "";
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
 #define OPTION_LITTLE (OPTION_MD_BASE)
 #define OPTION_BIG    (OPTION_LITTLE + 1)
@@ -330,7 +330,7 @@ struct option md_longopts[] =
   {"big", no_argument, NULL, OPTION_BIG},
   {NULL, no_argument, NULL, 0}
 };
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c, const char *arg ATTRIBUTE_UNUSED)
@@ -473,8 +473,8 @@ tc_gen_reloc (asection *section ATTRIBUTE_UNUSED, fixS *fixp)
   arelent *rel;
   bfd_reloc_code_real_type r_type;
 
-  rel = XNEW (arelent);
-  rel->sym_ptr_ptr = XNEW (asymbol *);
+  rel = notes_alloc (sizeof (arelent));
+  rel->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *rel->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   rel->address = fixp->fx_frag->fr_address + fixp->fx_where;
 

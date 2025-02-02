@@ -1,6 +1,6 @@
 /* Everything about catch/throw catchpoints, for GDB.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,11 +17,10 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "arch-utils.h"
 #include <ctype.h>
 #include "breakpoint.h"
-#include "gdbcmd.h"
+#include "exceptions.h"
 #include "inferior.h"
 #include "annotate.h"
 #include "valprint.h"
@@ -82,12 +81,12 @@ struct exception_catchpoint : public code_breakpoint
 				     _("invalid type-matching regexp")))
   {
     pspace = current_program_space;
-    re_set ();
+    re_set (pspace);
   }
 
-  void re_set () override;
+  void re_set (program_space *pspace) override;
   enum print_stop_action print_it (const bpstat *bs) const override;
-  bool print_one (bp_location **) const override;
+  bool print_one (const bp_location **) const override;
   void print_mention () const override;
   void print_recreate (struct ui_file *fp) const override;
   void print_one_detail (struct ui_out *) const override;
@@ -160,15 +159,13 @@ fetch_probe_arguments (struct value **arg0, struct value **arg1)
 void
 exception_catchpoint::check_status (struct bpstat *bs)
 {
-  struct exception_catchpoint *self
-    = (struct exception_catchpoint *) bs->breakpoint_at;
   std::string type_name;
 
   this->breakpoint::check_status (bs);
   if (!bs->stop)
     return;
 
-  if (self->pattern == NULL)
+  if (this->pattern == NULL)
     return;
 
   const char *name = nullptr;
@@ -192,7 +189,7 @@ exception_catchpoint::check_status (struct bpstat *bs)
 
   if (name != nullptr)
     {
-      if (self->pattern->exec (name, 0, NULL, 0) != 0)
+      if (this->pattern->exec (name, 0, NULL, 0) != 0)
 	bs->stop = false;
     }
 }
@@ -200,7 +197,7 @@ exception_catchpoint::check_status (struct bpstat *bs)
 /* Implement the 're_set' method.  */
 
 void
-exception_catchpoint::re_set ()
+exception_catchpoint::re_set (program_space *pspace)
 {
   std::vector<symtab_and_line> sals;
   struct program_space *filter_pspace = current_program_space;
@@ -261,7 +258,7 @@ exception_catchpoint::print_it (const bpstat *bs) const
 }
 
 bool
-exception_catchpoint::print_one (bp_location **last_loc) const
+exception_catchpoint::print_one (const bp_location **last_loc) const
 {
   struct value_print_options opts;
   struct ui_out *uiout = current_uiout;

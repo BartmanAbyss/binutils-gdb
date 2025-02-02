@@ -1,6 +1,6 @@
 /* SystemTap probe support for GDB.
 
-   Copyright (C) 2012-2023 Free Software Foundation, Inc.
+   Copyright (C) 2012-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,14 +17,14 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "stap-probe.h"
+#include "extract-store-integer.h"
 #include "probe.h"
 #include "ui-out.h"
 #include "objfiles.h"
 #include "arch-utils.h"
 #include "command.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "filenames.h"
 #include "value.h"
 #include "ax.h"
@@ -38,7 +38,6 @@
 #include "elf-bfd.h"
 #include "expop.h"
 #include <unordered_map>
-#include "gdbsupport/hash_enum.h"
 
 #include <ctype.h>
 
@@ -151,7 +150,7 @@ public:
 
   /* See probe.h.  */
   struct value *evaluate_argument (unsigned n,
-				   frame_info_ptr frame) override;
+				   const frame_info_ptr &frame) override;
 
   /* See probe.h.  */
   void compile_to_ax (struct agent_expr *aexpr,
@@ -435,8 +434,7 @@ typedef expr::operation_up binop_maker_ftype (expr::operation_up &&,
 					      expr::operation_up &&);
 /* Map from an expression opcode to a function that can create a
    binary operation of that type.  */
-static std::unordered_map<exp_opcode, binop_maker_ftype *,
-			  gdb::hash_enum<exp_opcode>> stap_maker_map;
+static std::unordered_map<exp_opcode, binop_maker_ftype *> stap_maker_map;
 
 /* Helper function to create a binary operation.  */
 static expr::operation_up
@@ -1438,7 +1436,7 @@ stap_probe::can_evaluate_arguments () const
    corresponding to it.  Assertion is thrown if N does not exist.  */
 
 struct value *
-stap_probe::evaluate_argument (unsigned n, frame_info_ptr frame)
+stap_probe::evaluate_argument (unsigned n, const frame_info_ptr &frame)
 {
   struct stap_probe_arg *arg;
   struct gdbarch *gdbarch = get_frame_arch (frame);
@@ -1760,8 +1758,9 @@ _initialize_stap_probe ()
 			     &stap_expression_debug,
 			     _("Set SystemTap expression debugging."),
 			     _("Show SystemTap expression debugging."),
-			     _("When non-zero, the internal representation "
-			       "of SystemTap expressions will be printed."),
+			     _("\
+When non-zero, the internal representation of SystemTap expressions\n\
+will be printed."),
 			     NULL,
 			     show_stapexpressiondebug,
 			     &setdebuglist, &showdebuglist);

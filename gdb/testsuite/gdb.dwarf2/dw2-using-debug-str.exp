@@ -1,4 +1,4 @@
-# Copyright 2021-2023 Free Software Foundation, Inc.
+# Copyright 2021-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -128,11 +128,13 @@ if {[run_on_host "objcopy" [gdb_find_objcopy] "$args"]} {
 # executable we're going to get an error, which we check for below.
 clean_restart
 
+gdb_test_no_output "maint set dwarf synchronous on"
+
 set line1 "Reading symbols from \[^\r\n\]+"
-set dwarf_error "Dwarf Error: DW_FORM_strp used without required section"
+set dwarf_error "DWARF Error: DW_FORM_strp used without required section"
 
 # This pattern is hit when GDB does not use -readnow (i.e. the default
-# behaviour).
+# behavior).
 set pattern1 \
     [multi_line \
          $line1 \

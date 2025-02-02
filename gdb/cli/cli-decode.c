@@ -1,6 +1,6 @@
 /* Handle lists of commands, their decoding and documentation, for GDB.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,7 +15,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "symtab.h"
 #include <ctype.h>
 #include "gdbsupport/gdb_regex.h"
@@ -24,7 +23,8 @@
 #include "cli/cli-cmds.h"
 #include "cli/cli-decode.h"
 #include "cli/cli-style.h"
-#include "gdbsupport/gdb_optional.h"
+#include "cli/cli-utils.h"
+#include <optional>
 
 /* Prototypes for local functions.  */
 
@@ -128,8 +128,10 @@ set_cmd_completer_handle_brkchars (struct cmd_list_element *cmd,
   cmd->completer_handle_brkchars = func;
 }
 
+/* See cli-decode.h.  */
+
 std::string
-cmd_list_element::prefixname () const
+cmd_list_element::prefixname_no_space () const
 {
   if (!this->is_prefix ())
     /* Not a prefix command.  */
@@ -137,12 +139,25 @@ cmd_list_element::prefixname () const
 
   std::string prefixname;
   if (this->prefix != nullptr)
-    prefixname = this->prefix->prefixname ();
+    {
+      prefixname = this->prefix->prefixname_no_space ();
+      prefixname += " ";
+    }
 
   prefixname += this->name;
-  prefixname += " ";
 
   return prefixname;
+}
+
+/* See cli-decode.h.  */
+
+std::string
+cmd_list_element::prefixname () const
+{
+  std::string result = prefixname_no_space ();
+  if (!result.empty ())
+    result += " ";
+  return result;
 }
 
 /* See cli/cli-decode.h.  */
@@ -155,7 +170,7 @@ cmd_list_element::command_components () const
   if (this->prefix != nullptr)
     result = this->prefix->command_components ();
 
-  result.emplace_back (std::string (this->name));
+  result.emplace_back (this->name);
   return result;
 }
 
@@ -381,7 +396,7 @@ do_prefix_cmd (const char *args, int from_tty, struct cmd_list_element *c)
   while (c->is_alias ())
     c = c->alias_target;
 
-  help_list (*c->subcommands, c->prefixname ().c_str (),
+  help_list (*c->subcommands, c->prefixname_no_space ().c_str (),
 	     all_commands, gdb_stdout);
 }
 
@@ -741,6 +756,87 @@ add_setshow_enum_cmd (const char *name, command_class theclass,
 }
 
 /* See cli-decode.h.  */
+
+void
+complete_on_color (completion_tracker &tracker,
+		   const char *text, const char *word)
+{
+  complete_on_enum (tracker, ui_file_style::basic_color_enums.data (),
+		    text, word);
+  if (*text == '\0')
+    {
+      /* Convenience to let the user know what the option
+	 can accept.  Note there's no common prefix between
+	 the strings on purpose, so that complete_on_enum doesn't do
+	 a partial match.  */
+      tracker.add_completion (make_unique_xstrdup ("NUMBER"));
+      tracker.add_completion (make_unique_xstrdup ("#RRGGBB"));
+    }
+}
+
+/* Completer used in color commands.  */
+
+static void
+color_completer (struct cmd_list_element *ignore,
+		 completion_tracker &tracker,
+		 const char *text, const char *word)
+{
+  complete_on_color (tracker, text, word);
+}
+
+
+/* Add element named NAME to command list LIST (the list for set or
+   some sublist thereof).  CLASS is as in add_cmd.  VAR is address
+   of the variable which will contain the color.  */
+
+set_show_commands
+add_setshow_color_cmd (const char *name,
+		       enum command_class theclass,
+		       ui_file_style::color *var,
+		       const char *set_doc,
+		       const char *show_doc,
+		       const char *help_doc,
+		       cmd_func_ftype *set_func,
+		       show_value_ftype *show_func,
+		       struct cmd_list_element **set_list,
+		       struct cmd_list_element **show_list)
+{
+  set_show_commands commands = add_setshow_cmd_full<ui_file_style::color>
+    (name, theclass, var_color, var,
+     set_doc, show_doc, help_doc,
+     nullptr, nullptr, set_func, show_func,
+     set_list, show_list);
+
+  set_cmd_completer (commands.set, color_completer);
+
+  return commands;
+}
+
+/* Same as above but using a getter and a setter function instead of a pointer
+   to a global storage buffer.  */
+
+set_show_commands
+add_setshow_color_cmd (const char *name, command_class theclass,
+		       const char *set_doc, const char *show_doc,
+		       const char *help_doc,
+		       setting_func_types<ui_file_style::color>::set set_func,
+		       setting_func_types<ui_file_style::color>::get get_func,
+		       show_value_ftype *show_func,
+		       cmd_list_element **set_list,
+		       cmd_list_element **show_list)
+{
+  auto cmds = add_setshow_cmd_full<ui_file_style::color>
+    (name, theclass, var_color, nullptr,
+     set_doc, show_doc, help_doc,
+     set_func, get_func, nullptr, show_func,
+     set_list, show_list);
+
+  set_cmd_completer (cmds.set, color_completer);
+
+  return cmds;
+}
+
+/* See cli-decode.h.  */
 const char * const auto_boolean_enums[] = { "on", "off", "auto", NULL };
 
 /* Add an auto-boolean command named NAME to both the set and show
@@ -867,7 +963,7 @@ add_setshow_filename_cmd (const char *name, enum command_class theclass,
 					 nullptr, nullptr, set_func,
 					 show_func, set_list, show_list);
 
-  set_cmd_completer (commands.set, filename_completer);
+  set_cmd_completer (commands.set, deprecated_filename_completer);
 
   return commands;
 }
@@ -891,7 +987,7 @@ add_setshow_filename_cmd (const char *name, command_class theclass,
 						 nullptr, show_func, set_list,
 						 show_list);
 
-  set_cmd_completer (cmds.set, filename_completer);
+  set_cmd_completer (cmds.set, deprecated_filename_completer);
 
   return cmds;
 }
@@ -1016,7 +1112,7 @@ add_setshow_optional_filename_cmd (const char *name, enum command_class theclass
 					 nullptr, nullptr, set_func, show_func,
 					 set_list, show_list);
 
-  set_cmd_completer (commands.set, filename_completer);
+  set_cmd_completer (commands.set, deprecated_filename_completer);
 
   return commands;
 }
@@ -1040,7 +1136,7 @@ add_setshow_optional_filename_cmd (const char *name, command_class theclass,
 				       set_func, get_func, nullptr, show_func,
 				       set_list,show_list);
 
-  set_cmd_completer (cmds.set, filename_completer);
+  set_cmd_completer (cmds.set, deprecated_filename_completer);
 
   return cmds;
 }
@@ -1531,7 +1627,7 @@ add_com_suppress_notification (const char *name, enum command_class theclass,
 					&cmdlist, suppress_notification);
 }
 
-/* Print the prefix of C followed by name of C in title style.  */
+/* Print the prefix of C followed by name of C in command style.  */
 
 static void
 fput_command_name_styled (const cmd_list_element &c, struct ui_file *stream)
@@ -1539,7 +1635,7 @@ fput_command_name_styled (const cmd_list_element &c, struct ui_file *stream)
   std::string prefixname
     = c.prefix == nullptr ? "" : c.prefix->prefixname ();
 
-  fprintf_styled (stream, title_style.style (), "%s%s",
+  fprintf_styled (stream, command_style.style (), "%s%s",
 		  prefixname.c_str (), c.name);
 }
 
@@ -1779,7 +1875,7 @@ help_cmd (const char *command, struct ui_file *stream)
 
   if (alias == nullptr || !user_documented_alias (*alias))
     {
-      /* Case of a normal command, or an alias not explictly
+      /* Case of a normal command, or an alias not explicitly
 	 documented by the user.  */
       /* If the user asked 'help somecommand' and there is no alias,
 	 the false indicates to not output the (single) command name.  */
@@ -1789,7 +1885,7 @@ help_cmd (const char *command, struct ui_file *stream)
     }
   else
     {
-      /* Case of an alias explictly documented by the user.
+      /* Case of an alias explicitly documented by the user.
 	 Only output the alias definition and its explicit documentation.  */
       fput_alias_definition_styled (*alias, stream);
       fput_command_names_styled (*alias, false, "\n", stream);
@@ -1804,7 +1900,7 @@ help_cmd (const char *command, struct ui_file *stream)
 
   /* If this is a prefix command, print it's subcommands.  */
   if (c->is_prefix ())
-    help_list (*c->subcommands, c->prefixname ().c_str (),
+    help_list (*c->subcommands, c->prefixname_no_space ().c_str (),
 	       all_commands, stream);
 
   /* If this is a class name, print all of the commands in the class.  */
@@ -1825,71 +1921,72 @@ help_cmd (const char *command, struct ui_file *stream)
 		c->hook_post->name);
 }
 
-/*
- * Get a specific kind of help on a command list.
- *
- * LIST is the list.
- * CMDTYPE is the prefix to use in the title string.
- * THECLASS is the class with which to list the nodes of this list (see
- * documentation for help_cmd_list below),  As usual, ALL_COMMANDS for
- * everything, ALL_CLASSES for just classes, and non-negative for only things
- * in a specific class.
- * and STREAM is the output stream on which to print things.
- * If you call this routine with a class >= 0, it recurses.
- */
+/* Get a specific kind of help on a command list.
+
+   LIST is the list.
+   CMDTYPE is the prefix to use in the title string.  It should not
+   end in a space.
+   THECLASS is the class with which to list the nodes of this list (see
+   documentation for help_cmd_list below),  As usual, ALL_COMMANDS for
+   everything, ALL_CLASSES for just classes, and non-negative for only things
+   in a specific class.
+   and STREAM is the output stream on which to print things.
+   If you call this routine with a class >= 0, it recurses.  */
 void
 help_list (struct cmd_list_element *list, const char *cmdtype,
 	   enum command_class theclass, struct ui_file *stream)
 {
-  int len;
-  char *cmdtype1, *cmdtype2;
-
-  /* If CMDTYPE is "foo ", CMDTYPE1 gets " foo" and CMDTYPE2 gets "foo sub".
-   */
-  len = strlen (cmdtype);
-  cmdtype1 = (char *) alloca (len + 1);
-  cmdtype1[0] = 0;
-  cmdtype2 = (char *) alloca (len + 4);
-  cmdtype2[0] = 0;
-  if (len)
+  int len = strlen (cmdtype);
+  const char *space = "";
+  const char *prefix = "";
+  if (len > 0)
     {
-      cmdtype1[0] = ' ';
-      memcpy (cmdtype1 + 1, cmdtype, len - 1);
-      cmdtype1[len] = 0;
-      memcpy (cmdtype2, cmdtype, len - 1);
-      strcpy (cmdtype2 + len - 1, " sub");
+      prefix = "sub";
+      space = " ";
     }
 
   if (theclass == all_classes)
-    gdb_printf (stream, "List of classes of %scommands:\n\n", cmdtype2);
+    gdb_printf (stream, "List of classes of %scommands:\n\n",
+		prefix);
+  else if (len == 0)
+    gdb_printf (stream, "List of commands:\n\n");
   else
-    gdb_printf (stream, "List of %scommands:\n\n", cmdtype2);
+    gdb_printf (stream, "List of \"%ps\" %scommands:\n\n",
+		styled_string (command_style.style (), cmdtype),
+		prefix);
 
   help_cmd_list (list, theclass, theclass >= 0, stream);
 
   if (theclass == all_classes)
     {
       gdb_printf (stream, "\n\
-Type \"help%s\" followed by a class name for a list of commands in ",
-		  cmdtype1);
+Type \"%p[help%s%s%p]\" followed by a class name for a list of commands in ",
+		  command_style.style ().ptr (),
+		  space, cmdtype,
+		  nullptr);
       stream->wrap_here (0);
       gdb_printf (stream, "that class.");
 
       gdb_printf (stream, "\n\
-Type \"help all\" for the list of all commands.");
+Type \"%ps\" for the list of all commands.",
+		  styled_string (command_style.style (), "help all"));
     }
 
-  gdb_printf (stream, "\nType \"help%s\" followed by %scommand name ",
-	      cmdtype1, cmdtype2);
+  gdb_printf (stream, "\nType \"%p[help%s%s%p]\" followed by %scommand name ",
+	      command_style.style ().ptr (), space, cmdtype, nullptr,
+	      prefix);
   stream->wrap_here (0);
   gdb_puts ("for ", stream);
   stream->wrap_here (0);
   gdb_puts ("full ", stream);
   stream->wrap_here (0);
   gdb_puts ("documentation.\n", stream);
-  gdb_puts ("Type \"apropos word\" to search "
-	    "for commands related to \"word\".\n", stream);
-  gdb_puts ("Type \"apropos -v word\" for full documentation", stream);
+  gdb_printf (stream,
+	      "Type \"%ps\" to search "
+	      "for commands related to \"word\".\n",
+	      styled_string (command_style.style (), "apropos word"));
+  gdb_printf (stream, "Type \"%ps\" for full documentation",
+	      styled_string (command_style.style (), "apropos -v word"));
   stream->wrap_here (0);
   gdb_puts (" of commands related to \"word\".\n", stream);
   gdb_puts ("Command name abbreviations are allowed if unambiguous.\n",
@@ -2503,21 +2600,21 @@ deprecated_cmd_warning (const char *text, struct cmd_list_element *list)
 
       if (cmd->cmd_deprecated)
 	gdb_printf (_("Warning: command '%ps' (%ps) is deprecated.\n"),
-		    styled_string (title_style.style (),
+		    styled_string (command_style.style (),
 				   tmp_cmd_str.c_str ()),
-		    styled_string (title_style.style (),
+		    styled_string (command_style.style (),
 				   tmp_alias_str.c_str ()));
       else
 	gdb_printf (_("Warning: '%ps', an alias for the command '%ps', "
 		      "is deprecated.\n"),
-		    styled_string (title_style.style (),
+		    styled_string (command_style.style (),
 				   tmp_alias_str.c_str ()),
-		    styled_string (title_style.style (),
+		    styled_string (command_style.style (),
 				   tmp_cmd_str.c_str ()));
     }
   else
     gdb_printf (_("Warning: command '%ps' is deprecated.\n"),
-		styled_string (title_style.style (),
+		styled_string (command_style.style (),
 			       tmp_cmd_str.c_str ()));
 
   /* Now display a second line indicating what the user should use instead.
@@ -2530,7 +2627,7 @@ deprecated_cmd_warning (const char *text, struct cmd_list_element *list)
     replacement = cmd->replacement;
   if (replacement != nullptr)
     gdb_printf (_("Use '%ps'.\n\n"),
-		styled_string (title_style.style (),
+		styled_string (command_style.style (),
 			       replacement));
   else
     gdb_printf (_("No alternative known.\n\n"));
@@ -2549,7 +2646,8 @@ deprecated_cmd_warning (const char *text, struct cmd_list_element *list)
    If TEXT is a subcommand (i.e. one that is preceded by a prefix
    command) set *PREFIX_CMD.
 
-   Set *CMD to point to the command TEXT indicates.
+   Set *CMD to point to the command TEXT indicates, or to
+   CMD_LIST_AMBIGUOUS if there are multiple possible matches.
 
    If any of *ALIAS, *PREFIX_CMD, or *CMD cannot be determined or do not
    exist, they are NULL when we return.
@@ -2589,7 +2687,12 @@ lookup_cmd_composition_1 (const char *text,
       *cmd = find_cmd (command.c_str (), len, cur_list, 1, &nfound);
 
       /* We only handle the case where a single command was found.  */
-      if (*cmd == CMD_LIST_AMBIGUOUS || *cmd == nullptr)
+      if (nfound > 1)
+	{
+	  *cmd = CMD_LIST_AMBIGUOUS;
+	  return 0;
+	}
+      else if (*cmd == nullptr)
 	return 0;
       else
 	{
@@ -2623,7 +2726,8 @@ lookup_cmd_composition_1 (const char *text,
    If TEXT is a subcommand (i.e. one that is preceded by a prefix
    command) set *PREFIX_CMD.
 
-   Set *CMD to point to the command TEXT indicates.
+   Set *CMD to point to the command TEXT indicates, or to
+   CMD_LIST_AMBIGUOUS if there are multiple possible matches.
 
    If any of *ALIAS, *PREFIX_CMD, or *CMD cannot be determined or do not
    exist, they are NULL when we return.
@@ -2727,7 +2831,7 @@ cmd_func (struct cmd_list_element *cmd, const char *args, int from_tty)
 {
   if (!cmd->is_command_class_help ())
     {
-      gdb::optional<scoped_restore_tmpl<bool>> restore_suppress;
+      std::optional<scoped_restore_tmpl<bool>> restore_suppress;
 
       if (cmd->suppress_notification != NULL)
 	restore_suppress.emplace (cmd->suppress_notification, true);
@@ -2742,4 +2846,96 @@ int
 cli_user_command_p (struct cmd_list_element *cmd)
 {
   return cmd->theclass == class_user && cmd->func == do_simple_func;
+}
+
+/* See cli-decode.h.  */
+
+ui_file_style::color
+parse_cli_var_color (const char **args)
+{
+  /* Do a "set" command.  ARG is nullptr if no argument, or the
+     text of the argument.  */
+
+  if (args == nullptr || *args == nullptr || **args == '\0')
+    {
+      std::string msg;
+
+      for (size_t i = 0; ui_file_style::basic_color_enums[i]; ++i)
+	{
+	  msg.append ("\"");
+	  msg.append (ui_file_style::basic_color_enums[i]);
+	  msg.append ("\", ");
+	}
+
+      error (_("Requires an argument. Valid arguments are %sinteger from -1 "
+	     "to 255 or an RGB hex triplet in a format #RRGGBB"),
+	     msg.c_str ());
+    }
+
+  const char *p = skip_to_space (*args);
+  size_t len = p - *args;
+
+  int nmatches = 0;
+  ui_file_style::basic_color match = ui_file_style::NONE;
+  for (int i = 0; ui_file_style::basic_color_enums[i]; ++i)
+    if (strncmp (*args, ui_file_style::basic_color_enums[i], len) == 0)
+      {
+	match = static_cast<ui_file_style::basic_color> (i - 1);
+	if (ui_file_style::basic_color_enums[i][len] == '\0')
+	  {
+	    nmatches = 1;
+	    break; /* Exact match.  */
+	  }
+	else
+	  nmatches++;
+      }
+
+  if (nmatches == 1)
+    {
+      *args += len;
+      return ui_file_style::color (match);
+    }
+
+  if (nmatches > 1)
+    error (_("Ambiguous item \"%.*s\"."), (int) len, *args);
+
+  if (**args != '#')
+    {
+      ULONGEST num = get_ulongest (args);
+      if (num > 255)
+	error (_("integer %s out of range"), pulongest (num));
+      return ui_file_style::color (color_space::XTERM_256COLOR,
+				   static_cast<int> (num));
+    }
+
+  /* Try to parse #RRGGBB string.  */
+  if (len != 7)
+    error_no_arg (_("invalid RGB hex triplet format"));
+
+  uint8_t r, g, b;
+  int scanned_chars = 0;
+  int parsed_args = sscanf (*args, "#%2" SCNx8 "%2" SCNx8 "%2" SCNx8 "%n",
+			    &r, &g, &b, &scanned_chars);
+
+  if (parsed_args != 3 || scanned_chars != 7)
+    error_no_arg (_("invalid RGB hex triplet format"));
+
+  *args += len;
+  return ui_file_style::color (r, g, b);
+}
+
+/* See cli-decode.h.  */
+
+ui_file_style::color
+parse_var_color (const char *arg)
+{
+  const char *end_arg = arg;
+  ui_file_style::color color = parse_cli_var_color (&end_arg);
+
+  int len = end_arg - arg;
+  const char *after = skip_spaces (end_arg);
+  if (*after != '\0')
+    error (_("Junk after item \"%.*s\": %s"), len, arg, after);
+
+  return color;
 }

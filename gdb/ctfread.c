@@ -1,6 +1,6 @@
 /* Compact ANSI-C Type Format (CTF) support in GDB.
 
-   Copyright (C) 2019-2023 Free Software Foundation, Inc.
+   Copyright (C) 2019-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -75,12 +75,11 @@
    already in the symbol table, and the CTF string table does not contain any
    duplicated strings.  */
 
-#include "defs.h"
 #include "buildsym.h"
 #include "complaints.h"
 #include "block.h"
 #include "ctfread.h"
-#include "psympriv.h"
+#include "psymtab.h"
 
 #if ENABLE_LIBCTF
 
@@ -324,9 +323,8 @@ get_bitsize (ctf_dict_t *fp, ctf_id_t tid, uint32_t kind)
 static void
 set_symbol_address (struct objfile *of, struct symbol *sym, const char *name)
 {
-  struct bound_minimal_symbol msym;
-
-  msym = lookup_minimal_symbol (name, nullptr, of);
+  bound_minimal_symbol msym
+    = lookup_minimal_symbol (current_program_space, name, of);
   if (msym.minsym != NULL)
     {
       sym->set_value_address (msym.value_address ());
@@ -346,9 +344,7 @@ attach_fields_to_type (struct ctf_field_info *fip, struct type *type)
     return;
 
   /* Record the field count, allocate space for the array of fields.  */
-  type->set_num_fields (nfields);
-  type->set_fields
-    ((struct field *) TYPE_ZALLOC (type, sizeof (struct field) * nfields));
+  type->alloc_fields (nfields);
 
   /* Copy the saved-up fields into the field vector.  */
   for (int i = 0; i < nfields; ++i)
@@ -372,7 +368,7 @@ ctf_init_float_type (struct objfile *objfile,
   const struct floatformat **format;
   struct type *type;
 
-  type_allocator alloc (objfile);
+  type_allocator alloc (objfile, language_c);
   format = gdbarch_floatformat_for_type (gdbarch, name_hint, bits);
   if (format != nullptr)
     type = init_float_type (alloc, bits, name, format);
@@ -420,7 +416,7 @@ ctf_add_member_cb (const char *name,
 
   fp->set_type (t);
   fp->set_loc_bitpos (offset / TARGET_CHAR_BIT);
-  FIELD_BITSIZE (*fp) = get_bitsize (ccp->fp, tid, kind);
+  fp->set_bitsize (get_bitsize (ccp->fp, tid, kind));
 
   fip->fields.emplace_back (new_field);
 
@@ -442,7 +438,7 @@ ctf_add_enum_member_cb (const char *name, int enum_value, void *arg)
   fp->set_name (name);
   fp->set_type (nullptr);
   fp->set_loc_enumval (enum_value);
-  FIELD_BITSIZE (*fp) = 0;
+  fp->set_bitsize (0);
 
   if (name != nullptr)
     {
@@ -507,7 +503,7 @@ new_symbol (struct ctf_context *ccp, struct type *type, ctf_id_t tid)
 	  case CTF_K_INTEGER:
 	  case CTF_K_FLOAT:
 	    sym->set_aclass_index (LOC_TYPEDEF);
-	    sym->set_domain (VAR_DOMAIN);
+	    sym->set_domain (TYPE_DOMAIN);
 	    break;
 	  case CTF_K_POINTER:
 	    break;
@@ -555,7 +551,7 @@ read_base_type (struct ctf_context *ccp, ctf_id_t tid)
 		   ctf_errmsg (ctf_errno (fp)));
     }
 
-  type_allocator alloc (of);
+  type_allocator alloc (of, language_c);
   kind = ctf_type_kind (fp, tid);
   if (kind == CTF_K_INTEGER)
     {
@@ -631,7 +627,7 @@ read_structure_type (struct ctf_context *ccp, ctf_id_t tid)
   struct type *type;
   uint32_t kind;
 
-  type = type_allocator (of).new_type ();
+  type = type_allocator (of, language_c).new_type ();
 
   const char *name = ctf_type_name_raw (fp, tid);
   if (name != nullptr && strlen (name) != 0)
@@ -690,7 +686,7 @@ read_func_kind_type (struct ctf_context *ccp, ctf_id_t tid)
   ctf_funcinfo_t cfi;
   uint32_t argc;
 
-  type = type_allocator (of).new_type ();
+  type = type_allocator (of, language_c).new_type ();
 
   type->set_code (TYPE_CODE_FUNC);
   if (ctf_func_type_info (fp, tid, &cfi) < 0)
@@ -715,8 +711,7 @@ read_func_kind_type (struct ctf_context *ccp, ctf_id_t tid)
       if (ctf_func_type_args (fp, tid, argc, argv.data ()) == CTF_ERR)
 	return nullptr;
 
-      type->set_fields
-	((struct field *) TYPE_ZALLOC (type, argc * sizeof (struct field)));
+      type->alloc_fields (argc);
       struct type *void_type = builtin_type (of)->builtin_void;
       /* If failed to find the argument type, fill it with void_type.  */
       for (int iparam = 0; iparam < argc; iparam++)
@@ -742,7 +737,7 @@ read_enum_type (struct ctf_context *ccp, ctf_id_t tid)
   ctf_dict_t *fp = ccp->fp;
   struct type *type;
 
-  type = type_allocator (of).new_type ();
+  type = type_allocator (of, language_c).new_type ();
 
   const char *name = ctf_type_name_raw (fp, tid);
   if (name != nullptr && strlen (name) != 0)
@@ -831,7 +826,7 @@ read_array_type (struct ctf_context *ccp, ctf_id_t tid)
   if (idx_type == nullptr)
     idx_type = builtin_type (objfile)->builtin_int;
 
-  type_allocator alloc (objfile);
+  type_allocator alloc (objfile, language_c);
   range_type = create_static_range_type (alloc, idx_type, 0, ar.ctr_nelems - 1);
   type = create_array_type (alloc, element_type, range_type);
   if (ar.ctr_nelems <= 1)	/* Check if undefined upper bound.  */
@@ -931,7 +926,8 @@ read_typedef_type (struct ctf_context *ccp, ctf_id_t tid,
   struct type *this_type, *target_type;
 
   char *aname = obstack_strdup (&objfile->objfile_obstack, name);
-  this_type = type_allocator (objfile).new_type (TYPE_CODE_TYPEDEF, 0, aname);
+  this_type = type_allocator (objfile, language_c).new_type (TYPE_CODE_TYPEDEF,
+							     0, aname);
   set_tid_type (objfile, tid, this_type);
   target_type = fetch_tid_type (ccp, btid);
   if (target_type != this_type)
@@ -979,7 +975,7 @@ read_forward_type (struct ctf_context *ccp, ctf_id_t tid)
   struct type *type;
   uint32_t kind;
 
-  type = type_allocator (of).new_type ();
+  type = type_allocator (of, language_c).new_type ();
 
   const char *name = ctf_type_name_raw (fp, tid);
   if (name != nullptr && strlen (name) != 0)
@@ -1464,7 +1460,7 @@ ctf_psymtab_type_cb (ctf_id_t tid, void *arg)
 {
   struct ctf_context *ccp;
   uint32_t kind;
-  short section = -1;
+  int section = -1;
 
   ccp = (struct ctf_context *) arg;
 
@@ -1475,7 +1471,7 @@ ctf_psymtab_type_cb (ctf_id_t tid, void *arg)
     {
       case CTF_K_ENUM:
 	ctf_psymtab_add_enums (ccp, tid);
-	/* FALL THROUGH */
+	[[fallthrough]];
       case CTF_K_STRUCT:
       case CTF_K_UNION:
 	domain = STRUCT_DOMAIN;

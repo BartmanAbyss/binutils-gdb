@@ -1,6 +1,6 @@
 /* Common target-dependent code for NetBSD systems.
 
-   Copyright (C) 2002-2023 Free Software Foundation, Inc.
+   Copyright (C) 2002-2024 Free Software Foundation, Inc.
 
    Contributed by Wasabi Systems, Inc.
   
@@ -19,7 +19,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "auxv.h"
 #include "solib-svr4.h"
 #include "netbsd-tdep.h"
@@ -43,21 +42,6 @@
 #define	KINFO_VME_FLAG_PAGEABLE		0x00000008
 #define	KINFO_VME_FLAG_GROWS_UP		0x00000010
 #define	KINFO_VME_FLAG_GROWS_DOWN	0x00000020
-
-/* FIXME: kettenis/20060115: We should really eliminate the next two
-   functions completely.  */
-
-struct link_map_offsets *
-nbsd_ilp32_solib_svr4_fetch_link_map_offsets (void)
-{
-  return svr4_ilp32_fetch_link_map_offsets ();
-}
-
-struct link_map_offsets *
-nbsd_lp64_solib_svr4_fetch_link_map_offsets (void)
-{
-  return svr4_lp64_fetch_link_map_offsets ();
-}
 
 int
 nbsd_pc_in_sigtramp (CORE_ADDR pc, const char *func_name)
@@ -364,9 +348,8 @@ nbsd_gdb_signal_to_target (struct gdbarch *gdbarch,
 static CORE_ADDR
 nbsd_skip_solib_resolver (struct gdbarch *gdbarch, CORE_ADDR pc)
 {
-  struct bound_minimal_symbol msym;
-
-  msym = lookup_minimal_symbol ("_rtld_bind_start", NULL, NULL);
+  bound_minimal_symbol msym
+    = lookup_minimal_symbol (current_program_space, "_rtld_bind_start");
   if (msym.minsym && msym.value_address () == pc)
     return frame_unwind_caller_pc (get_current_frame ());
   else

@@ -1,4 +1,4 @@
-# Copyright 2008-2023 Free Software Foundation, Inc.
+# Copyright 2008-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,6 +19,16 @@ load_lib mi-support.exp
 set MIFLAGS "-i=mi"
 
 require dwarf2_support
+
+# Clang reorders global assembly labels, placing them all side by side.
+# This results in having low and high PCs what have the same value for
+# the CU and all the functions (in my system, they are all 0x1130).  If
+# this test is rewritten to use the dwarf assembler instead, we can enable
+# this test with clang again.
+if {[test_compiler_info {clang-*-*}]} {
+    unsupported "can't generate debug info"
+    return
+}
 
 standard_testfile .S dw2-ref-missing-frame-func.c dw2-ref-missing-frame-main.c
 set objsfile [standard_output_file ${testfile}.o]

@@ -1,5 +1,5 @@
 # Expect script for ld-i386 tests
-#   Copyright (C) 2002-2023 Free Software Foundation, Inc.
+#   Copyright (C) 2002-2025 Free Software Foundation, Inc.
 #
 # This file is part of the GNU Binutils.
 #
@@ -191,7 +191,7 @@ set i386tests {
     {"Reloc section order"
      "-shared -melf_i386 -z nocombreloc -z notext" "" "--32"
      {reloc.s} {{objdump -hw reloc.d}} "reloc.so"}
-    {"Basic --emit-relocs support" "-shared -melf_i386 --emit-relocs" "" "--32"
+    {"Basic --emit-relocs support" "-shared -melf_i386 --emit-relocs --no-rosegment" "" "--32"
      {emit-relocs.s} {{readelf --relocs emit-relocs.rd}} "emit-relocs.so"}
     {"-z combreloc relocation sections" "-shared -melf_i386 -z combreloc" ""
      "--32" {combreloc.s} {{readelf -r combreloc.d}} "combreloc.so"}
@@ -314,6 +314,7 @@ run_dump_test "tlsie2"
 run_dump_test "tlsie3"
 run_dump_test "tlsie4"
 run_dump_test "tlsie5"
+run_dump_test "tlsle1"
 run_dump_test "hidden1"
 run_dump_test "hidden2"
 run_dump_test "hidden3"
@@ -511,6 +512,9 @@ run_dump_test "dt-relr-1a"
 run_dump_test "dt-relr-1b"
 run_dump_test "pr28870"
 run_dump_test "pr28894"
+run_dump_test "pr30787"
+run_dump_test "pr31047"
+run_dump_test "pr32191"
 
 if { !([istarget "i?86-*-linux*"]
        || [istarget "i?86-*-gnu*"]
@@ -539,6 +543,12 @@ run_dump_test "tlsdesc2"
 run_dump_test "report-reloc-1"
 run_dump_test "pr27998a"
 run_dump_test "pr27998b"
+run_dump_test "pr31868a"
+run_dump_test "pr31868b"
+run_dump_test "pr31868c"
+run_dump_test "tlsgdesc1"
+run_dump_test "tlsgdesc2"
+run_dump_test "tlsgdesc3"
 
 proc undefined_weak {cflags ldflags} {
     set testname "Undefined weak symbol"
@@ -548,9 +558,9 @@ proc undefined_weak {cflags ldflags} {
 
     if { [string match "*-fPIE*" $cflags]
 	 && ![string match "*-z nodynamic-undefined-weak*" $ldflags] } {
-	set weak_symbol "Weak defined"
+	set weak_symbol "Weak defined\n"
     } else {
-	set weak_symbol "Weak undefined"
+	set weak_symbol "Weak undefined\n"
     }
 
     run_cc_link_tests [list \
@@ -1316,7 +1326,30 @@ if { [isnative]
 	    {{error_output "pr21997-1.err"}} \
 	    "pr21997-1" \
 	] \
+	[list \
+	    "Build pr32067" \
+	    "-Wl,--oformat,binary -nostdlib -nostartfiles" \
+	    "" \
+	    { start.s ../ld-x86-64/pr32067.s } \
+	    {} \
+	    "pr32067" \
+	] \
     ]
+
+    # The musl C library does not support TEXTRELs.
+    if { ![istarget i?86-*-musl] } {
+	run_ld_link_exec_tests [list \
+	    [list \
+		"Run pr22001-1" \
+		"$NOPIE_LDFLAGS -Wl,-z,nocopyreloc,--no-as-needed,-z,notext tmpdir/pr22001-1.so" \
+		"-Wa,-mx86-used-note=yes" \
+		{ pr22001-1b.c } \
+		"pr22001-1" \
+		"pass.out" \
+		"$NOPIE_CFLAGS" \
+	    ] \
+	]
+    }
 
     run_ld_link_exec_tests [list \
 	[list \
@@ -1328,16 +1361,7 @@ if { [isnative]
 	    "pass.out" \
 	    "$NOPIE_CFLAGS" \
 	] \
-	[list \
-	    "Run pr22001-1" \
-	    "$NOPIE_LDFLAGS -Wl,-z,nocopyreloc,--no-as-needed,-z,notext tmpdir/pr22001-1.so" \
-	    "-Wa,-mx86-used-note=yes" \
-	    { pr22001-1b.c } \
-	    "pr22001-1" \
-	    "pass.out" \
-	    "$NOPIE_CFLAGS" \
-	] \
-	[list \
+ 	[list \
 	    "Run pr22001-1 (PIE 1)" \
 	    "$NOPIE_LDFLAGS -Wl,-z,nocopyreloc,--no-as-needed tmpdir/pr22001-1.so" \
 	    "-Wa,-mx86-used-note=yes" \

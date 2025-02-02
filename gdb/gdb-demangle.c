@@ -1,6 +1,6 @@
 /* Basic C++ demangling support for GDB.
 
-   Copyright (C) 1991-2023 Free Software Foundation, Inc.
+   Copyright (C) 1991-2024 Free Software Foundation, Inc.
 
    Written by Fred Fish at Cygnus Support.
 
@@ -23,10 +23,9 @@
 /*  This file contains support code for C++ demangling that is common
    to a styles of demangling, and GDB specific.  */
 
-#include "defs.h"
-#include "cli/cli-utils.h" /* for skip_to_space */
+#include "cli/cli-utils.h"
 #include "command.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "demangle.h"
 #include "gdb-demangle.h"
 #include "language.h"

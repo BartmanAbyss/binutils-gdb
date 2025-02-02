@@ -1,4 +1,4 @@
-# Copyright 2022-2023 Free Software Foundation, Inc.
+# Copyright 2022-2024 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -58,12 +58,36 @@ if {[build_executable crc_mismatch.exp crc_mismatch-2 crc_mismatch-2.c debug] !=
     # to trigger the "CRC mismatch" warning.
     remote_exec build "mv ${debugfile} [standard_output_file crc_mismatch-2.debug]"
 
-    gdb_exit
-    gdb_start
+    clean_restart
 
     set escapedobjdirsubdir [string_to_regexp [standard_output_file {}]]
+    gdb_test "file [standard_output_file crc_mismatch-2]" \
+	[multi_line \
+	     "Reading symbols from ${escapedobjdirsubdir}/crc_mismatch-2\\.\\.\\." \
+	     "warning: the debug information found in \"${escapedobjdirsubdir}/crc_mismatch-2\\.debug\" does not match \"${escapedobjdirsubdir}/crc_mismatch-2\" \\(CRC mismatch\\)\\." \
+	     "\\(No debugging symbols found in .*\\)"] \
+	"CRC mismatch is reported"
 
-    gdb_test "file [standard_output_file crc_mismatch-2]" "warning: the debug information found in \"${escapedobjdirsubdir}/crc_mismatch-2\\.debug\" does not match \"${escapedobjdirsubdir}/crc_mismatch-2\" \\(CRC mismatch\\)\\..*\\(No debugging symbols found in .*\\).*" "CRC mismatch is reported"
+    # Do the same thing again, but this time check that the styling is
+    # correct.
+    with_test_prefix "check styling" {
+	with_ansi_styling_terminal {
+	    clean_restart
+
+	    set debug_file_re [style "${escapedobjdirsubdir}/crc_mismatch-2\\.debug" file]
+	    set exe_file_re [style "${escapedobjdirsubdir}/crc_mismatch-2" file]
+
+	    gdb_test "file [standard_output_file crc_mismatch-2]" \
+		[multi_line \
+		     "Reading symbols from ${exe_file_re}\\.\\.\\." \
+		     "warning: the debug information found in \"${debug_file_re}\" does not match \"${exe_file_re}\" \\(CRC mismatch\\)\\." \
+		     "\\(No debugging symbols found in \[^\r\n\]+\\)"] \
+		"CRC mismatch is reported"
+	}
+    }
+
+    # Restart GDB with styling disabled.
+    clean_restart
 }
 
 # Create CACHE and DB directories ready for debuginfod to use.
@@ -97,7 +121,7 @@ proc_with_prefix local_debuginfod { } {
     gdb_test "file [standard_output_file crc_mismatch-2]" \
 	[multi_line \
 	     "Reading symbols from ${escapedobjdirsubdir}/crc_mismatch-2\\.\\.\\." \
-	     "Downloading separate debug info for ${escapedobjdirsubdir}/crc_mismatch-2\\.\\.\\." \
+	     "Downloading.*separate debug info for ${escapedobjdirsubdir}/crc_mismatch-2\\.\\.\\." \
 	     "Reading symbols from ${cache}/\[^\r\n\]+\\.\\.\\.(?:\r\nExpanding full symbols from \[^\r\n\]+)*"] \
 	 "debuginfod running, info downloaded, no CRC mismatch"
 }

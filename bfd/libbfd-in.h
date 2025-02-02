@@ -1,7 +1,7 @@
 /* libbfd.h -- Declarations used by bfd library *implementation*.
    (This include file is not for users of the library.)
 
-   Copyright (C) 1990-2023 Free Software Foundation, Inc.
+   Copyright (C) 1990-2025 Free Software Foundation, Inc.
 
    Written by Cygnus Support.
 
@@ -38,10 +38,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* If you want to read and write large blocks, you might want to do it
-   in quanta of this amount */
-#define DEFAULT_BUFFERSIZE 8192
 
 /* Set a tdata field.  Can't use the other macros for this, since they
    do casts, and casting to the left of assignment isn't portable.  */
@@ -252,7 +248,7 @@ extern int bfd_generic_stat_arch_elt
 #define _bfd_read_ar_hdr(abfd) \
 	BFD_SEND (abfd, _bfd_read_ar_hdr_fn, (abfd))
 #define _bfd_write_ar_hdr(archive, abfd)	 \
-	BFD_SEND (abfd, _bfd_write_ar_hdr_fn, (archive, abfd))
+	BFD_SEND (archive, _bfd_write_ar_hdr_fn, (archive, abfd))
 
 /* Generic routines to use for BFD_JUMP_TABLE_GENERIC.  Use
    BFD_JUMP_TABLE_GENERIC (_bfd_generic).  */
@@ -261,13 +257,11 @@ extern int bfd_generic_stat_arch_elt
 extern bool _bfd_archive_close_and_cleanup
   (bfd *) ATTRIBUTE_HIDDEN;
 extern void _bfd_unlink_from_archive_parent (bfd *) ATTRIBUTE_HIDDEN;
-#define _bfd_generic_bfd_free_cached_info _bfd_bool_bfd_true
+#define _bfd_generic_bfd_free_cached_info _bfd_free_cached_info
 extern bool _bfd_generic_new_section_hook
   (bfd *, asection *) ATTRIBUTE_HIDDEN;
 extern bool _bfd_generic_get_section_contents
   (bfd *, asection *, void *, file_ptr, bfd_size_type) ATTRIBUTE_HIDDEN;
-extern bool _bfd_generic_get_section_contents_in_window
-  (bfd *, asection *, bfd_window *, file_ptr, bfd_size_type) ATTRIBUTE_HIDDEN;
 
 /* Generic routines to use for BFD_JUMP_TABLE_COPY.  Use
    BFD_JUMP_TABLE_COPY (_bfd_generic).  */
@@ -421,7 +415,7 @@ extern bool _bfd_vms_lib_ia64_mkarchive
 /* Routines to use for BFD_JUMP_TABLE_SYMBOLS where there is no symbol
    support.  Use BFD_JUMP_TABLE_SYMBOLS (_bfd_nosymbols).  */
 
-#define _bfd_nosymbols_get_symtab_upper_bound _bfd_long_bfd_n1_error
+#define _bfd_nosymbols_get_symtab_upper_bound _bfd_long_bfd_0
 extern long _bfd_nosymbols_canonicalize_symtab
   (bfd *, asymbol **) ATTRIBUTE_HIDDEN;
 #define _bfd_nosymbols_make_empty_symbol _bfd_generic_make_empty_symbol
@@ -787,6 +781,8 @@ struct ecoff_debug_swap;
 struct ecoff_extr;
 struct ecoff_find_line;
 
+extern void _bfd_ecoff_free_ecoff_debug_info
+  (struct ecoff_debug_info *debug);
 extern bool _bfd_ecoff_locate_line
   (bfd *, asection *, bfd_vma, struct ecoff_debug_info * const,
    const struct ecoff_debug_swap * const, struct ecoff_find_line *,
@@ -847,10 +843,14 @@ extern bfd_vma _bfd_safe_read_leb128
 extern bfd_byte * _bfd_write_unsigned_leb128
   (bfd_byte *, bfd_byte *, bfd_vma) ATTRIBUTE_HIDDEN;
 
-extern struct bfd_link_info *_bfd_get_link_info (bfd *);
-
-extern bool _bfd_link_keep_memory (struct bfd_link_info *)
+extern struct bfd_link_info *_bfd_get_link_info (bfd *)
   ATTRIBUTE_HIDDEN;
+
+#ifdef HAVE_MMAP
+extern uintptr_t _bfd_pagesize ATTRIBUTE_HIDDEN;
+extern uintptr_t _bfd_pagesize_m1 ATTRIBUTE_HIDDEN;
+extern uintptr_t _bfd_minimum_mmap_size ATTRIBUTE_HIDDEN;
+#endif
 
 #if GCC_VERSION >= 7000
 #define _bfd_mul_overflow(a, b, res) __builtin_mul_overflow (a, b, res)
@@ -882,7 +882,7 @@ _bfd_alloc_and_read (bfd *abfd, bfd_size_type asize, bfd_size_type rsize)
   mem = bfd_alloc (abfd, asize);
   if (mem != NULL)
     {
-      if (bfd_bread (mem, rsize, abfd) == rsize)
+      if (bfd_read (mem, rsize, abfd) == rsize)
 	return mem;
       bfd_release (abfd, mem);
     }
@@ -905,9 +905,41 @@ _bfd_malloc_and_read (bfd *abfd, bfd_size_type asize, bfd_size_type rsize)
   mem = bfd_malloc (asize);
   if (mem != NULL)
     {
-      if (bfd_bread (mem, rsize, abfd) == rsize)
+      if (bfd_read (mem, rsize, abfd) == rsize)
 	return mem;
       free (mem);
     }
   return NULL;
 }
+
+#ifdef USE_MMAP
+extern void *_bfd_mmap_persistent
+  (bfd *, size_t) ATTRIBUTE_HIDDEN;
+extern void *_bfd_mmap_temporary
+  (bfd *, size_t, void **, size_t *) ATTRIBUTE_HIDDEN;
+extern void _bfd_munmap_temporary
+  (void *, size_t) ATTRIBUTE_HIDDEN;
+#else
+static inline void *
+_bfd_mmap_persistent (bfd *abfd, size_t rsize)
+{
+  return _bfd_alloc_and_read (abfd, rsize, rsize);
+}
+static inline void *
+_bfd_mmap_temporary (bfd *abfd, size_t rsize, void **map_addr,
+		     size_t *map_size)
+{
+  void *mem = _bfd_malloc_and_read (abfd, rsize, rsize);
+  *map_addr = mem;
+  *map_size = rsize;
+  return mem;
+}
+static inline void
+_bfd_munmap_temporary (void *ptr, size_t rsize ATTRIBUTE_UNUSED)
+{
+  free (ptr);
+}
+#endif
+
+extern bool _bfd_mmap_read_temporary
+  (void **, size_t *, void **, bfd *, bool) ATTRIBUTE_HIDDEN;

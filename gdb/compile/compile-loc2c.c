@@ -1,6 +1,6 @@
 /* Convert a DWARF location expression to C
 
-   Copyright (C) 2014-2023 Free Software Foundation, Inc.
+   Copyright (C) 2014-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "dwarf2.h"
 #include "objfiles.h"
 #include "dwarf2/expr.h"
@@ -30,9 +29,9 @@
 #include "compile.h"
 #include "block.h"
 #include "dwarf2/frame.h"
-#include "gdbsupport/gdb_vecs.h"
 #include "value.h"
 #include "gdbarch.h"
+#include "extract-store-integer.h"
 
 
 

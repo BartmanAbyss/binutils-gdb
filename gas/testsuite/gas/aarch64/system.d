@@ -1,4 +1,6 @@
 #objdump: -dr
+# This test is only valid on ELF based ports.
+#notarget: *-*-*coff *-*-pe *-*-wince *-*-*aout* *-*-netbsd
 
 .*:     file format .*
 
@@ -12,7 +14,7 @@ Disassembly of section \.text:
 .*:	d503207f 	wfi
 .*:	d503209f 	sev
 .*:	d50320bf 	sevl
-.*:	d50322df 	clearbhb
+.*:	d50322df 	clrbhb
 .*:	d503201f 	nop
 .*:	d503203f 	yield
 .*:	d503205f 	wfe
@@ -32,10 +34,10 @@ Disassembly of section \.text:
 .*:	d503221f 	(hint	#0x10|esb)
 .*:	d503223f 	(hint	#0x11|psb	csync)
 .*:	d503225f 	(hint	#0x12|tsb	csync)
-.*:	d503227f 	hint	#0x13
+.*:	d503227f 	(hint	#0x13|gcsb	dsync)
 .*:	d503229f 	(hint	#0x14|csdb)
 .*:	d50322bf 	hint	#0x15
-.*:	d50322df 	(hint	#0x16|clearbhb)
+.*:	d50322df 	(hint	#0x16|clrbhb)
 .*:	d50322ff 	hint	#0x17
 .*:	d503231f 	(hint	#0x18|paciaz)
 .*:	d503233f 	(hint	#0x19|paciasp)
@@ -53,7 +55,7 @@ Disassembly of section \.text:
 .*:	d50324bf 	hint	#0x25
 .*:	d50324df 	(hint	#0x26|bti	jc)
 .*:	d50324ff 	hint	#0x27
-.*:	d503251f 	hint	#0x28
+.*:	d503251f 	(hint	#0x28|chkfeat	x16)
 .*:	d503253f 	hint	#0x29
 .*:	d503255f 	hint	#0x2a
 .*:	d503257f 	hint	#0x2b
@@ -238,16 +240,16 @@ Disassembly of section \.text:
 .*:	f8af6be5 	prfm	pldl3strm, \[sp, x15\]
 .*:	f8be58e5 	prfm	pldl3strm, \[x7, w30, uxtw #3\]
 .*:	f9800c65 	prfm	pldl3strm, \[x3, #24\]
-.*:	d8000006 	prfm	#0x06, 0 <LABEL1>
+.*:	d8000006 	prfm	pldslckeep, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
-.*:	f8af6be6 	prfm	#0x06, \[sp, x15\]
-.*:	f8be58e6 	prfm	#0x06, \[x7, w30, uxtw #3\]
-.*:	f9800c66 	prfm	#0x06, \[x3, #24\]
-.*:	d8000007 	prfm	#0x07, 0 <LABEL1>
+.*:	f8af6be6 	prfm	pldslckeep, \[sp, x15\]
+.*:	f8be58e6 	prfm	pldslckeep, \[x7, w30, uxtw #3\]
+.*:	f9800c66 	prfm	pldslckeep, \[x3, #24\]
+.*:	d8000007 	prfm	pldslcstrm, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
-.*:	f8af6be7 	prfm	#0x07, \[sp, x15\]
-.*:	f8be58e7 	prfm	#0x07, \[x7, w30, uxtw #3\]
-.*:	f9800c67 	prfm	#0x07, \[x3, #24\]
+.*:	f8af6be7 	prfm	pldslcstrm, \[sp, x15\]
+.*:	f8be58e7 	prfm	pldslcstrm, \[x7, w30, uxtw #3\]
+.*:	f9800c67 	prfm	pldslcstrm, \[x3, #24\]
 .*:	d8000008 	prfm	plil1keep, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
 .*:	f8af6be8 	prfm	plil1keep, \[sp, x15\]
@@ -278,16 +280,16 @@ Disassembly of section \.text:
 .*:	f8af6bed 	prfm	plil3strm, \[sp, x15\]
 .*:	f8be58ed 	prfm	plil3strm, \[x7, w30, uxtw #3\]
 .*:	f9800c6d 	prfm	plil3strm, \[x3, #24\]
-.*:	d800000e 	prfm	#0x0e, 0 <LABEL1>
+.*:	d800000e 	prfm	plislckeep, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
-.*:	f8af6bee 	prfm	#0x0e, \[sp, x15\]
-.*:	f8be58ee 	prfm	#0x0e, \[x7, w30, uxtw #3\]
-.*:	f9800c6e 	prfm	#0x0e, \[x3, #24\]
-.*:	d800000f 	prfm	#0x0f, 0 <LABEL1>
+.*:	f8af6bee 	prfm	plislckeep, \[sp, x15\]
+.*:	f8be58ee 	prfm	plislckeep, \[x7, w30, uxtw #3\]
+.*:	f9800c6e 	prfm	plislckeep, \[x3, #24\]
+.*:	d800000f 	prfm	plislcstrm, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
-.*:	f8af6bef 	prfm	#0x0f, \[sp, x15\]
-.*:	f8be58ef 	prfm	#0x0f, \[x7, w30, uxtw #3\]
-.*:	f9800c6f 	prfm	#0x0f, \[x3, #24\]
+.*:	f8af6bef 	prfm	plislcstrm, \[sp, x15\]
+.*:	f8be58ef 	prfm	plislcstrm, \[x7, w30, uxtw #3\]
+.*:	f9800c6f 	prfm	plislcstrm, \[x3, #24\]
 .*:	d8000010 	prfm	pstl1keep, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
 .*:	f8af6bf0 	prfm	pstl1keep, \[sp, x15\]
@@ -318,16 +320,16 @@ Disassembly of section \.text:
 .*:	f8af6bf5 	prfm	pstl3strm, \[sp, x15\]
 .*:	f8be58f5 	prfm	pstl3strm, \[x7, w30, uxtw #3\]
 .*:	f9800c75 	prfm	pstl3strm, \[x3, #24\]
-.*:	d8000016 	prfm	#0x16, 0 <LABEL1>
+.*:	d8000016 	prfm	pstslckeep, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
-.*:	f8af6bf6 	prfm	#0x16, \[sp, x15\]
-.*:	f8be58f6 	prfm	#0x16, \[x7, w30, uxtw #3\]
-.*:	f9800c76 	prfm	#0x16, \[x3, #24\]
-.*:	d8000017 	prfm	#0x17, 0 <LABEL1>
+.*:	f8af6bf6 	prfm	pstslckeep, \[sp, x15\]
+.*:	f8be58f6 	prfm	pstslckeep, \[x7, w30, uxtw #3\]
+.*:	f9800c76 	prfm	pstslckeep, \[x3, #24\]
+.*:	d8000017 	prfm	pstslcstrm, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
-.*:	f8af6bf7 	prfm	#0x17, \[sp, x15\]
-.*:	f8be58f7 	prfm	#0x17, \[x7, w30, uxtw #3\]
-.*:	f9800c77 	prfm	#0x17, \[x3, #24\]
+.*:	f8af6bf7 	prfm	pstslcstrm, \[sp, x15\]
+.*:	f8be58f7 	prfm	pstslcstrm, \[x7, w30, uxtw #3\]
+.*:	f9800c77 	prfm	pstslcstrm, \[x3, #24\]
 .*:	d8000018 	prfm	#0x18, 0 <LABEL1>
 .*: R_AARCH64_(P32_|)LD_PREL_LO19	LABEL1
 .*:	f9800c78 	prfm	#0x18, \[x3, #24\]
@@ -358,17 +360,23 @@ Disassembly of section \.text:
 .*:	f9800c63 	prfm	pldl2strm, \[x3, #24\]
 .*:	f9800c64 	prfm	pldl3keep, \[x3, #24\]
 .*:	f9800c65 	prfm	pldl3strm, \[x3, #24\]
+.*:	f9800c66 	prfm	pldslckeep, \[x3, #24\]
+.*:	f9800c67 	prfm	pldslcstrm, \[x3, #24\]
 .*:	f9800c68 	prfm	plil1keep, \[x3, #24\]
 .*:	f9800c69 	prfm	plil1strm, \[x3, #24\]
 .*:	f9800c6a 	prfm	plil2keep, \[x3, #24\]
 .*:	f9800c6b 	prfm	plil2strm, \[x3, #24\]
 .*:	f9800c6c 	prfm	plil3keep, \[x3, #24\]
 .*:	f9800c6d 	prfm	plil3strm, \[x3, #24\]
+.*:	f9800c6e 	prfm	plislckeep, \[x3, #24\]
+.*:	f9800c6f 	prfm	plislcstrm, \[x3, #24\]
 .*:	f9800c70 	prfm	pstl1keep, \[x3, #24\]
 .*:	f9800c71 	prfm	pstl1strm, \[x3, #24\]
 .*:	f9800c72 	prfm	pstl2keep, \[x3, #24\]
 .*:	f9800c73 	prfm	pstl2strm, \[x3, #24\]
 .*:	f9800c74 	prfm	pstl3keep, \[x3, #24\]
 .*:	f9800c75 	prfm	pstl3strm, \[x3, #24\]
-.*:	f8a04817 	prfm	#0x17, \[x0, w0, uxtw\]
+.*:	f9800c76 	prfm	pstslckeep, \[x3, #24\]
+.*:	f9800c77 	prfm	pstslcstrm, \[x3, #24\]
+.*:	f8a04817 	prfm	pstslcstrm, \[x0, w0, uxtw\]
 .*:	f8a04818 	rprfm	pldkeep, x0, \[x0\]

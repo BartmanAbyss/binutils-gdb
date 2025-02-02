@@ -1,6 +1,6 @@
 /* Support for printing Modula 2 values for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "expression.h"
@@ -373,7 +372,7 @@ m2_language::value_print_inner (struct value *val, struct ui_file *stream,
 	  gdb_printf (stream, "{...}");
 	  break;
 	}
-      /* Fall through.  */
+      [[fallthrough]];
     case TYPE_CODE_STRUCT:
       if (m2_is_long_set (type))
 	m2_print_long_set (type, valaddr, 0, address, stream);
@@ -451,7 +450,7 @@ m2_language::value_print_inner (struct value *val, struct ui_file *stream,
 	  value_print_inner (v, stream, recurse, options);
 	  break;
 	}
-      /* FALLTHROUGH */
+      [[fallthrough]];
 
     case TYPE_CODE_REF:
     case TYPE_CODE_ENUM:

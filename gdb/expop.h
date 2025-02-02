@@ -1,6 +1,6 @@
 /* Definitions for expressions in GDB
 
-   Copyright (C) 2020-2023 Free Software Foundation, Inc.
+   Copyright (C) 2020-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,8 +17,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#ifndef EXPOP_H
-#define EXPOP_H
+#ifndef GDB_EXPOP_H
+#define GDB_EXPOP_H
 
 #include "c-lang.h"
 #include "cp-abi.h"
@@ -64,11 +64,6 @@ extern struct value *eval_op_func_static_var (struct type *expect_type,
 extern struct value *eval_op_register (struct type *expect_type,
 				       struct expression *exp,
 				       enum noside noside, const char *name);
-extern struct value *eval_op_ternop (struct type *expect_type,
-				     struct expression *exp,
-				     enum noside noside,
-				     struct value *array, struct value *low,
-				     struct value *upper);
 extern struct value *eval_op_structop_struct (struct type *expect_type,
 					      struct expression *exp,
 					      enum noside noside,
@@ -177,9 +172,6 @@ extern struct value *eval_op_ind (struct type *expect_type,
 				  struct expression *exp,
 				  enum noside noside,
 				  struct value *arg1);
-extern struct value *eval_op_type (struct type *expect_type,
-				   struct expression *exp,
-				   enum noside noside, struct type *type);
 extern struct value *eval_op_alignof (struct type *expect_type,
 				      struct expression *exp,
 				      enum noside noside,
@@ -939,16 +931,7 @@ public:
 
   value *evaluate (struct type *expect_type,
 		   struct expression *exp,
-		   enum noside noside) override
-  {
-    struct value *array
-      = std::get<0> (m_storage)->evaluate (nullptr, exp, noside);
-    struct value *low
-      = std::get<1> (m_storage)->evaluate (nullptr, exp, noside);
-    struct value *upper
-      = std::get<2> (m_storage)->evaluate (nullptr, exp, noside);
-    return eval_op_ternop (expect_type, exp, noside, array, low, upper);
-  }
+		   enum noside noside) override;
 
   enum exp_opcode opcode () const override
   { return TERNOP_SLICE; }
@@ -1527,9 +1510,8 @@ public:
 		   struct expression *exp,
 		   enum noside noside) override
   {
-    if (expect_type != nullptr && expect_type->code () == TYPE_CODE_PTR)
-      expect_type = check_typedef (expect_type)->target_type ();
-    value *val = std::get<0> (m_storage)->evaluate (expect_type, exp, noside);
+    value *val
+      = std::get<0> (m_storage)->evaluate (nullptr, exp, noside);
     return eval_op_ind (expect_type, exp, noside, val);
   }
 
@@ -1575,15 +1557,15 @@ public:
 
   value *evaluate (struct type *expect_type,
 		   struct expression *exp,
-		   enum noside noside) override
-  {
-    return eval_op_type (expect_type, exp, noside, std::get<0> (m_storage));
-  }
+		   enum noside noside) override;
 
   enum exp_opcode opcode () const override
   { return OP_TYPE; }
 
   bool constant_p () const override
+  { return true; }
+
+  bool type_p () const override
   { return true; }
 };
 
@@ -1608,6 +1590,9 @@ public:
 
   enum exp_opcode opcode () const override
   { return OP_TYPEOF; }
+
+  bool type_p () const override
+  { return true; }
 };
 
 /* Implement 'decltype'.  */
@@ -1653,6 +1638,9 @@ public:
 
   enum exp_opcode opcode () const override
   { return OP_DECLTYPE; }
+
+  bool type_p () const override
+  { return true; }
 };
 
 /* Implement 'typeid'.  */
@@ -1667,9 +1655,8 @@ public:
 		   struct expression *exp,
 		   enum noside noside) override
   {
-    enum exp_opcode sub_op = std::get<0> (m_storage)->opcode ();
     enum noside sub_noside
-      = ((sub_op == OP_TYPE || sub_op == OP_DECLTYPE || sub_op == OP_TYPEOF)
+      = (std::get<0> (m_storage)->type_p ()
 	 ? EVAL_AVOID_SIDE_EFFECTS
 	 : noside);
 
@@ -2229,4 +2216,4 @@ public:
 
 } /* namespace expr */
 
-#endif /* EXPOP_H */
+#endif /* GDB_EXPOP_H */

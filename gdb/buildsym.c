@@ -1,5 +1,5 @@
 /* Support routines for building symbol tables in GDB's internal format.
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,7 +16,6 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "buildsym-legacy.h"
 #include "bfd.h"
 #include "gdbsupport/gdb_obstack.h"
@@ -26,10 +25,10 @@
 #include "objfiles.h"
 #include "gdbtypes.h"
 #include "complaints.h"
-#include "expression.h"		/* For "enum exp_opcode" used by...  */
-#include "filenames.h"		/* For DOSish file names.  */
+#include "expression.h"
+#include "filenames.h"
 #include "macrotab.h"
-#include "demangle.h"		/* Needed by SYMBOL_INIT_DEMANGLED_NAME.  */
+#include "demangle.h"
 #include "block.h"
 #include "cp-support.h"
 #include "dictionary.h"
@@ -264,10 +263,7 @@ buildsym_compunit::finish_block_internal
 	    }
 	  if (nparams > 0)
 	    {
-	      ftype->set_num_fields (nparams);
-	      ftype->set_fields
-		((struct field *)
-		 TYPE_ALLOC (ftype, nparams * sizeof (struct field)));
+	      ftype->alloc_fields (nparams);
 
 	      iparams = 0;
 	      /* Here we want to directly access the dictionary, because
@@ -280,7 +276,7 @@ buildsym_compunit::finish_block_internal
 		  if (sym->is_argument ())
 		    {
 		      ftype->field (iparams).set_type (sym->type ());
-		      TYPE_FIELD_ARTIFICIAL (ftype, iparams) = 0;
+		      ftype->field (iparams).set_is_artificial (false);
 		      iparams++;
 		    }
 		}
@@ -646,14 +642,14 @@ buildsym_compunit::record_line (struct subfile *subfile, int line,
      anyway.  */
   if (line == 0)
     {
-      gdb::optional<int> last_line;
+      std::optional<int> last_line;
 
       while (!subfile->line_vector_entries.empty ())
 	{
 	  linetable_entry *last = &subfile->line_vector_entries.back ();
 	  last_line = last->line;
 
-	  if (last->raw_pc () != pc)
+	  if (last->unrelocated_pc () != pc)
 	    break;
 
 	  subfile->line_vector_entries.pop_back ();
@@ -664,12 +660,12 @@ buildsym_compunit::record_line (struct subfile *subfile, int line,
 	return;
     }
 
-  subfile->line_vector_entries.emplace_back ();
-  linetable_entry &e = subfile->line_vector_entries.back ();
+  linetable_entry &e = subfile->line_vector_entries.emplace_back ();
   e.line = line;
   e.is_stmt = (flags & LEF_IS_STMT) != 0;
-  e.set_raw_pc (pc);
+  e.set_unrelocated_pc (pc);
   e.prologue_end = (flags & LEF_PROLOGUE_END) != 0;
+  e.epilogue_begin = (flags & LEF_EPILOGUE_BEGIN) != 0;
 }
 
 
@@ -955,11 +951,7 @@ buildsym_compunit::end_compunit_symtab_with_blockvector
   cu->set_producer (m_producer);
 
   cu->set_blockvector (blockvector);
-  {
-    struct block *b = blockvector->global_block ();
-
-    b->set_compunit_symtab (cu);
-  }
+  blockvector->global_block ()->set_compunit (cu);
 
   cu->set_macro_table (release_macros ());
 
@@ -1136,8 +1128,7 @@ buildsym_compunit::augment_type_symtab ()
 struct context_stack *
 buildsym_compunit::push_context (int desc, CORE_ADDR valu)
 {
-  m_context_stack.emplace_back ();
-  struct context_stack *newobj = &m_context_stack.back ();
+  struct context_stack *newobj = &m_context_stack.emplace_back ();
 
   newobj->depth = desc;
   newobj->locals = m_local_symbols;

@@ -1,4 +1,4 @@
-# Copyright 2009-2023 Free Software Foundation, Inc.
+# Copyright 2009-2024 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -55,9 +55,11 @@ gdb_test "watch j task 1 task 3" "You can specify only one task\\."
 
 # Check that attempting to combine 'task' and 'thread' gives an error.
 gdb_test "break break_me task 1 thread 1" \
-    "You can specify only one of thread or task\\."
+    "You can specify only one of thread, inferior, or task\\."
 gdb_test "break break_me thread 1 task 1" \
-    "You can specify only one of thread or task\\."
+    "You can specify only one of thread, inferior, or task\\."
+gdb_test "break break_me inferior 1 task 1" \
+    "You can specify only one of thread, inferior, or task\\."
 gdb_test "watch j task 1 thread 1" \
     "You can specify only one of thread or task\\."
 gdb_test "watch j thread 1 task 1" \
@@ -96,15 +98,15 @@ if {[allow_python_tests]} {
     gdb_test "python print(bp.thread)" "None"
     gdb_test "python bp.thread = 1" \
 	[multi_line \
-	     "RuntimeError: Cannot set both task and thread attributes\\." \
-	     "Error while executing Python code\\."] \
+	     "RuntimeError.*: Cannot set both task and thread attributes\\." \
+	     "Error occurred in Python.*"] \
 	"try setting the thread, but expect an error"
     gdb_test_no_output "python bp.task = None"
     gdb_test_no_output "python bp.thread = 1"
     gdb_test "python bp.task = 3" \
 	[multi_line \
-	     "RuntimeError: Cannot set both task and thread attributes\\." \
-	     "Error while executing Python code\\."] \
+	     "RuntimeError.*: Cannot set both task and thread attributes\\." \
+	     "Error occurred in Python.*"] \
 	"try setting the task, but expect an error"
 
     # Reset the breakpoint to the state required for the rest of this

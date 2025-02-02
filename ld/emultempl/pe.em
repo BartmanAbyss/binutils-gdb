@@ -18,7 +18,7 @@ esac
 rm -f e${EMULATION_NAME}.c
 (echo;echo;echo;echo;echo)>e${EMULATION_NAME}.c # there, now line numbers match ;-)
 fragment <<EOF
-/* Copyright (C) 1995-2023 Free Software Foundation, Inc.
+/* Copyright (C) 1995-2025 Free Software Foundation, Inc.
 
    This file is part of the GNU Binutils.
 
@@ -160,6 +160,7 @@ static char * thumb_entry_symbol = NULL;
 static lang_assignment_statement_type *image_base_statement = 0;
 static unsigned short pe_dll_characteristics = DEFAULT_DLL_CHARACTERISTICS;
 static bool insert_timestamp = true;
+static bool orphan_init_done;
 static const char *emit_build_id;
 #ifdef PDB_H
 static int pdb;
@@ -235,84 +236,6 @@ fragment <<EOF
 
 /* PE format extra command line options.  */
 
-/* Used for setting flags in the PE header.  */
-enum options
-{
-  OPTION_BASE_FILE = 300 + 1,
-  OPTION_DLL,
-  OPTION_FILE_ALIGNMENT,
-  OPTION_IMAGE_BASE,
-  OPTION_MAJOR_IMAGE_VERSION,
-  OPTION_MAJOR_OS_VERSION,
-  OPTION_MAJOR_SUBSYSTEM_VERSION,
-  OPTION_MINOR_IMAGE_VERSION,
-  OPTION_MINOR_OS_VERSION,
-  OPTION_MINOR_SUBSYSTEM_VERSION,
-  OPTION_SECTION_ALIGNMENT,
-  OPTION_STACK,
-  OPTION_SUBSYSTEM,
-  OPTION_HEAP,
-  OPTION_SUPPORT_OLD_CODE,
-  OPTION_OUT_DEF,
-  OPTION_EXPORT_ALL,
-  OPTION_EXCLUDE_SYMBOLS,
-  OPTION_EXCLUDE_ALL_SYMBOLS,
-  OPTION_KILL_ATS,
-  OPTION_STDCALL_ALIASES,
-  OPTION_ENABLE_STDCALL_FIXUP,
-  OPTION_DISABLE_STDCALL_FIXUP,
-  OPTION_THUMB_ENTRY,
-  OPTION_WARN_DUPLICATE_EXPORTS,
-  OPTION_IMP_COMPAT,
-  OPTION_ENABLE_AUTO_IMAGE_BASE,
-  OPTION_DISABLE_AUTO_IMAGE_BASE,
-  OPTION_DLL_SEARCH_PREFIX,
-  OPTION_NO_DEFAULT_EXCLUDES,
-  OPTION_DLL_ENABLE_AUTO_IMPORT,
-  OPTION_DLL_DISABLE_AUTO_IMPORT,
-  OPTION_ENABLE_EXTRA_PE_DEBUG,
-  OPTION_EXCLUDE_LIBS,
-  OPTION_DLL_ENABLE_RUNTIME_PSEUDO_RELOC,
-  OPTION_DLL_DISABLE_RUNTIME_PSEUDO_RELOC,
-  OPTION_LARGE_ADDRESS_AWARE,
-  OPTION_DISABLE_LARGE_ADDRESS_AWARE,
-  OPTION_DLL_ENABLE_RUNTIME_PSEUDO_RELOC_V1,
-  OPTION_DLL_ENABLE_RUNTIME_PSEUDO_RELOC_V2,
-  OPTION_EXCLUDE_MODULES_FOR_IMPLIB,
-  OPTION_USE_NUL_PREFIXED_IMPORT_TABLES,
-  OPTION_NO_LEADING_UNDERSCORE,
-  OPTION_LEADING_UNDERSCORE,
-  OPTION_ENABLE_LONG_SECTION_NAMES,
-  OPTION_DISABLE_LONG_SECTION_NAMES,
-/* DLLCharacteristics flags.  */
-  OPTION_DYNAMIC_BASE,
-  OPTION_FORCE_INTEGRITY,
-  OPTION_NX_COMPAT,
-  OPTION_NO_ISOLATION,
-  OPTION_NO_SEH,
-  OPTION_NO_BIND,
-  OPTION_WDM_DRIVER,
-  OPTION_TERMINAL_SERVER_AWARE,
-/* Determinism.  */
-  OPTION_INSERT_TIMESTAMP,
-  OPTION_NO_INSERT_TIMESTAMP,
-  OPTION_BUILD_ID,
-#ifdef PDB_H
-  OPTION_PDB,
-#endif
-  OPTION_ENABLE_RELOC_SECTION,
-  OPTION_DISABLE_RELOC_SECTION,
-/* DLL Characteristics flags.  */
-  OPTION_DISABLE_DYNAMIC_BASE,
-  OPTION_DISABLE_FORCE_INTEGRITY,
-  OPTION_DISABLE_NX_COMPAT,
-  OPTION_DISABLE_NO_ISOLATION,
-  OPTION_DISABLE_NO_SEH,
-  OPTION_DISABLE_NO_BIND,
-  OPTION_DISABLE_WDM_DRIVER,
-  OPTION_DISABLE_TERMINAL_SERVER_AWARE
-};
-
 static void
 gld${EMULATION_NAME}_add_options
   (int ns ATTRIBUTE_UNUSED,
@@ -329,7 +252,6 @@ gld${EMULATION_NAME}_add_options
     {"dll", no_argument, NULL, OPTION_DLL},
     {"file-alignment", required_argument, NULL, OPTION_FILE_ALIGNMENT},
     {"heap", required_argument, NULL, OPTION_HEAP},
-    {"image-base", required_argument, NULL, OPTION_IMAGE_BASE},
     {"major-image-version", required_argument, NULL, OPTION_MAJOR_IMAGE_VERSION},
     {"major-os-version", required_argument, NULL, OPTION_MAJOR_OS_VERSION},
     {"major-subsystem-version", required_argument, NULL, OPTION_MAJOR_SUBSYSTEM_VERSION},
@@ -1189,6 +1111,30 @@ change_undef (struct bfd_link_hash_entry * undef,
 }
 
 static void
+set_decoration (const char *undecorated_name,
+		struct bfd_link_hash_entry * decoration)
+{
+  static bool  gave_warning_message = false;
+  struct decoration_hash_entry *entry;
+
+  if (is_underscoring () && undecorated_name[0] == '_')
+    undecorated_name++;
+
+  entry = (struct decoration_hash_entry *)
+	  bfd_hash_lookup (&(coff_hash_table (&link_info)->decoration_hash),
+			   undecorated_name, true /* create */, false /* copy */);
+
+  if (entry->decorated_link != NULL && !gave_warning_message)
+    {
+      einfo (_("%P: warning: overwriting decorated name %s with %s\n"),
+	     entry->decorated_link->root.string, undecorated_name);
+      gave_warning_message = true;
+    }
+
+  entry->decorated_link = decoration;
+}
+
+static void
 pe_fixup_stdcalls (void)
 {
   struct bfd_link_hash_entry *undef, *sym;
@@ -1231,7 +1177,10 @@ pe_fixup_stdcalls (void)
 	    bfd_link_hash_traverse (link_info.hash, pe_undef_cdecl_match,
 				    (char *) name);
 	    if (pe_undef_found_sym)
-	      change_undef (undef, pe_undef_found_sym);
+	      {
+		change_undef (undef, pe_undef_found_sym);
+		set_decoration (undef->root.string, pe_undef_found_sym);
+	      }
 	  }
       }
 }
@@ -1243,7 +1192,7 @@ read_addend (arelent *rel, asection *s)
   bfd_vma addend = 0;
 
   if (!bfd_get_section_contents (s->owner, s, buf, rel->address, sizeof (buf)))
-    einfo (_("%P: %C: cannot get section contents - auto-import exception\n"),
+    einfo (_("%P: %H: cannot get section contents - auto-import exception\n"),
 	   s->owner, s, rel->address);
   else
     addend = bfd_get_32 (s->owner, buf);
@@ -1328,7 +1277,7 @@ pecoff_checksum_contents (bfd *abfd,
       if (bfd_seek (abfd, filepos, SEEK_SET) != 0)
 	return 0;
 
-      status = bfd_bread (&b, (bfd_size_type) 1, abfd);
+      status = bfd_read (&b, 1, abfd);
       if (status < 1)
 	{
 	  break;
@@ -1419,7 +1368,7 @@ write_build_id (bfd *abfd)
   if (bfd_seek (abfd, asec->filepos + link_order->offset, SEEK_SET) != 0)
     return 0;
 
-  if (bfd_bwrite (contents, sizeof (*ext), abfd) != sizeof (*ext))
+  if (bfd_write (contents, sizeof (*ext), abfd) != sizeof (*ext))
     return 0;
 
 #ifdef PDB_H
@@ -1799,13 +1748,28 @@ gld${EMULATION_NAME}_after_open (void)
 
 	    /* Microsoft import libraries may contain archive members for
 	       one or more DLLs, together with static object files.
-	       Inspect all members that are named *.dll - check whether
-	       they contain .idata sections. Do the renaming of all
-	       archive members that seem to be Microsoft style import
-	       objects.  */
+	       The head and sentinels are regular COFF object files,
+	       while the thunks are special ILF files that get synthesized
+	       by bfd into COFF object files.
+
+	       As Microsoft import libraries can be for a module with
+	       almost any file name (*.dll, *.exe, etc), we can't easily
+	       know which archive members to inspect.
+
+	       Inspect all members, except ones named *.o or *.obj (which
+	       is the case both for regular static libraries or for GNU
+	       style import libraries). Archive members with file names other
+	       than *.o or *.obj, that do contain .idata sections, are
+	       considered to be Microsoft style import objects, and are
+	       renamed accordingly.
+
+	       If this heuristic is wrong and we apply this on archive members
+	       that already have unique names, it shouldn't make any difference
+	       as we only append a suffix on the names.  */
 	    pnt = strrchr (bfd_get_filename (is->the_bfd), '.');
 
-	    if (pnt != NULL && (fileext_cmp (pnt + 1, "dll") == 0))
+	    if (pnt != NULL && (fileext_cmp (pnt + 1, "o") != 0 &&
+				fileext_cmp (pnt + 1, "obj") != 0))
 	      {
 		int idata2 = 0, reloc_count = 0, idata = 0;
 		asection *sec;
@@ -1820,8 +1784,8 @@ gld${EMULATION_NAME}_after_open (void)
 		    reloc_count += sec->reloc_count;
 		  }
 
-		/* An archive member named .dll, but not having any .idata
-		   sections - apparently not a Microsoft import object
+		/* An archive member not named .o or .obj, but not having any
+		   .idata sections - apparently not a Microsoft import object
 		   after all: Skip renaming it.  */
 		if (!idata)
 		  continue;
@@ -2069,6 +2033,10 @@ gld${EMULATION_NAME}_recognized_file (lang_input_statement_type *entry ATTRIBUTE
 static void
 gld${EMULATION_NAME}_finish (void)
 {
+  /* Support the object-only output.  */
+  if (config.emit_gnu_object_only)
+    orphan_init_done = false;
+
 #if defined(TARGET_IS_armpe) || defined(TARGET_IS_arm_wince_pe)
   struct bfd_link_hash_entry * h;
 
@@ -2228,7 +2196,7 @@ gld${EMULATION_NAME}_place_orphan (asection *s,
 
   if (os == NULL)
     {
-      static struct orphan_save hold[] =
+      static struct orphan_save orig_hold[] =
 	{
 	  { ".text",
 	    SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_READONLY | SEC_CODE,
@@ -2246,6 +2214,7 @@ gld${EMULATION_NAME}_place_orphan (asection *s,
 	    SEC_ALLOC,
 	    0, 0, 0, 0 }
 	};
+      static struct orphan_save hold[ARRAY_SIZE (orig_hold)];
       enum orphan_save_index
 	{
 	  orphan_text = 0,
@@ -2254,7 +2223,6 @@ gld${EMULATION_NAME}_place_orphan (asection *s,
 	  orphan_data,
 	  orphan_bss
 	};
-      static int orphan_init_done = 0;
       struct orphan_save *place;
       lang_output_section_statement_type *after;
       etree_type *address;
@@ -2263,15 +2231,20 @@ gld${EMULATION_NAME}_place_orphan (asection *s,
 
       if (!orphan_init_done)
 	{
-	  struct orphan_save *ho;
-	  for (ho = hold; ho < hold + sizeof (hold) / sizeof (hold[0]); ++ho)
-	    if (ho->name != NULL)
-	      {
-		ho->os = lang_output_section_find (ho->name);
-		if (ho->os != NULL && ho->os->flags == 0)
-		  ho->os->flags = ho->flags;
-	      }
-	  orphan_init_done = 1;
+	  struct orphan_save *ho, *horig;
+	  for (ho = hold, horig = orig_hold;
+	       ho < hold + ARRAY_SIZE (hold);
+	       ++ho, ++horig)
+	    {
+	      *ho = *horig;
+	      if (ho->name != NULL)
+		{
+		  ho->os = lang_output_section_find (ho->name);
+		  if (ho->os != NULL && ho->os->flags == 0)
+		    ho->os->flags = ho->flags;
+	        }
+	    }
+	  orphan_init_done = true;
 	}
 
       flags = s->flags;
@@ -2437,8 +2410,8 @@ gld${EMULATION_NAME}_open_dynamic_archive
 			    search->name and the start of the format string.  */
 			 + 2);
 
-  sprintf (full_string, "%s/", search->name);
-  base_string = full_string + strlen (full_string);
+  base_string = stpcpy (full_string, search->name);
+  *base_string++ = '/';
 
   for (i = 0; libname_fmt[i].format; i++)
     {
@@ -2484,7 +2457,7 @@ then
 # Scripts compiled in.
 
 # sed commands to quote an ld script as a C string.
-sc="-f stringify.sed"
+sc="-f ${srcdir}/emultempl/stringify.sed"
 
 fragment <<EOF
 {

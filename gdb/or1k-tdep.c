@@ -1,5 +1,5 @@
 /* Target-dependent code for the 32-bit OpenRISC 1000, for the GDB.
-   Copyright (C) 2008-2023 Free Software Foundation, Inc.
+   Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -16,12 +16,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "extract-store-integer.h"
 #include "frame.h"
 #include "inferior.h"
 #include "symtab.h"
 #include "value.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "language.h"
 #include "gdbcore.h"
 #include "symfile.h"
@@ -360,7 +360,7 @@ or1k_delay_slot_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 			   NULL, 32, &tmp_fields, 0);
 
   /* NULL here would mean the last instruction was not understood by cgen.
-     This should not usually happen, but if does its not a delay slot.  */
+     This should not usually happen, but if it does it's not a delay slot.  */
   if (insn == NULL)
     return 0;
 
@@ -378,12 +378,12 @@ or1k_delay_slot_p (struct gdbarch *gdbarch, CORE_ADDR pc)
 
 static int
 or1k_single_step_through_delay (struct gdbarch *gdbarch,
-				frame_info_ptr this_frame)
+				const frame_info_ptr &this_frame)
 {
   ULONGEST val;
   CORE_ADDR ppc;
   CORE_ADDR npc;
-  struct regcache *regcache = get_current_regcache ();
+  regcache *regcache = get_thread_regcache (inferior_thread ());
 
   /* Get the previous and current instruction addresses.  If they are not
     adjacent, we cannot be in a delay slot.  */
@@ -558,7 +558,7 @@ or1k_frame_align (struct gdbarch *gdbarch, CORE_ADDR sp)
 /* Implement the unwind_pc gdbarch method.  */
 
 static CORE_ADDR
-or1k_unwind_pc (struct gdbarch *gdbarch, frame_info_ptr next_frame)
+or1k_unwind_pc (struct gdbarch *gdbarch, const frame_info_ptr &next_frame)
 {
   CORE_ADDR pc;
 
@@ -578,7 +578,7 @@ or1k_unwind_pc (struct gdbarch *gdbarch, frame_info_ptr next_frame)
 /* Implement the unwind_sp gdbarch method.  */
 
 static CORE_ADDR
-or1k_unwind_sp (struct gdbarch *gdbarch, frame_info_ptr next_frame)
+or1k_unwind_sp (struct gdbarch *gdbarch, const frame_info_ptr &next_frame)
 {
   CORE_ADDR sp;
 
@@ -889,7 +889,7 @@ or1k_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
    Reportedly, this is only valid for frames less than 0x7fff in size.  */
 
 static struct trad_frame_cache *
-or1k_frame_cache (frame_info_ptr this_frame, void **prologue_cache)
+or1k_frame_cache (const frame_info_ptr &this_frame, void **prologue_cache)
 {
   struct gdbarch *gdbarch;
   struct trad_frame_cache *info;
@@ -1102,7 +1102,7 @@ or1k_frame_cache (frame_info_ptr this_frame, void **prologue_cache)
 /* Implement the this_id function for the stub unwinder.  */
 
 static void
-or1k_frame_this_id (frame_info_ptr this_frame,
+or1k_frame_this_id (const frame_info_ptr &this_frame,
 		    void **prologue_cache, struct frame_id *this_id)
 {
   struct trad_frame_cache *info = or1k_frame_cache (this_frame,
@@ -1114,7 +1114,7 @@ or1k_frame_this_id (frame_info_ptr this_frame,
 /* Implement the prev_register function for the stub unwinder.  */
 
 static struct value *
-or1k_frame_prev_register (frame_info_ptr this_frame,
+or1k_frame_prev_register (const frame_info_ptr &this_frame,
 			  void **prologue_cache, int regnum)
 {
   struct trad_frame_cache *info = or1k_frame_cache (this_frame,
@@ -1125,16 +1125,17 @@ or1k_frame_prev_register (frame_info_ptr this_frame,
 
 /* Data structures for the normal prologue-analysis-based unwinder.  */
 
-static const struct frame_unwind or1k_frame_unwind = {
+static const struct frame_unwind_legacy or1k_frame_unwind (
   "or1k prologue",
   NORMAL_FRAME,
+  FRAME_UNWIND_ARCH,
   default_frame_unwind_stop_reason,
   or1k_frame_this_id,
   or1k_frame_prev_register,
   NULL,
   default_frame_sniffer,
-  NULL,
-};
+  NULL
+);
 
 /* Architecture initialization for OpenRISC 1000.  */
 

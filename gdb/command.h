@@ -1,6 +1,6 @@
 /* Header file for command creation.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,10 +15,9 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#if !defined (COMMAND_H)
-#define COMMAND_H 1
+#ifndef GDB_COMMAND_H
+#define GDB_COMMAND_H
 
-#include "gdbsupport/gdb_vecs.h"
 #include "gdbsupport/scoped_restore.h"
 
 struct completion_tracker;
@@ -111,7 +110,9 @@ enum var_types
     /* Enumerated type.  Can only have one of the specified values.
        *VAR is a char pointer to the name of the element that we
        find.  */
-    var_enum
+    var_enum,
+    /* Color type.  *VAR is a ui_file_style::color structure.  */
+    var_color
   };
 
 /* A structure describing an extra literal accepted and shown in place
@@ -126,7 +127,7 @@ struct literal_def
   LONGEST use;
 
   /* An optional number accepted that stands for the literal.  */
-  gdb::optional<LONGEST> val;
+  std::optional<LONGEST> val;
 };
 
 /* Return true if a setting of type VAR_TYPE is backed with type T.
@@ -183,6 +184,14 @@ template<>
 inline bool var_type_uses<const char *> (var_types t)
 {
   return t == var_enum;
+}
+
+/* Return true if a setting of type T is backed by an ui_file_style::color
+   variable.  */
+template<>
+inline bool var_type_uses<ui_file_style::color> (var_types t)
+{
+  return t == var_color;
 }
 
 template<bool is_scalar, typename T> struct setting_func_types_1;
@@ -292,8 +301,8 @@ struct setting
     /* Getters and setters are cast to and from the arbitrary `void (*) ()`
        function pointer type.  Make sure that the two types are really of the
        same size.  */
-    gdb_static_assert (sizeof (m_getter) == sizeof (getter));
-    gdb_static_assert (sizeof (m_setter) == sizeof (setter));
+    static_assert (sizeof (m_getter) == sizeof (getter));
+    static_assert (sizeof (m_setter) == sizeof (setter));
 
     m_getter = reinterpret_cast<erased_func> (getter);
     m_setter = reinterpret_cast<erased_func> (setter);
@@ -633,7 +642,7 @@ extern cmd_list_element *add_com_alias (const char *name,
 extern struct cmd_list_element *add_com_suppress_notification
 		       (const char *name, enum command_class theclass,
 			cmd_simple_func_ftype *fun, const char *doc,
-			bool *supress_notification);
+			bool *suppress_notification);
 
 extern struct cmd_list_element *add_info (const char *,
 					  cmd_simple_func_ftype *fun,
@@ -680,6 +689,20 @@ extern set_show_commands add_setshow_enum_cmd
    const char *help_doc, setting_func_types<const char *>::set set_func,
    setting_func_types<const char *>::get get_func, show_value_ftype *show_func,
    cmd_list_element **set_list, cmd_list_element **show_list);
+
+extern set_show_commands add_setshow_color_cmd
+  (const char *name, command_class theclass, ui_file_style::color *var,
+   const char *set_doc, const char *show_doc, const char *help_doc,
+   cmd_func_ftype *set_func, show_value_ftype *show_func,
+   cmd_list_element **set_list, cmd_list_element **show_list);
+
+extern set_show_commands add_setshow_color_cmd
+  (const char *name, command_class theclass,
+   const char *set_doc, const char *show_doc, const char *help_doc,
+   setting_func_types<ui_file_style::color>::set set_func,
+   setting_func_types<ui_file_style::color>::get get_func,
+   show_value_ftype *show_func, cmd_list_element **set_list,
+   cmd_list_element **show_list);
 
 extern set_show_commands add_setshow_auto_boolean_cmd
   (const char *name, command_class theclass, auto_boolean *var,
@@ -876,7 +899,7 @@ extern void cmd_show_list (struct cmd_list_element *, int);
 /* Used everywhere whenever at least one parameter is required and
    none is specified.  */
 
-extern void error_no_arg (const char *) ATTRIBUTE_NORETURN;
+[[noreturn]] extern void error_no_arg (const char *);
 
 
 /* Command line saving and repetition.
@@ -934,4 +957,4 @@ extern void not_just_help_class_command (const char *, int);
 extern void cmd_func (struct cmd_list_element *cmd,
 		      const char *args, int from_tty);
 
-#endif /* !defined (COMMAND_H) */
+#endif /* GDB_COMMAND_H */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2008-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2008-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -15,8 +15,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "windows-tdep.h"
+#include "extract-store-integer.h"
 #include "gdbsupport/gdb_obstack.h"
 #include "xml-support.h"
 #include "gdbarch.h"
@@ -24,7 +24,7 @@
 #include "value.h"
 #include "inferior.h"
 #include "command.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "gdbthread.h"
 #include "objfiles.h"
 #include "symfile.h"
@@ -32,6 +32,7 @@
 #include "gdb_bfd.h"
 #include "solib.h"
 #include "solib-target.h"
+#include "frame-unwind.h"
 #include "gdbcore.h"
 #include "coff/internal.h"
 #include "libcoff.h"
@@ -451,8 +452,8 @@ display_one_tib (ptid_t ptid)
   gdb_byte *index;
   CORE_ADDR thread_local_base;
   ULONGEST i, val, max, max_name, size, tib_size;
-  ULONGEST sizeof_ptr = gdbarch_ptr_bit (target_gdbarch ());
-  enum bfd_endian byte_order = gdbarch_byte_order (target_gdbarch ());
+  ULONGEST sizeof_ptr = gdbarch_ptr_bit (current_inferior ()->arch ());
+  bfd_endian byte_order = gdbarch_byte_order (current_inferior ()->arch ());
 
   if (sizeof_ptr == 64)
     {
@@ -490,13 +491,13 @@ display_one_tib (ptid_t ptid)
       gdb_printf (_("Unable to read thread information "
 		    "block for %s at address %s\n"),
 		  target_pid_to_str (ptid).c_str (), 
-		  paddress (target_gdbarch (), thread_local_base));
+		  paddress (current_inferior ()->arch (), thread_local_base));
       return -1;
     }
 
   gdb_printf (_("Thread Information Block %s at %s\n"),
 	      target_pid_to_str (ptid).c_str (),
-	      paddress (target_gdbarch (), thread_local_base));
+	      paddress (current_inferior ()->arch (), thread_local_base));
 
   index = (gdb_byte *) tib;
 
@@ -527,14 +528,13 @@ display_tib (const char * args, int from_tty)
 void
 windows_xfer_shared_library (const char* so_name, CORE_ADDR load_addr,
 			     CORE_ADDR *text_offset_cached,
-			     struct gdbarch *gdbarch, struct obstack *obstack)
+			     struct gdbarch *gdbarch, std::string &xml)
 {
   CORE_ADDR text_offset = text_offset_cached ? *text_offset_cached : 0;
 
-  obstack_grow_str (obstack, "<library name=\"");
-  std::string p = xml_escape_text (so_name);
-  obstack_grow_str (obstack, p.c_str ());
-  obstack_grow_str (obstack, "\"><segment address=\"");
+  xml += "<library name=\"";
+  xml_escape_text_append (xml, so_name);
+  xml += "\"><segment address=\"";
 
   if (!text_offset)
     {
@@ -547,8 +547,8 @@ windows_xfer_shared_library (const char* so_name, CORE_ADDR load_addr,
 	*text_offset_cached = text_offset;
     }
 
-  obstack_grow_str (obstack, paddress (gdbarch, load_addr + text_offset));
-  obstack_grow_str (obstack, "\"/></library>");
+  xml += paddress (gdbarch, load_addr + text_offset);
+  xml += "\"/></library>";
 }
 
 /* Implement the "iterate_over_objfiles_in_search_order" gdbarch
@@ -745,9 +745,7 @@ create_enum (struct gdbarch *gdbarch, int bit, const char *name,
   int i;
 
   type = type_allocator (gdbarch).new_type (TYPE_CODE_ENUM, bit, name);
-  type->set_num_fields (count);
-  type->set_fields
-    ((struct field *) TYPE_ZALLOC (type, sizeof (struct field) * count));
+  type->alloc_fields (count);
   type->set_is_unsigned (true);
 
   for (i = 0; i < count; i++)
@@ -865,7 +863,7 @@ windows_get_siginfo_type (struct gdbarch *gdbarch)
   return siginfo_type;
 }
 
-/* Implement the "solib_create_inferior_hook" target_so_ops method.  */
+/* Implement the "solib_create_inferior_hook" solib_ops method.  */
 
 static void
 windows_solib_create_inferior_hook (int from_tty)
@@ -874,7 +872,7 @@ windows_solib_create_inferior_hook (int from_tty)
 
   /* Find base address of main executable in
      TIB->process_environment_block->image_base_address.  */
-  struct gdbarch *gdbarch = target_gdbarch ();
+  gdbarch *gdbarch = current_inferior ()->arch ();
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int ptr_bytes;
   int peb_offset;  /* Offset of process_environment_block in TIB.  */
@@ -913,7 +911,7 @@ windows_solib_create_inferior_hook (int from_tty)
     }
 }
 
-static struct target_so_ops windows_so_ops;
+static solib_ops windows_so_ops;
 
 /* Common parts for gdbarch initialization for the Windows and Cygwin OS
    ABIs.  */
@@ -978,7 +976,7 @@ struct pe_import_directory_entry
   uint32_t import_address_table_rva;
 };
 
-gdb_static_assert (sizeof (pe_import_directory_entry) == 20);
+static_assert (sizeof (pe_import_directory_entry) == 20);
 
 /* See windows-tdep.h.  */
 
@@ -1089,7 +1087,7 @@ range [%s, %s]."),
 struct cpms_data
 {
   struct gdbarch *gdbarch;
-  struct obstack *obstack;
+  std::string xml;
   int module_count;
 };
 
@@ -1147,37 +1145,30 @@ core_process_module_section (bfd *abfd, asection *sect, void *obj)
   /* The first module is the .exe itself.  */
   if (data->module_count != 0)
     windows_xfer_shared_library (module_name, base_addr,
-				 NULL, data->gdbarch, data->obstack);
+				 NULL, data->gdbarch, data->xml);
   data->module_count++;
 }
 
 ULONGEST
 windows_core_xfer_shared_libraries (struct gdbarch *gdbarch,
-				  gdb_byte *readbuf,
-				  ULONGEST offset, ULONGEST len)
+				    gdb_byte *readbuf,
+				    ULONGEST offset, ULONGEST len)
 {
-  struct obstack obstack;
-  const char *buf;
-  ULONGEST len_avail;
-  struct cpms_data data = { gdbarch, &obstack, 0 };
-
-  obstack_init (&obstack);
-  obstack_grow_str (&obstack, "<library-list>\n");
-  bfd_map_over_sections (core_bfd,
+  cpms_data data { gdbarch, "<library-list>\n", 0 };
+  bfd_map_over_sections (current_program_space->core_bfd (),
 			 core_process_module_section,
 			 &data);
-  obstack_grow_str0 (&obstack, "</library-list>\n");
+  data.xml += "</library-list>\n";
 
-  buf = (const char *) obstack_finish (&obstack);
-  len_avail = strlen (buf);
+  ULONGEST len_avail = data.xml.length ();
   if (offset >= len_avail)
     return 0;
 
   if (len > len_avail - offset)
     len = len_avail - offset;
-  memcpy (readbuf, buf + offset, len);
 
-  obstack_free (&obstack, NULL);
+  memcpy (readbuf, data.xml.data () + offset, len);
+
   return len;
 }
 
@@ -1221,4 +1212,188 @@ even if their meaning is unknown."),
      isn't initialized yet.  At this point, we're quite sure there
      isn't another convenience variable of the same name.  */
   create_internalvar_type_lazy ("_tlb", &tlb_funcs, NULL);
+}
+
+/* Frame cache data for the cygwin sigwrapper unwinder.  */
+
+struct cygwin_sigwrapper_frame_cache
+{
+  CORE_ADDR prev_pc;
+  int tlsoffset;
+};
+
+/* Return true if the instructions at PC match the instructions bytes
+   in PATTERN.  Returns false otherwise.  */
+
+static bool
+insns_match_pattern (CORE_ADDR pc,
+		     const gdb::array_view<const gdb_byte> pattern)
+{
+  for (size_t i = 0; i < pattern.size (); i++)
+    {
+      gdb_byte buf;
+      if (target_read_code (pc + i, &buf, 1) != 0)
+	return false;
+      if (buf != pattern[i])
+	return false;
+    }
+  return true;
+}
+
+/* Helper for cygwin_sigwrapper_frame_cache.  Search for one of the
+   patterns in PATTERNS_LIST within [START, END).  If found, record
+   the tls offset found after the matched pattern in the instruction
+   stream, in *TLSOFFSET.  */
+
+static void
+cygwin_sigwrapper_frame_analyze
+  (struct gdbarch *gdbarch,
+   CORE_ADDR start, CORE_ADDR end,
+   gdb::array_view<const gdb::array_view<const gdb_byte>> patterns_list,
+   int *tlsoffset)
+{
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+
+  *tlsoffset = 0;
+
+  for (CORE_ADDR addr = start; addr < end; addr++)
+    {
+      for (auto patterns : patterns_list)
+	{
+	  if (insns_match_pattern (addr, patterns))
+	    {
+	      /* The instruction sequence is followed by 4 bytes for
+		 tls::stackptr.  */
+	      gdb_byte tls_stackptr[4];
+	      if (target_read_code (addr + patterns.size (), tls_stackptr, 4) == 0)
+		{
+		  *tlsoffset = extract_signed_integer (tls_stackptr, 4, byte_order);
+
+		  frame_debug_printf ("matched pattern at %s, sigstackptroffset=%x",
+				      paddress (gdbarch, addr),
+				      *tlsoffset);
+		  break;
+		}
+	    }
+	}
+    }
+
+  /* XXX: Perhaps we should also note the address of the xaddq
+     instruction which pops the RA from the sigstack.  If PC is after
+     that, we should look in the appropriate register to get the RA,
+     not on the sigstack.  */
+}
+
+/* Fill THIS_CACHE using the cygwin sigwrapper unwinding data for
+   THIS_FRAME.  */
+
+static cygwin_sigwrapper_frame_cache *
+cygwin_sigwrapper_frame_cache (frame_info_ptr this_frame, void **this_cache)
+{
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  auto *cache = (struct cygwin_sigwrapper_frame_cache *) *this_cache;
+  const int len = gdbarch_addr_bit (gdbarch) / 8;
+
+  /* Get address of top of stack from thread information block.  */
+  CORE_ADDR thread_local_base;
+  target_get_tib_address (inferior_ptid, &thread_local_base);
+
+  CORE_ADDR stacktop
+    = read_memory_unsigned_integer (thread_local_base + len, len, byte_order);
+
+  frame_debug_printf ("TEB.stacktop=%s", paddress (gdbarch, stacktop));
+
+  /* Find cygtls, relative to stacktop, and read signalstackptr from
+     cygtls.  */
+  CORE_ADDR signalstackptr
+    = read_memory_unsigned_integer (stacktop + cache->tlsoffset,
+				    len, byte_order);
+
+  frame_debug_printf ("sigsp=%s", paddress (gdbarch, signalstackptr));
+
+  /* Read return address from signal stack.  */
+  cache->prev_pc
+    = read_memory_unsigned_integer (signalstackptr - len, len, byte_order);
+
+  frame_debug_printf ("ra=%s", paddress (gdbarch, cache->prev_pc));
+
+  return cache;
+}
+
+struct value *
+cygwin_sigwrapper_frame_unwind::prev_register
+    (const frame_info_ptr &this_frame, void **this_cache, int regnum) const
+{
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  struct cygwin_sigwrapper_frame_cache *cache
+    = cygwin_sigwrapper_frame_cache (this_frame, this_cache);
+
+  frame_debug_printf ("%s for pc=%s",
+		      gdbarch_register_name (gdbarch, regnum),
+		      paddress (gdbarch, cache->prev_pc));
+
+  if (regnum == gdbarch_pc_regnum (gdbarch))
+    return frame_unwind_got_address (this_frame, regnum, cache->prev_pc);
+
+  return frame_unwind_got_register (this_frame, regnum, regnum);
+}
+
+void
+cygwin_sigwrapper_frame_unwind::this_id (const frame_info_ptr &this_frame,
+					 void **this_cache,
+					 struct frame_id *this_id) const
+{
+  *this_id = frame_id_build_unavailable_stack (get_frame_func (this_frame));
+}
+
+int
+cygwin_sigwrapper_frame_unwind::sniff (const frame_info_ptr &this_frame,
+					 void **this_cache) const
+{
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+
+  CORE_ADDR pc = get_frame_pc (this_frame);
+  const char *name;
+  CORE_ADDR start, end;
+  find_pc_partial_function (pc, &name, &start, &end);
+
+  if (name == nullptr)
+    return 0;
+
+  if (strcmp (name, "_sigbe") != 0
+      && strcmp (name, "__sigbe") != 0
+      && strcmp (name, "sigdelayed") != 0
+      && strcmp (name, "_sigdelayed") != 0)
+    return 0;
+
+  frame_debug_printf ("name=%s, start=%s, end=%s",
+		      name,
+		      paddress (gdbarch, start),
+		      paddress (gdbarch, end));
+
+  int tlsoffset;
+  cygwin_sigwrapper_frame_analyze (gdbarch, start, end, patterns_list,
+				   &tlsoffset);
+  if (tlsoffset == 0)
+    return 0;
+
+  frame_debug_printf ("sigstackptroffset=%x", tlsoffset);
+
+  auto *cache = FRAME_OBSTACK_ZALLOC (struct cygwin_sigwrapper_frame_cache);
+  cache->tlsoffset = tlsoffset;
+
+  *this_cache = cache;
+  cygwin_sigwrapper_frame_cache (this_frame, this_cache);
+
+  return 1;
+}
+
+/* Cygwin sigwapper unwinder.  */
+
+cygwin_sigwrapper_frame_unwind::cygwin_sigwrapper_frame_unwind
+  (gdb::array_view<const gdb::array_view<const gdb_byte>> patterns_list)
+    : frame_unwind ("cygwin sigwrapper", NORMAL_FRAME, FRAME_UNWIND_GDB,
+		    nullptr), patterns_list (patterns_list)
+{
 }

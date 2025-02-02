@@ -1,5 +1,5 @@
 /* tc-mcore.c -- Assemble code for M*Core
-   Copyright (C) 1999-2023 Free Software Foundation, Inc.
+   Copyright (C) 1999-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -1629,7 +1629,7 @@ md_atof (int type, char * litP, int * sizeP)
   return ieee_md_atof (type, litP, sizeP, target_big_endian);
 }
 
-const char * md_shortopts = "";
+const char md_shortopts[] = "";
 
 enum options
 {
@@ -1642,7 +1642,7 @@ enum options
   OPTION_EL,
 };
 
-struct option md_longopts[] =
+const struct option md_longopts[] =
 {
   { "no-jsri2bsr", no_argument, NULL, OPTION_JSRI2BSR_OFF},
   { "jsri2bsr",    no_argument, NULL, OPTION_JSRI2BSR_ON},
@@ -1654,7 +1654,7 @@ struct option md_longopts[] =
   { NULL,          no_argument, NULL, 0}
 };
 
-size_t md_longopts_size = sizeof (md_longopts);
+const size_t md_longopts_size = sizeof (md_longopts);
 
 int
 md_parse_option (int c, const char * arg)
@@ -2193,8 +2193,8 @@ tc_gen_reloc (asection * section ATTRIBUTE_UNUSED, fixS * fixp)
       break;
   }
 
-  rel = XNEW (arelent);
-  rel->sym_ptr_ptr = XNEW (asymbol *);
+  rel = notes_alloc (sizeof (arelent));
+  rel->sym_ptr_ptr = notes_alloc (sizeof (asymbol *));
   *rel->sym_ptr_ptr = symbol_get_bfdsym (fixp->fx_addsy);
   rel->address = fixp->fx_frag->fr_address + fixp->fx_where;
   /* Always pass the addend along!  */

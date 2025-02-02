@@ -1,6 +1,6 @@
 /* Handle set and show GDB commands.
 
-   Copyright (C) 2000-2023 Free Software Foundation, Inc.
+   Copyright (C) 2000-2024 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,18 +15,19 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
 #include "readline/tilde.h"
 #include "value.h"
 #include <ctype.h>
 #include "arch-utils.h"
 #include "observable.h"
+#include "interps.h"
 
 #include "ui-out.h"
 
 #include "cli/cli-decode.h"
 #include "cli/cli-cmds.h"
 #include "cli/cli-setshow.h"
+#include "cli/cli-style.h"
 #include "cli/cli-utils.h"
 
 /* Return true if the change of command parameter should be notified.  */
@@ -137,10 +138,14 @@ deprecated_show_value_hack (struct ui_file *ignore_file,
     {
     case var_string:
     case var_string_noescape:
-    case var_optional_filename:
-    case var_filename:
     case var_enum:
       gdb_printf ((" is \"%s\".\n"), value);
+      break;
+
+    case var_optional_filename:
+    case var_filename:
+      gdb_printf ((" is \"%ps\".\n"),
+		  styled_string (file_name_style.style (), value));
       break;
 
     default:
@@ -339,14 +344,12 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
     {
     case var_string:
       {
-	char *newobj;
+	std::string newobj;
 	const char *p;
-	char *q;
 	int ch;
 
-	newobj = (char *) xmalloc (strlen (arg) + 2);
+	newobj.reserve (strlen (arg));
 	p = arg;
-	q = newobj;
 	while ((ch = *p++) != '\000')
 	  {
 	    if (ch == '\\')
@@ -364,20 +367,14 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 		if (ch == 0)
 		  break;	/* C loses */
 		else if (ch > 0)
-		  *q++ = ch;
+		  newobj.push_back (ch);
 	      }
 	    else
-	      *q++ = ch;
+	      newobj.push_back (ch);
 	  }
-#if 0
-	if (*(p - 1) != '\\')
-	  *q++ = ' ';
-#endif
-	*q++ = '\0';
-	newobj = (char *) xrealloc (newobj, q - newobj);
+	newobj.shrink_to_fit ();
 
-	option_changed = c->var->set<std::string> (std::string (newobj));
-	xfree (newobj);
+	option_changed = c->var->set<std::string> (std::move (newobj));
       }
       break;
     case var_string_noescape:
@@ -386,7 +383,7 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
     case var_filename:
       if (*arg == '\0')
 	error_no_arg (_("filename to set it to."));
-      /* FALLTHROUGH */
+      [[fallthrough]];
     case var_optional_filename:
       {
 	char *val = NULL;
@@ -449,6 +446,13 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	  error (_("Junk after item \"%.*s\": %s"), len, arg, after);
 
 	option_changed = c->var->set<const char *> (match);
+      }
+      break;
+    case var_color:
+      {
+	ui_file_style::color color = parse_var_color (arg);
+	ui_file_style::color approx_color = color.approximate (colorsupport ());
+	option_changed = c->var->set<ui_file_style::color> (approx_color);
       }
       break;
     default:
@@ -521,18 +525,26 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	case var_string_noescape:
 	case var_filename:
 	case var_optional_filename:
-	  gdb::observers::command_param_changed.notify
+	  interps_notify_param_changed
 	    (name, c->var->get<std::string> ().c_str ());
 	  break;
 	case var_enum:
-	  gdb::observers::command_param_changed.notify
+	  interps_notify_param_changed
 	    (name, c->var->get<const char *> ());
+	  break;
+	case var_color:
+	  {
+	    const ui_file_style::color &color
+	      = c->var->get<ui_file_style::color> ();
+	    interps_notify_param_changed
+	      (name, color.to_string ().c_str ());
+	  }
 	  break;
 	case var_boolean:
 	  {
 	    const char *opt = c->var->get<bool> () ? "on" : "off";
 
-	    gdb::observers::command_param_changed.notify (name, opt);
+	    interps_notify_param_changed (name, opt);
 	  }
 	  break;
 	case var_auto_boolean:
@@ -540,7 +552,7 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	    const char *s
 	      = auto_boolean_enums[c->var->get<enum auto_boolean> ()];
 
-	    gdb::observers::command_param_changed.notify (name, s);
+	    interps_notify_param_changed (name, s);
 	  }
 	  break;
 	case var_uinteger:
@@ -548,7 +560,7 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	    char s[64];
 
 	    xsnprintf (s, sizeof s, "%u", c->var->get<unsigned int> ());
-	    gdb::observers::command_param_changed.notify (name, s);
+	    interps_notify_param_changed (name, s);
 	  }
 	  break;
 	case var_integer:
@@ -557,7 +569,7 @@ do_set_command (const char *arg, int from_tty, struct cmd_list_element *c)
 	    char s[64];
 
 	    xsnprintf (s, sizeof s, "%d", c->var->get<int> ());
-	    gdb::observers::command_param_changed.notify (name, s);
+	    interps_notify_param_changed (name, s);
 	  }
 	  break;
 	}
@@ -591,6 +603,12 @@ get_setshow_command_value_string (const setting &var)
 	const char *value = var.get<const char *> ();
 	if (value != nullptr)
 	  stb.puts (value);
+      }
+      break;
+    case var_color:
+      {
+	const ui_file_style::color &value = var.get<ui_file_style::color> ();
+	stb.puts (value.to_string ().c_str ());
       }
       break;
     case var_boolean:
@@ -689,6 +707,7 @@ cmd_show_list (struct cmd_list_element *list, int from_tty)
   struct ui_out *uiout = current_uiout;
 
   ui_out_emit_tuple tuple_emitter (uiout, "showlist");
+  const ui_file_style cmd_style = command_style.style ();
   for (; list != NULL; list = list->next)
     {
       /* We skip show command aliases to avoid showing duplicated values.  */
@@ -709,15 +728,18 @@ cmd_show_list (struct cmd_list_element *list, int from_tty)
 	{
 	  ui_out_emit_tuple option_emitter (uiout, "option");
 
-	  if (list->prefix != nullptr)
+	  if (!uiout->is_mi_like_p () && list->prefix != nullptr)
 	    {
 	      /* If we find a prefix, output it (with "show " skipped).  */
 	      std::string prefixname = list->prefix->prefixname ();
-	      prefixname = (!list->prefix->is_prefix () ? ""
-			    : strstr (prefixname.c_str (), "show ") + 5);
-	      uiout->text (prefixname);
+	      if (startswith (prefixname, "show "))
+		prefixname = prefixname.substr (5);
+	      /* In non-MI mode, we include the full name here.  */
+	      prefixname += list->name;
+	      uiout->field_string ("name", prefixname, cmd_style);
 	    }
-	  uiout->field_string ("name", list->name);
+	  else
+	    uiout->field_string ("name", list->name, cmd_style);
 	  uiout->text (":  ");
 	  if (list->type == show_cmd)
 	    do_show_command (NULL, from_tty, list);

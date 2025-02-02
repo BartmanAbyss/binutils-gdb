@@ -1,5 +1,5 @@
 /* read.c - read a source file -
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2025 Free Software Foundation, Inc.
 
    This file is part of GAS, the GNU Assembler.
 
@@ -38,9 +38,11 @@
 #include "obstack.h"
 #include "ecoff.h"
 #include "dw2gencfi.h"
+#include "scfidw2gen.h"
 #include "codeview.h"
 #include "wchar.h"
 #include "filenames.h"
+#include "ginsn.h"
 
 #include <limits.h>
 
@@ -260,9 +262,12 @@ static int hex_float (int, char *);
 static segT get_known_segmented_expression (expressionS * expP);
 static void pobegin (void);
 static void poend (void);
-static size_t get_non_macro_line_sb (sb *);
+static size_t get_macro_line_sb (sb *);
 static void generate_file_debug (void);
 static char *_find_end_of_line (char *, int, int, int);
+#if defined (TE_PE) && defined (O_secrel)
+static void s_cv_comp (int sign);
+#endif
 
 void
 read_begin (void)
@@ -283,7 +288,8 @@ read_begin (void)
   /* Use more.  FIXME-SOMEDAY.  */
 
   if (flag_mri)
-    lex_type['?'] = 3;
+    lex_type['?'] = LEX_BEGIN_NAME | LEX_NAME;
+
   stabs_begin ();
 
 #ifndef WORKING_DOT_WORD
@@ -322,6 +328,9 @@ read_end (void)
   stabs_end ();
   poend ();
   _obstack_free (&cond_obstack, NULL);
+  free (current_name);
+  free (current_label);
+  free (include_dirs);
 }
 
 #ifndef TC_ADDRESS_BYTES
@@ -353,6 +362,7 @@ static const pseudo_typeS potable[] = {
   {"balign", s_align_bytes, 0},
   {"balignw", s_align_bytes, -2},
   {"balignl", s_align_bytes, -4},
+  {"base64", s_base64, 0},
 /* block  */
 #ifdef HANDLE_BUNDLE
   {"bundle_align_mode", s_bundle_align_mode, 0},
@@ -363,6 +373,10 @@ static const pseudo_typeS potable[] = {
   {"comm", s_comm, 0},
   {"common", s_mri_common, 0},
   {"common.s", s_mri_common, 1},
+#if defined (TE_PE) && defined (O_secrel)
+  {"cv_scomp", s_cv_comp, 1},
+  {"cv_ucomp", s_cv_comp, 0},
+#endif
   {"data", s_data, 0},
   {"dc", cons, 2},
   {"dc.a", cons, 0},
@@ -478,7 +492,7 @@ static const pseudo_typeS potable[] = {
   {"quad", cons, 8},
   {"reloc", s_reloc, 0},
   {"rep", s_rept, 0},
-  {"rept", s_rept, 0},
+  {"rept", s_rept, 1},
   {"rva", s_rva, 4},
   {"sbttl", listing_title, 1},	/* Subtitle of listing.  */
 /* scl  */
@@ -585,6 +599,10 @@ pop_insert (const pseudo_typeS *table)
 #define cfi_pop_insert()	pop_insert(cfi_pseudo_table)
 #endif
 
+#ifndef scfi_pop_insert
+#define scfi_pop_insert()	pop_insert(scfi_pseudo_table)
+#endif
+
 static void
 pobegin (void)
 {
@@ -605,8 +623,18 @@ pobegin (void)
   pop_insert (potable);
 
   /* Now CFI ones.  */
-  pop_table_name = "cfi";
-  cfi_pop_insert ();
+#if defined (TARGET_USE_SCFI) && defined (TARGET_USE_GINSN)
+  if (flag_synth_cfi)
+    {
+      pop_table_name = "scfi";
+      scfi_pop_insert ();
+    }
+  else
+#endif
+    {
+      pop_table_name = "cfi";
+      cfi_pop_insert ();
+    }
 }
 
 static void
@@ -845,6 +873,29 @@ do_align (unsigned int n, char *fill, unsigned int len, unsigned int max)
     record_alignment (now_seg, n - OCTETS_PER_BYTE_POWER);
 }
 
+/* Find first <eol><next_char>NO_APP<eol>, if any, in the supplied buffer.
+   Return NULL if there's none, or else the position of <next_char>.  */
+static char *
+find_no_app (const char *s, char next_char)
+{
+  const char *start = s;
+  const char srch[] = { next_char, 'N', 'O', '_', 'A', 'P', 'P', '\0' };
+
+  for (;;)
+    {
+      char *ends = strstr (s, srch);
+
+      if (ends == NULL)
+	break;
+      if (is_end_of_line (ends[sizeof (srch) - 1])
+	  && (ends == start || is_end_of_line (ends[-1])))
+	return ends;
+      s = ends + sizeof (srch) - 1;
+    }
+
+  return NULL;
+}
+
 /* We read the file, putting things into a web that represents what we
    have been reading.  */
 void
@@ -881,7 +932,7 @@ read_a_source_file (const char *name)
 #endif
       while (input_line_pointer < buffer_limit)
 	{
-	  bool was_new_line;
+	  char was_new_line;
 	  /* We have more of this buffer to parse.  */
 
 	  /* We now have input_line_pointer->1st char of next line.
@@ -934,6 +985,61 @@ read_a_source_file (const char *name)
 		listing_newline (NULL);
 	    }
 #endif
+
+	  next_char = *input_line_pointer;
+	  if (was_new_line == 1
+             && (strchr (line_comment_chars, '#')
+		  ? next_char == '#'
+		  : next_char && strchr (line_comment_chars, next_char)))
+	    {
+	      /* Its a comment.  Check for APP followed by NO_APP.  */
+	      sb sbuf;
+	      char *ends;
+	      size_t len;
+
+	      s = input_line_pointer + 1;
+	      if (!startswith (s, "APP") || !is_end_of_line (s[3]))
+		{
+		  /* We ignore it.  Note: Not ignore_rest_of_line ()!  */
+		  while (s <= buffer_limit)
+		    if (is_end_of_line (*s++))
+		      break;
+		  input_line_pointer = s;
+		  continue;
+		}
+	      s += 4;
+
+	      ends = find_no_app (s, next_char);
+	      len = ends ? ends - s : buffer_limit - s;
+
+	      sb_build (&sbuf, len + 100);
+	      sb_add_buffer (&sbuf, s, len);
+	      if (!ends)
+		{
+		  /* The end of the #APP wasn't in this buffer.  We
+		     keep reading in buffers until we find the #NO_APP
+		     that goes with this #APP  There is one.  The specs
+		     guarantee it...  */
+		  do
+		    {
+		      buffer_limit = input_scrub_next_buffer (&buffer);
+		      if (!buffer_limit)
+			break;
+		      ends = find_no_app (buffer, next_char);
+		      len = ends ? ends - buffer : buffer_limit - buffer;
+		      sb_add_buffer (&sbuf, buffer, len);
+		    }
+		  while (!ends);
+		}
+	      sb_add_char (&sbuf, '\n');
+
+	      input_line_pointer = ends ? ends + 8 : NULL;
+	      input_scrub_include_sb (&sbuf, input_line_pointer, expanding_app);
+	      sb_kill (&sbuf);
+	      buffer_limit = input_scrub_next_buffer (&input_line_pointer);
+	      continue;
+	    }
+
 	  if (was_new_line)
 	    {
 	      line_label = NULL;
@@ -1244,13 +1350,14 @@ read_a_source_file (const char *name)
 
 	      temp = next_char - '0';
 
-	      if (nul_char == '"')
-		++ input_line_pointer;
-
 	      /* Read the whole number.  */
 	      while (ISDIGIT (*input_line_pointer))
 		{
 		  const long digit = *input_line_pointer - '0';
+
+		  /* Don't accept labels which look like octal numbers.  */
+		  if (temp == 0)
+		    break;
 		  if (temp > (INT_MAX - digit) / 10)
 		    {
 		      as_bad (_("local label too large near %s"), backup);
@@ -1296,48 +1403,13 @@ read_a_source_file (const char *name)
 	    }
 
 	  if (next_char && strchr (line_comment_chars, next_char))
-	    {			/* Its a comment.  Better say APP or NO_APP.  */
-	      sb sbuf;
-	      char *ends;
-	      size_t len;
-
+	    {
+	      /* Its a comment, ignore it.  Note: Not ignore_rest_of_line ()!  */
 	      s = input_line_pointer;
-	      if (!startswith (s, "APP\n"))
-		{
-		  /* We ignore it.  */
-		  ignore_rest_of_line ();
-		  continue;
-		}
-	      bump_line_counters ();
-	      s += 4;
-
-	      ends = strstr (s, "#NO_APP\n");
-	      len = ends ? ends - s : buffer_limit - s;
-
-	      sb_build (&sbuf, len + 100);
-	      sb_add_buffer (&sbuf, s, len);
-	      if (!ends)
-		{
-		  /* The end of the #APP wasn't in this buffer.  We
-		     keep reading in buffers until we find the #NO_APP
-		     that goes with this #APP  There is one.  The specs
-		     guarantee it...  */
-		  do
-		    {
-		      buffer_limit = input_scrub_next_buffer (&buffer);
-		      if (!buffer_limit)
-			break;
-		      ends = strstr (buffer, "#NO_APP\n");
-		      len = ends ? ends - buffer : buffer_limit - buffer;
-		      sb_add_buffer (&sbuf, buffer, len);
-		    }
-		  while (!ends);
-		}
-
-	      input_line_pointer = ends ? ends + 8 : NULL;
-	      input_scrub_include_sb (&sbuf, input_line_pointer, expanding_none);
-	      sb_kill (&sbuf);
-	      buffer_limit = input_scrub_next_buffer (&input_line_pointer);
+	      while (s <= buffer_limit)
+		if (is_end_of_line (*s++))
+		  break;
+	      input_line_pointer = s;
 	      continue;
 	    }
 
@@ -1366,6 +1438,9 @@ read_a_source_file (const char *name)
       bundle_lock_depth = 0;
     }
 #endif
+
+  if (flag_synth_cfi)
+    ginsn_data_end (symbol_temp_new_now ());
 
 #ifdef md_cleanup
   md_cleanup ();
@@ -1749,7 +1824,7 @@ s_comm_internal (int param,
       ignore_rest_of_line ();
       goto out;
     }
-  else if (temp != size || !exp.X_unsigned)
+  else if (temp != size || (!exp.X_unsigned && exp.X_add_number < 0))
     {
       as_warn (_("size (%ld) out of range, ignored"), (long) temp);
       ignore_rest_of_line ();
@@ -2380,7 +2455,7 @@ s_irp (int irpc)
 
   sb_new (&out);
 
-  err = expand_irp (irpc, 0, &s, &out, get_non_macro_line_sb);
+  err = expand_irp (irpc, 0, &s, &out, get_macro_line_sb);
   if (err != NULL)
     as_bad_where (file, line, "%s", err);
 
@@ -2539,7 +2614,7 @@ parse_align (int align_bytes)
   if (exp.X_op == O_absent)
     goto no_align;
 
-  if (!exp.X_unsigned)
+  if (!exp.X_unsigned && exp.X_add_number < 0)
     {
       as_warn (_("alignment negative; 0 assumed"));
       align = 0;
@@ -2784,6 +2859,7 @@ s_mri (int ignore ATTRIBUTE_UNUSED)
 #ifdef TC_M68K
       flag_m68k_mri = 1;
 #endif
+      lex_type['?'] = LEX_BEGIN_NAME | LEX_NAME;
     }
   else
     {
@@ -2791,6 +2867,7 @@ s_mri (int ignore ATTRIBUTE_UNUSED)
 #ifdef TC_M68K
       flag_m68k_mri = 0;
 #endif
+      lex_type['?'] = LEX_QM;
     }
 
   /* Operator precedence changes in m68k MRI mode, so we need to
@@ -3021,8 +3098,8 @@ s_purgem (int ignore ATTRIBUTE_UNUSED)
       SKIP_WHITESPACE ();
       c = get_symbol_name (& name);
       delete_macro (name);
-      *input_line_pointer = c;
-      SKIP_WHITESPACE_AFTER_NAME ();
+      restore_line_pointer (c);
+      SKIP_WHITESPACE ();
     }
   while (*input_line_pointer++ == ',');
 
@@ -3044,19 +3121,21 @@ s_bad_end (int endr)
 /* Handle the .rept pseudo-op.  */
 
 void
-s_rept (int ignore ATTRIBUTE_UNUSED)
+s_rept (int expand_count)
 {
   size_t count;
 
   count = (size_t) get_absolute_expression ();
 
-  do_repeat (count, "REPT", "ENDR", NULL);
+  do_repeat (count, "REPT", "ENDR", expand_count ? "" : NULL);
 }
 
 /* This function provides a generic repeat block implementation.   It allows
    different directives to be used as the start/end keys.  Any text matching
    the optional EXPANDER in the block is replaced by the remaining iteration
-   count.  */
+   count.  Except when EXPANDER is the empty string, in which case \+ will
+   be looked for (as also recognized in macros as well as .irp and .irpc),
+   where the replacement will be the number of iterations done so far.  */
 
 void
 do_repeat (size_t count, const char *start, const char *end,
@@ -3065,9 +3144,9 @@ do_repeat (size_t count, const char *start, const char *end,
   sb one;
   sb many;
 
-  if (((ssize_t) count) < 0)
+  if (count > 0x7fffffff)
     {
-      as_bad (_("negative count for %s - ignored"), start);
+      as_bad (_("excessive count %zu for %s - ignored"), count, start);
       count = 0;
     }
 
@@ -3079,7 +3158,59 @@ do_repeat (size_t count, const char *start, const char *end,
       return;
     }
 
-  if (expander == NULL || strstr (one.ptr, expander) == NULL)
+  sb_terminate (&one);
+
+  if (expander != NULL && !*expander && strstr (one.ptr, "\\+") != NULL)
+    {
+      /* The 3 here and below are arbitrary, added in an attempt to limit
+	 re-allocation needs in sb_add_...() for moderate repeat counts.  */
+      sb_build (&many, count * (one.len + 3));
+
+      for (size_t done = 0; count-- > 0; ++done)
+	{
+	  const char *ptr, *bs;
+	  sb processed;
+
+	  sb_build (&processed, one.len + 3);
+
+	  for (ptr = one.ptr; (bs = strchr (ptr, '\\')) != NULL; )
+	    {
+	      sb_add_buffer (&processed, ptr, bs - ptr);
+	      switch (bs[1])
+		{
+		  char scratch[24];
+
+		default:
+		  sb_add_char (&processed, '\\');
+		  sb_add_char (&processed, bs[1]);
+		  ptr = bs + 2;
+		  break;
+
+		case '\0':
+		  as_warn (_("`\\' at end of line/statement; ignored"));
+		  ptr = bs + 1;
+		  break;
+
+		case '\\':
+		  sb_add_char (&processed, '\\');
+		  ptr = bs + 2;
+		  break;
+
+		case '+':
+		  snprintf (scratch, ARRAY_SIZE (scratch), "%zu", done);
+		  sb_add_string (&processed, scratch);
+		  ptr = bs + 2;
+		  break;
+		}
+	    }
+
+	  sb_add_string (&processed, ptr);
+
+	  sb_add_sb (&many, &processed);
+	  sb_kill (&processed);
+	}
+    }
+  else if (expander == NULL || !*expander || strstr (one.ptr, expander) == NULL)
     {
       sb_build (&many, count * one.len);
       while (count-- > 0)
@@ -3167,9 +3298,8 @@ assign_symbol (char *name, int mode)
 	  symbol_set_frag (symbolP, dummy_frag);
 	}
 #endif
-#if defined (OBJ_COFF) && !defined (TE_PE)
-      /* "set" symbols are local unless otherwise specified.  */
-      SF_SET_LOCAL (symbolP);
+#ifdef obj_assign_symbol
+      obj_assign_symbol (symbolP);
 #endif
     }
 
@@ -3464,10 +3594,6 @@ s_nop (int ignore ATTRIBUTE_UNUSED)
   md_flush_pending_output ();
 #endif
 
-#ifdef md_cons_align
-  md_cons_align (1);
-#endif
-
   SKIP_WHITESPACE ();
   expression (&exp);
   demand_empty_rest_of_line ();
@@ -3486,8 +3612,7 @@ s_nop (int ignore ATTRIBUTE_UNUSED)
 #endif
       /* md_assemble might modify its argument, so
 	 we must pass it a string that is writable.  */
-      if (asprintf (&nop, "%s", md_single_noop_insn) < 0)
-	as_fatal ("%s", xstrerror (errno));
+      nop = xasprintf ("%s", md_single_noop_insn);
 
       /* Some targets assume that they can update input_line_pointer
 	 inside md_assemble, and, worse, that they can leave it
@@ -3515,10 +3640,6 @@ s_nops (int ignore ATTRIBUTE_UNUSED)
 
 #ifdef md_flush_pending_output
   md_flush_pending_output ();
-#endif
-
-#ifdef md_cons_align
-  md_cons_align (1);
 #endif
 
   SKIP_WHITESPACE ();
@@ -3905,7 +4026,7 @@ demand_empty_rest_of_line (void)
   /* Return pointing just after end-of-line.  */
 }
 
-/* Silently advance to the end of line.  Use this after already having
+/* Silently advance to the end of a statement.  Use this after already having
    issued an error about something bad.  Like demand_empty_rest_of_line,
    this function may leave input_line_pointer one after buffer_limit;
    Don't call it from within expression parsing code in an attempt to
@@ -3915,9 +4036,9 @@ void
 ignore_rest_of_line (void)
 {
   while (input_line_pointer <= buffer_limit)
-    if (is_end_of_line[(unsigned char) *input_line_pointer++])
+    if (is_end_of_stmt (*input_line_pointer++))
       break;
-  /* Return pointing just after end-of-line.  */
+  /* Return pointing just after end-of-statement.  */
 }
 
 /* Sets frag for given symbol to zero_address_frag, except when the
@@ -3948,7 +4069,7 @@ pseudo_set (symbolS *symbolP)
   if (!S_IS_FORWARD_REF (symbolP))
     (void) expression (&exp);
   else
-    (void) deferred_expression (&exp);
+    (void) expr (0, &exp, expr_defer_incl_dot);
 
   if (exp.X_op == O_illegal)
     as_bad (_("illegal expression"));
@@ -4000,6 +4121,10 @@ pseudo_set (symbolS *symbolP)
 	  return;
 	}
 #endif
+      /* Make sure symbol_equated_p() recognizes the symbol as an equate.  */
+      exp.X_add_symbol = make_expr_symbol (&exp);
+      exp.X_add_number = 0;
+      exp.X_op = O_symbol;
       symbol_set_value_expression (symbolP, &exp);
       S_SET_SEGMENT (symbolP, reg_section);
       set_zero_frag (symbolP);
@@ -4185,6 +4310,12 @@ cons_worker (int nbytes,	/* 1=.byte, 2=.word, 4=.long.  */
 
   if (flag_mri)
     mri_comment_end (stop, stopc);
+
+  /* Disallow hand-crafting instructions using .byte.  FIXME - what about
+     .word, .long etc ?  */
+  if (flag_synth_cfi && frchain_now && frchain_now->frch_ginsn_data
+      && nbytes == 1)
+    as_bad (_("SCFI: hand-crafting instructions not supported"));
 }
 
 void
@@ -4220,7 +4351,7 @@ s_reloc (int ignore ATTRIBUTE_UNUSED)
     { "64", BFD_RELOC_64 }
   };
 
-  reloc = XNEW (struct reloc_list);
+  reloc = notes_alloc (sizeof (*reloc));
 
   if (flag_mri)
     stop = mri_comment_field (&stopc);
@@ -4277,7 +4408,7 @@ s_reloc (int ignore ATTRIBUTE_UNUSED)
     }
   else
     reloc->u.a.howto = bfd_reloc_name_lookup (stdoutput, r_name);
-  *input_line_pointer = c;
+  restore_line_pointer (c);
   if (reloc->u.a.howto == NULL)
     {
       as_bad (_("unrecognized reloc type"));
@@ -4285,7 +4416,7 @@ s_reloc (int ignore ATTRIBUTE_UNUSED)
     }
 
   exp.X_op = O_absent;
-  SKIP_WHITESPACE_AFTER_NAME ();
+  SKIP_WHITESPACE ();
   if (*input_line_pointer == ',')
     {
       ++input_line_pointer;
@@ -4299,7 +4430,6 @@ s_reloc (int ignore ATTRIBUTE_UNUSED)
       as_bad (_("bad reloc expression"));
     err_out:
       ignore_rest_of_line ();
-      free (reloc);
       if (flag_mri)
 	mri_comment_end (stop, stopc);
       return;
@@ -4353,8 +4483,7 @@ emit_expr_with_reloc (expressionS *exp,
     return;
 
   frag_grow (nbytes);
-  dot_value = frag_now_fix ();
-  dot_frag = frag_now;
+  symbol_set_value_now (&dot_symbol);
 
 #ifndef NO_LISTING
 #ifdef OBJ_ELF
@@ -5334,6 +5463,439 @@ s_leb128 (int sign)
   demand_empty_rest_of_line ();
 }
 
+#if defined (TE_PE) && defined (O_secrel)
+
+/* Generate the appropriate fragments for a given expression to emit a
+   cv_comp value.  SIGN is 1 for cv_scomp, 0 for cv_ucomp.  */
+
+static void
+emit_cv_comp_expr (expressionS *exp, int sign)
+{
+  operatorT op = exp->X_op;
+
+  if (op == O_absent || op == O_illegal)
+    {
+      as_warn (_("zero assumed for missing expression"));
+      exp->X_add_number = 0;
+      op = O_constant;
+    }
+  else if (op == O_big)
+    {
+      as_bad (_("number invalid"));
+      exp->X_add_number = 0;
+      op = O_constant;
+    }
+  else if (op == O_register)
+    {
+      as_warn (_("register value used as expression"));
+      op = O_constant;
+    }
+
+  if (now_seg == absolute_section)
+    {
+      if (op != O_constant || exp->X_add_number != 0)
+	as_bad (_("attempt to store value in absolute section"));
+      abs_section_offset++;
+      return;
+    }
+
+  if ((op != O_constant || exp->X_add_number != 0) && in_bss ())
+    as_bad (_("attempt to store non-zero value in section `%s'"),
+	    segment_name (now_seg));
+
+  /* Let the backend know that subsequent data may be byte aligned.  */
+#ifdef md_cons_align
+  md_cons_align (1);
+#endif
+
+  if (op == O_constant)
+    {
+      offsetT value = exp->X_add_number;
+      unsigned int size;
+      char *p;
+
+      /* If we've got a constant, emit the thing directly right now.  */
+
+      size = sizeof_cv_comp (value, sign);
+      p = frag_more (size);
+      if (output_cv_comp (p, value, sign) > size)
+	abort ();
+    }
+  else
+    {
+      /* Otherwise, we have to create a variable sized fragment and
+	 resolve things later.  */
+
+      frag_var (rs_cv_comp, 4, 0, sign, make_expr_symbol (exp), 0, NULL);
+    }
+}
+
+/* Parse the .cv_ucomp and .cv_scomp pseudos.  */
+
+static void
+s_cv_comp (int sign)
+{
+  expressionS exp;
+
+#ifdef md_flush_pending_output
+  md_flush_pending_output ();
+#endif
+
+  do
+    {
+      expression (&exp);
+      emit_cv_comp_expr (&exp, sign);
+    }
+  while (*input_line_pointer++ == ',');
+
+  input_line_pointer--;
+  demand_empty_rest_of_line ();
+}
+
+#endif /* TE_PE && O_secrel */
+
+/* Code for handling base64 encoded strings.
+   Based upon code in sharutils' lib/base64.c source file, written by
+   Simon Josefsson.  Which was partially adapted from GNU MailUtils
+   (mailbox/filter_trans.c, as of 2004-11-28) and improved by review
+   from Paul Eggert, Bruno Haible, and Stepan Kasal.  */
+
+#define B64(_)           \
+  (  (_) == 'A' ? 0      \
+   : (_) == 'B' ? 1      \
+   : (_) == 'C' ? 2      \
+   : (_) == 'D' ? 3      \
+   : (_) == 'E' ? 4      \
+   : (_) == 'F' ? 5      \
+   : (_) == 'G' ? 6      \
+   : (_) == 'H' ? 7      \
+   : (_) == 'I' ? 8      \
+   : (_) == 'J' ? 9      \
+   : (_) == 'K' ? 10     \
+   : (_) == 'L' ? 11     \
+   : (_) == 'M' ? 12     \
+   : (_) == 'N' ? 13     \
+   : (_) == 'O' ? 14     \
+   : (_) == 'P' ? 15     \
+   : (_) == 'Q' ? 16     \
+   : (_) == 'R' ? 17     \
+   : (_) == 'S' ? 18     \
+   : (_) == 'T' ? 19     \
+   : (_) == 'U' ? 20     \
+   : (_) == 'V' ? 21     \
+   : (_) == 'W' ? 22     \
+   : (_) == 'X' ? 23     \
+   : (_) == 'Y' ? 24     \
+   : (_) == 'Z' ? 25     \
+   : (_) == 'a' ? 26     \
+   : (_) == 'b' ? 27     \
+   : (_) == 'c' ? 28     \
+   : (_) == 'd' ? 29     \
+   : (_) == 'e' ? 30     \
+   : (_) == 'f' ? 31     \
+   : (_) == 'g' ? 32     \
+   : (_) == 'h' ? 33     \
+   : (_) == 'i' ? 34     \
+   : (_) == 'j' ? 35     \
+   : (_) == 'k' ? 36     \
+   : (_) == 'l' ? 37     \
+   : (_) == 'm' ? 38     \
+   : (_) == 'n' ? 39     \
+   : (_) == 'o' ? 40     \
+   : (_) == 'p' ? 41     \
+   : (_) == 'q' ? 42     \
+   : (_) == 'r' ? 43     \
+   : (_) == 's' ? 44     \
+   : (_) == 't' ? 45     \
+   : (_) == 'u' ? 46     \
+   : (_) == 'v' ? 47     \
+   : (_) == 'w' ? 48     \
+   : (_) == 'x' ? 49     \
+   : (_) == 'y' ? 50     \
+   : (_) == 'z' ? 51     \
+   : (_) == '0' ? 52     \
+   : (_) == '1' ? 53     \
+   : (_) == '2' ? 54     \
+   : (_) == '3' ? 55     \
+   : (_) == '4' ? 56     \
+   : (_) == '5' ? 57     \
+   : (_) == '6' ? 58     \
+   : (_) == '7' ? 59     \
+   : (_) == '8' ? 60     \
+   : (_) == '9' ? 61     \
+   : (_) == '+' ? 62     \
+   : (_) == '/' ? 63     \
+   : -1)
+
+static const signed char b64[0x100] =
+{
+  B64 (0),   B64 (1),   B64 (2),   B64 (3),
+  B64 (4),   B64 (5),   B64 (6),   B64 (7),
+  B64 (8),   B64 (9),   B64 (10),  B64 (11),
+  B64 (12),  B64 (13),  B64 (14),  B64 (15),
+  B64 (16),  B64 (17),  B64 (18),  B64 (19),
+  B64 (20),  B64 (21),  B64 (22),  B64 (23),
+  B64 (24),  B64 (25),  B64 (26),  B64 (27),
+  B64 (28),  B64 (29),  B64 (30),  B64 (31),
+  B64 (32),  B64 (33),  B64 (34),  B64 (35),
+  B64 (36),  B64 (37),  B64 (38),  B64 (39),
+  B64 (40),  B64 (41),  B64 (42),  B64 (43),
+  B64 (44),  B64 (45),  B64 (46),  B64 (47),
+  B64 (48),  B64 (49),  B64 (50),  B64 (51),
+  B64 (52),  B64 (53),  B64 (54),  B64 (55),
+  B64 (56),  B64 (57),  B64 (58),  B64 (59),
+  B64 (60),  B64 (61),  B64 (62),  B64 (63),
+  B64 (64),  B64 (65),  B64 (66),  B64 (67),
+  B64 (68),  B64 (69),  B64 (70),  B64 (71),
+  B64 (72),  B64 (73),  B64 (74),  B64 (75),
+  B64 (76),  B64 (77),  B64 (78),  B64 (79),
+  B64 (80),  B64 (81),  B64 (82),  B64 (83),
+  B64 (84),  B64 (85),  B64 (86),  B64 (87),
+  B64 (88),  B64 (89),  B64 (90),  B64 (91),
+  B64 (92),  B64 (93),  B64 (94),  B64 (95),
+  B64 (96),  B64 (97),  B64 (98),  B64 (99),
+  B64 (100), B64 (101), B64 (102), B64 (103),
+  B64 (104), B64 (105), B64 (106), B64 (107),
+  B64 (108), B64 (109), B64 (110), B64 (111),
+  B64 (112), B64 (113), B64 (114), B64 (115),
+  B64 (116), B64 (117), B64 (118), B64 (119),
+  B64 (120), B64 (121), B64 (122), B64 (123),
+  B64 (124), B64 (125), B64 (126), B64 (127),
+  B64 (128), B64 (129), B64 (130), B64 (131),
+  B64 (132), B64 (133), B64 (134), B64 (135),
+  B64 (136), B64 (137), B64 (138), B64 (139),
+  B64 (140), B64 (141), B64 (142), B64 (143),
+  B64 (144), B64 (145), B64 (146), B64 (147),
+  B64 (148), B64 (149), B64 (150), B64 (151),
+  B64 (152), B64 (153), B64 (154), B64 (155),
+  B64 (156), B64 (157), B64 (158), B64 (159),
+  B64 (160), B64 (161), B64 (162), B64 (163),
+  B64 (164), B64 (165), B64 (166), B64 (167),
+  B64 (168), B64 (169), B64 (170), B64 (171),
+  B64 (172), B64 (173), B64 (174), B64 (175),
+  B64 (176), B64 (177), B64 (178), B64 (179),
+  B64 (180), B64 (181), B64 (182), B64 (183),
+  B64 (184), B64 (185), B64 (186), B64 (187),
+  B64 (188), B64 (189), B64 (190), B64 (191),
+  B64 (192), B64 (193), B64 (194), B64 (195),
+  B64 (196), B64 (197), B64 (198), B64 (199),
+  B64 (200), B64 (201), B64 (202), B64 (203),
+  B64 (204), B64 (205), B64 (206), B64 (207),
+  B64 (208), B64 (209), B64 (210), B64 (211),
+  B64 (212), B64 (213), B64 (214), B64 (215),
+  B64 (216), B64 (217), B64 (218), B64 (219),
+  B64 (220), B64 (221), B64 (222), B64 (223),
+  B64 (224), B64 (225), B64 (226), B64 (227),
+  B64 (228), B64 (229), B64 (230), B64 (231),
+  B64 (232), B64 (233), B64 (234), B64 (235),
+  B64 (236), B64 (237), B64 (238), B64 (239),
+  B64 (240), B64 (241), B64 (242), B64 (243),
+  B64 (244), B64 (245), B64 (246), B64 (247),
+  B64 (248), B64 (249), B64 (250), B64 (251),
+  B64 (252), B64 (253), B64 (254), B64 (255)
+};
+
+static bool
+is_base64_char (unsigned int c)
+{
+  return (c < 0x100) && (b64[c] != -1);
+}
+
+static void
+decode_base64_and_append (unsigned int b[4], int len)
+{
+  gas_assert (len > 1);
+
+  FRAG_APPEND_1_CHAR ((b64[b[0]] << 2) | (b64[b[1]] >> 4));
+
+  if (len == 2)
+    return; /* FIXME: Check for unused bits in b[1] ?  */
+
+  FRAG_APPEND_1_CHAR (((b64[b[1]] << 4) & 0xf0) | (b64[b[2]] >> 2));
+
+  if (len == 3)
+    return; /* FIXME: Check for unused bits in b[2] ?  */
+
+  FRAG_APPEND_1_CHAR (((b64[b[2]] << 6) & 0xc0) | b64[b[3]]);
+}
+
+/* Accept one or more comma separated, base64 encoded strings.  Decode them
+   and store them at the current point in the current section.  The strings
+   must be enclosed in double quotes.  Line breaks, quoted characters and
+   escaped characters are not allowed.  Only the characters "A-Za-z0-9+/" are
+   accepted inside the string.  The string must be a multiple of four
+   characters in length.  If the encoded string does not fit this requirement
+   it may use one or more '=' characters at the end as padding.  */
+
+void
+s_base64 (int dummy ATTRIBUTE_UNUSED)
+{
+  unsigned int c;
+  unsigned long num_octets = 0;
+
+  /* If we have been switched into the abs_section then we
+     will not have an obstack onto which we can hang strings.  */
+  if (now_seg == absolute_section)
+    {
+      as_bad (_("base64 strings must be placed into a section"));
+      ignore_rest_of_line ();
+      return;
+    }
+
+  if (is_it_end_of_statement ())
+    {
+      as_bad (_("a string must follow the .base64 pseudo-op"));
+      return;
+    }
+
+#ifdef md_flush_pending_output
+  md_flush_pending_output ();
+#endif
+
+#ifdef md_cons_align
+  md_cons_align (1);
+#endif
+
+  do
+    {
+      SKIP_ALL_WHITESPACE ();
+
+      c = * input_line_pointer ++;
+
+      if (c != '"')
+	{
+	  as_bad (_("expected double quote enclosed string as argument to .base64 pseudo-op"));
+	  ignore_rest_of_line ();
+	  return;
+	}
+
+      /* Read a block of four base64 encoded characters.  */
+      int i;
+      unsigned int b[4];
+      bool seen_equals = false;
+
+    loop:
+      for (i = 0; i < 4; i++)
+      	{
+	  c = * input_line_pointer ++;
+
+	  if (c >= 256 || is_end_of_line [c])
+	    {
+	      as_bad (_("end of line encountered inside .base64 string"));
+	      ignore_rest_of_line ();
+	      return;
+	    }
+
+	  if (c == '"')
+	    {
+	      /* We allow this.  But only if there were enough
+		 characters to form a valid base64 encoding.  */
+	      if (i > 1)
+		{
+		  as_warn (_(".base64 string terminated early"));
+		  -- input_line_pointer;
+		  break;
+		}
+
+	      as_bad (_(".base64 string terminated unexpectedly"));
+	      ignore_rest_of_line ();
+	      return;
+	    }
+
+	  if (seen_equals && c != '=')
+	    {
+	      as_bad (_("equals character only allowed at end of .base64 string"));
+	      ignore_rest_of_line ();
+	      return;
+	    }
+
+	  if (c == '=')
+	    {
+	      if (i == 0)
+		{
+		  as_bad (_("the equals character cannot start a block of four base64 encoded bytes"));
+		  ignore_rest_of_line ();
+		  return;
+		}
+	      else if (i == 1)
+		{
+		  as_bad (_("the equals character cannot be the second character in a block of four base64 encoded bytes"));
+		  ignore_rest_of_line ();
+		  return;
+		}
+
+	      seen_equals = true;
+	    }
+	  else if (! is_base64_char (c))
+	    {
+	      if (ISPRINT (c))
+		as_bad (_("invalid character '%c' found inside .base64 string"), c);
+	      else
+		as_bad (_("invalid character %#x found inside .base64 string"), c);
+	      ignore_rest_of_line ();
+	      return;
+	    }
+
+	  b[i] = c;
+	}
+
+      if (seen_equals && i == 4)
+	{
+	  -- i;
+	  if (b[2] == '=')
+	    -- i;
+	}
+
+      /* We have a block of up to four valid base64 encoded bytes.  */
+      decode_base64_and_append (b, i);
+      num_octets += (i - 1);
+
+      /* Check the next character.  */
+      c = * input_line_pointer ++;
+
+      if (is_base64_char (c))
+	{
+	  if (seen_equals)
+	    {
+	      as_bad (_("no base64 characters expected after '=' padding characters"));
+	      ignore_rest_of_line ();
+	      return;
+	    }
+
+	  -- input_line_pointer;
+	  goto loop;
+	}
+      else if (c != '"')
+	{
+	  as_bad (_(".base64 string must have a terminating double quote character"));
+	  ignore_rest_of_line ();
+	  return;
+	}
+
+      SKIP_ALL_WHITESPACE ();
+      
+      c = * input_line_pointer ++;
+    }
+  while (c == ',');
+
+  /* Make sure that we have not skipped the EOL marker.  */
+  -- input_line_pointer;
+
+  while (num_octets % OCTETS_PER_BYTE)
+    {
+      /* We have finished emiting the octets for this .base64 pseudo-op, but
+	 we have not filled up enough bytes for the target architecture.  So
+	 we emit padding octets here.  This is done after all of the arguments
+	 to the pseudo-op have been processed, rather than at the end of each
+	 argument, as it is likely that the user wants the arguments to be
+	 contiguous.  */
+      FRAG_APPEND_1_CHAR (0);
+      ++ num_octets;
+    }
+
+  demand_empty_rest_of_line ();
+}
+
 static void
 stringer_append_char (int c, int bitsize)
 {
@@ -6044,6 +6606,8 @@ do_s_func (int end_p, const char *default_prefix)
       if (debug_type == DEBUG_STABS)
 	stabs_generate_asm_endfunc (current_name, current_label);
 
+      free (current_name);
+      free (current_label);
       current_name = current_label = NULL;
     }
   else /* ! end_p */
@@ -6060,27 +6624,21 @@ do_s_func (int end_p, const char *default_prefix)
 
       delim1 = get_symbol_name (& name);
       name = xstrdup (name);
-      *input_line_pointer = delim1;
-      SKIP_WHITESPACE_AFTER_NAME ();
+      restore_line_pointer (delim1);
+      SKIP_WHITESPACE ();
       if (*input_line_pointer != ',')
 	{
 	  if (default_prefix)
-	    {
-	      if (asprintf (&label, "%s%s", default_prefix, name) == -1)
-		as_fatal ("%s", xstrerror (errno));
-	    }
+	    label = xasprintf ("%s%s", default_prefix, name);
 	  else
 	    {
 	      char leading_char = bfd_get_symbol_leading_char (stdoutput);
 	      /* Missing entry point, use function's name with the leading
 		 char prepended.  */
 	      if (leading_char)
-		{
-		  if (asprintf (&label, "%c%s", leading_char, name) == -1)
-		    as_fatal ("%s", xstrerror (errno));
-		}
+		label = xasprintf ("%c%s", leading_char, name);
 	      else
-		label = name;
+		label = xstrdup (name);
 	    }
 	}
       else

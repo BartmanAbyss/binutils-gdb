@@ -1,4 +1,4 @@
-/* Copyright (C) 2021-2023 Free Software Foundation, Inc.
+/* Copyright (C) 2021-2025 Free Software Foundation, Inc.
    Contributed by Oracle.
 
    This file is part of GNU Binutils.
@@ -151,6 +151,14 @@ Elf::Elf (char *filename) : DbeMessages (), Data_window (filename)
   gnu_debug_file = NULL;
   dbeFile = NULL;
   abfd = NULL;
+  bfd_symcnt = -1;
+  bfd_dynsymcnt = -1;
+  bfd_synthcnt = -1;
+  bfd_sym = NULL;
+  bfd_dynsym = NULL;
+  bfd_synthsym = NULL;
+  synthsym = NULL;
+
   if (bfd_status != BFD_INIT_MAGIC)
     {
       status = ELF_ERR_CANT_OPEN_FILE;
@@ -162,6 +170,7 @@ Elf::Elf (char *filename) : DbeMessages (), Data_window (filename)
       status = ELF_ERR_CANT_OPEN_FILE;
       return;
     }
+  abfd->flags |= BFD_DECOMPRESS;
   if (!bfd_check_format (abfd, bfd_object))
     {
       bfd_close (abfd);
@@ -256,9 +265,14 @@ Elf::~Elf ()
       for (int i = 0; i < (int) ehdrp->e_shnum; i++)
 	{
 	  Elf_Data *p = data[i];
-	  if (p && !mmap_on_file && (p->d_flags & SHF_SUNW_ABSENT) == 0)
-	    free (p->d_buf);
-	  delete p;
+	  if (p)
+	    {
+	      if (p->d_flags & SEC_DECOMPRESSED)
+		free (p->d_buf);
+	      else if (!mmap_on_file && (p->d_flags & SHF_SUNW_ABSENT) == 0)
+		free (p->d_buf);
+	      delete p;
+	    }
 	}
       free (data);
     }
@@ -270,6 +284,10 @@ Elf::~Elf ()
   delete elfSymbols;
   delete gnu_debug_file;
   delete dbeFile;
+  delete synthsym;
+  free (bfd_sym);
+  free (bfd_dynsym);
+  free (bfd_synthsym);
   if (abfd)
     bfd_close (abfd);
 }
@@ -392,7 +410,7 @@ Elf::elf_getdata (unsigned int sec)
 {
   if (data == NULL)
     {
-      data = (Elf_Data **) malloc (ehdrp->e_shnum * sizeof (Elf_Data *));
+      data = (Elf_Data **) xmalloc (ehdrp->e_shnum * sizeof (Elf_Data *));
       for (int i = 0; i < (int) ehdrp->e_shnum; i++)
 	data[i] = NULL;
     }
@@ -430,11 +448,28 @@ Elf::elf_getdata (unsigned int sec)
 		}
 	    }
 	}
-      edta->d_buf = get_data (shdr->sh_offset, (size_t) shdr->sh_size, NULL);
-      edta->d_flags = shdr->sh_flags;
-      edta->d_size = ((edta->d_buf == NULL) || (shdr->sh_type == SHT_NOBITS)) ? 0 : shdr->sh_size;
-      edta->d_off = shdr->sh_offset;
-      edta->d_align = shdr->sh_addralign;
+
+      sec_ptr sp = shdr->bfd_section;
+      if (sp && bfd_is_section_compressed (abfd, sp))
+	{
+	  bfd_byte *p = NULL;
+	  if (bfd_get_full_section_contents (abfd, sp, &p))
+	    {
+	      edta->d_buf = p;
+	      edta->d_size = p ? sp->size : 0;
+	      edta->d_off = 0;
+	      edta->d_flags = shdr->sh_flags | SEC_DECOMPRESSED;
+	      edta->d_align = shdr->sh_addralign;
+	    }
+	}
+      else
+	{
+	  edta->d_buf = get_data (shdr->sh_offset, (size_t) shdr->sh_size, NULL);
+	  edta->d_flags = shdr->sh_flags;
+	  edta->d_size = ((edta->d_buf == NULL) || (shdr->sh_type == SHT_NOBITS)) ? 0 : shdr->sh_size;
+	  edta->d_off = shdr->sh_offset;
+	  edta->d_align = shdr->sh_addralign;
+	}
     }
   return edta;
 }
@@ -719,6 +754,87 @@ Elf::find_ancillary_files (char *lo_name)
 	    }
 	}
     }
+  return NULL;
+}
+
+void
+Elf::get_bfd_symbols()
+{
+  if (bfd_symcnt < 0)
+    {
+      if ((bfd_get_file_flags (abfd) & HAS_SYMS) != 0)
+	bfd_symcnt = bfd_get_symtab_upper_bound (abfd);
+      if (bfd_symcnt > 0)
+	{
+	  bfd_sym = (asymbol **) xmalloc (bfd_symcnt);
+	  bfd_symcnt = bfd_canonicalize_symtab (abfd, bfd_sym);
+	  if (bfd_symcnt < 0)
+	    {
+	      free (bfd_sym);
+	      bfd_sym = NULL;
+	    }
+	}
+      else
+	bfd_symcnt = 0;
+    }
+
+  if (bfd_dynsymcnt < 0)
+    {
+      bfd_dynsymcnt = bfd_get_dynamic_symtab_upper_bound (abfd);
+      if (bfd_dynsymcnt > 0)
+	{
+	  bfd_dynsym = (asymbol **) xmalloc (bfd_dynsymcnt);
+	  bfd_dynsymcnt = bfd_canonicalize_dynamic_symtab (abfd, bfd_dynsym);
+	  if (bfd_dynsymcnt < 0)
+	    {
+	      free (bfd_dynsym);
+	      bfd_dynsym = NULL;
+	    }
+	}
+      else
+	bfd_dynsymcnt = 0;
+    }
+  if (bfd_synthcnt < 0)
+    {
+      bfd_synthcnt = bfd_get_synthetic_symtab (abfd, bfd_symcnt, bfd_sym,
+				bfd_dynsymcnt, bfd_dynsym, &bfd_synthsym);
+      if (bfd_synthcnt < 0)
+	bfd_synthcnt = 0;
+    }
+}
+
+static int
+cmp_sym_addr (const void *a, const void *b)
+{
+  asymbol *sym1 = *((asymbol **) a);
+  asymbol *sym2 = *((asymbol **) b);
+  uint64_t a1 = sym1->value;
+  uint64_t a2 = sym2->value;
+  if (sym1->section)
+    a1 += sym1->section->vma;
+  if (sym2->section)
+    a2 += sym2->section->vma;
+  return a1 < a2 ? -1 : (a1 == a2 ? 0 : 1);
+}
+
+const char *
+Elf::get_funcname_in_plt (uint64_t pc)
+{
+  if (synthsym == NULL)
+    {
+      get_bfd_symbols();
+      synthsym = new Vector<asymbol *> (bfd_synthcnt + 1);
+      for (long i = 0; i < bfd_synthcnt; i++)
+	synthsym->append (bfd_synthsym + i);
+      synthsym->sort (cmp_sym_addr);
+    }
+
+  asymbol sym, *symp = &sym;
+  sym.section = NULL;
+  sym.value = pc;
+  long ind = synthsym->bisearch (0, -1, &symp, cmp_sym_addr);
+  if (ind >= 0)
+    return synthsym->get (ind)->name;
   return NULL;
 }
 

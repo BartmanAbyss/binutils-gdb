@@ -1,6 +1,6 @@
 /* GDB CLI command scripting.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,7 +17,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "event-top.h"
 #include "value.h"
 #include <ctype.h>
 
@@ -30,12 +30,11 @@
 #include "cli/cli-decode.h"
 #include "cli/cli-script.h"
 #include "cli/cli-style.h"
-#include "gdbcmd.h"
 
 #include "extension.h"
 #include "interps.h"
 #include "compile/compile.h"
-#include "gdbsupport/gdb_string_view.h"
+#include <string_view>
 #include "python/python.h"
 #include "guile/guile.h"
 
@@ -103,7 +102,7 @@ private:
   std::string m_command_line;
 
   /* The arguments.  Each element points inside M_COMMAND_LINE.  */
-  std::vector<gdb::string_view> m_args;
+  std::vector<std::string_view> m_args;
 };
 
 /* The stack of arguments passed to user defined functions.  We need a
@@ -1521,6 +1520,8 @@ do_document_command (const char *comname, int from_tty,
   lookup_cmd_composition (comfull, &alias, &prefix_cmd, &c);
   if (c == nullptr)
     error (_("Undefined command: \"%s\"."), comfull);
+  else if (c == CMD_LIST_AMBIGUOUS)
+    error (_("Ambiguous command: \"%s\"."), comfull);
 
   if (c->theclass != class_user
       && (alias == nullptr || alias->theclass != class_alias))
@@ -1666,7 +1667,7 @@ show_user_1 (struct cmd_list_element *c, const char *prefix, const char *name,
 
       gdb_printf (stream, "User %scommand \"",
 		  c->is_prefix () ? "prefix" : "");
-      fprintf_styled (stream, title_style.style (), "%s%s",
+      fprintf_styled (stream, command_style.style (), "%s%s",
 		      prefix, name);
       gdb_printf (stream, "\":\n");
       if (cmdlines)

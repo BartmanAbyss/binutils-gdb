@@ -1,6 +1,6 @@
 /* Support for printing C++ values for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2023 Free Software Foundation, Inc.
+   Copyright (C) 1986-2024 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -17,14 +17,15 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include "defs.h"
+#include "event-top.h"
+#include "extract-store-integer.h"
 #include "gdbsupport/gdb_obstack.h"
 #include "symtab.h"
 #include "gdbtypes.h"
 #include "expression.h"
 #include "value.h"
 #include "command.h"
-#include "gdbcmd.h"
+#include "cli/cli-cmds.h"
 #include "demangle.h"
 #include "annotate.h"
 #include "c-lang.h"
@@ -259,20 +260,20 @@ cp_print_value_fields (struct value *val, struct ui_file *stream,
 	  annotate_field_value ();
 
 	  if (!type->field (i).is_static ()
-	      && TYPE_FIELD_PACKED (type, i))
+	      && type->field (i).is_packed ())
 	    {
 	      struct value *v;
 
 	      /* Bitfields require special handling, especially due to
 		 byte order problems.  */
-	      if (TYPE_FIELD_IGNORE (type, i))
+	      if (type->field (i).is_ignored ())
 		{
 		  fputs_styled ("<optimized out or zero length>",
 				metadata_style.style (), stream);
 		}
 	      else if (val->bits_synthetic_pointer
 		       (type->field (i).loc_bitpos (),
-			TYPE_FIELD_BITSIZE (type, i)))
+			type->field (i).bitsize ()))
 		{
 		  fputs_styled (_("<synthetic pointer>"),
 				metadata_style.style (), stream);
@@ -290,7 +291,7 @@ cp_print_value_fields (struct value *val, struct ui_file *stream,
 	    }
 	  else
 	    {
-	      if (TYPE_FIELD_IGNORE (type, i))
+	      if (type->field (i).is_ignored ())
 		{
 		  fputs_styled ("<optimized out or zero length>",
 				metadata_style.style (), stream);
@@ -752,13 +753,13 @@ test_print_fields (gdbarch *arch)
     {
       f = append_composite_type_field_raw (the_struct, "A", bool_type);
       f->set_loc_bitpos (1);
-      FIELD_BITSIZE (*f) = 1;
+      f->set_bitsize (1);
       f = append_composite_type_field_raw (the_struct, "B", uint8_type);
       f->set_loc_bitpos (3);
-      FIELD_BITSIZE (*f) = 3;
+      f->set_bitsize (3);
       f = append_composite_type_field_raw (the_struct, "C", bool_type);
       f->set_loc_bitpos (7);
-      FIELD_BITSIZE (*f) = 1;
+      f->set_bitsize (1);
     }
   /* According to the logic commented in "make_gdb_type_struct ()" of
    * target-descriptions.c, bit positions are numbered differently for
@@ -767,13 +768,13 @@ test_print_fields (gdbarch *arch)
     {
       f = append_composite_type_field_raw (the_struct, "A", bool_type);
       f->set_loc_bitpos (30);
-      FIELD_BITSIZE (*f) = 1;
+      f->set_bitsize (1);
       f = append_composite_type_field_raw (the_struct, "B", uint8_type);
       f->set_loc_bitpos (26);
-      FIELD_BITSIZE (*f) = 3;
+      f->set_bitsize (3);
       f = append_composite_type_field_raw (the_struct, "C", bool_type);
       f->set_loc_bitpos (24);
-      FIELD_BITSIZE (*f) = 1;
+      f->set_bitsize (1);
     }
 
   value *val = value::allocate (the_struct);
