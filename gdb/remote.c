@@ -4617,7 +4617,6 @@ remote_target::get_offsets ()
   ptr = buf;
   lose = 0;
 
- #if 0 // BARTO
   if (startswith (ptr, "Text="))
     {
       ptr += 5;
@@ -4666,15 +4665,17 @@ remote_target::get_offsets ()
   else
     lose = 1;
 
+#if 0 // BARTO
   if (lose)
     error (_("Malformed response to offset query, %s"), buf);
   else if (*ptr != '\0')
     warning (_("Target reported unsupported offsets: %s"), buf);
  #endif //BARTO
 
-  // BARTO START
-  objfile *objf = current_program_space->symfile_object_file;
-  section_offsets offs = objf->section_offsets;
+// BARTO START
+objfile *objf = current_program_space->symfile_object_file;
+section_offsets offs = objf->section_offsets;
+if(lose) {
   for (const auto *section = objf->obfd->sections; section; section = section->next)
   {
     if ((section->flags & SEC_ALLOC) && section->size > 0)
@@ -4689,9 +4690,9 @@ remote_target::get_offsets ()
         ptr++;
     }
   }
+} else {
   // BARTO END
 
-#if 0 //BARTO
   symfile_segment_data_up data = get_symfile_segment_data (objf->obfd.get ());
   do_segments = (data != NULL);
   do_sections = num_segments == 0;
@@ -4751,7 +4752,7 @@ remote_target::get_offsets ()
       offs[SECT_OFF_DATA (objf)] = data_addr;
       offs[SECT_OFF_BSS (objf)] = data_addr;
     }
-#endif //BARTO
+} //BARTO
 
   objfile_relocate (objf, offs);
 }

@@ -2914,7 +2914,7 @@ parse_cli_var_color (const char **args)
 
   uint8_t r, g, b;
   int scanned_chars = 0;
-  int parsed_args = sscanf (*args, "#%2" SCNx8 "%2" SCNx8 "%2" SCNx8 "%n",
+  int parsed_args = sscanf (*args, "#%2hhx%2hhx%2hhx%n",
 			    &r, &g, &b, &scanned_chars);
 
   if (parsed_args != 3 || scanned_chars != 7)
